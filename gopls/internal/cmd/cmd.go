@@ -285,6 +285,7 @@ func (app *Application) featureCommands() []tool.Application {
 		&check{app: app, Severity: "warning"},
 		&codeaction{app: app},
 		&codelens{app: app},
+		&conftamer{app: app},
 		&definition{app: app},
 		&execute{app: app},
 		&fix{app: app}, // (non-functional)
