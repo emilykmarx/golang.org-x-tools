@@ -58,7 +58,7 @@ const (
 // getenv returns the effective environment variable value for the provided
 // key, looking up the key in the session environment before falling back on
 // the process environment.
-func (s *server) getenv(key string) string {
+func (s *Server) getenv(key string) string {
 	if v, ok := s.Options().Env[key]; ok {
 		return v
 	}
@@ -67,7 +67,7 @@ func (s *server) getenv(key string) string {
 
 // telemetryMode returns the current effective telemetry mode.
 // By default this is x/telemetry.Mode(), but it may be overridden for tests.
-func (s *server) telemetryMode() string {
+func (s *Server) telemetryMode() string {
 	if fake := s.getenv(FakeTelemetryModefileEnvvar); fake != "" {
 		if data, err := os.ReadFile(fake); err == nil {
 			return string(data)
@@ -80,7 +80,7 @@ func (s *server) telemetryMode() string {
 // setTelemetryMode sets the current telemetry mode.
 // By default this calls x/telemetry.SetMode, but it may be overridden for
 // tests.
-func (s *server) setTelemetryMode(mode string) error {
+func (s *Server) setTelemetryMode(mode string) error {
 	if fake := s.getenv(FakeTelemetryModefileEnvvar); fake != "" {
 		return os.WriteFile(fake, []byte(mode), 0666)
 	}
@@ -95,7 +95,7 @@ func (s *server) setTelemetryMode(mode string) error {
 // prompting.
 // If enabled is false, this will not prompt the user in any condition,
 // but will send work progress reports to help testing.
-func (s *server) maybePromptForTelemetry(ctx context.Context, enabled bool) {
+func (s *Server) maybePromptForTelemetry(ctx context.Context, enabled bool) {
 	if s.Options().VerboseWorkDoneProgress {
 		work := s.progress.Start(ctx, TelemetryPromptWorkTitle, "Checking if gopls should prompt about telemetry...", nil, nil)
 		defer work.End(ctx, "Done.")

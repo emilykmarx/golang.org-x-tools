@@ -14,7 +14,7 @@ import (
 	"golang.org/x/tools/internal/event"
 )
 
-func (s *server) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
+func (s *Server) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
 	ctx, done := event.Start(ctx, "server.SignatureHelp", label.URI.Of(params.TextDocument.URI))
 	defer done()
 

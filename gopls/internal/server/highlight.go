@@ -15,7 +15,7 @@ import (
 	"golang.org/x/tools/internal/event"
 )
 
-func (s *server) DocumentHighlight(ctx context.Context, params *protocol.DocumentHighlightParams) ([]protocol.DocumentHighlight, error) {
+func (s *Server) DocumentHighlight(ctx context.Context, params *protocol.DocumentHighlightParams) ([]protocol.DocumentHighlight, error) {
 	ctx, done := event.Start(ctx, "server.DocumentHighlight", label.URI.Of(params.TextDocument.URI))
 	defer done()
 

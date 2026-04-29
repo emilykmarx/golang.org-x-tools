@@ -15,7 +15,7 @@ import (
 	"golang.org/x/tools/internal/event"
 )
 
-func (s *server) Rename(ctx context.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
+func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
 	countRename.Inc()
 	ctx, done := event.Start(ctx, "server.Rename", label.URI.Of(params.TextDocument.URI))
 	defer done()
@@ -43,7 +43,7 @@ func (s *server) Rename(ctx context.Context, params *protocol.RenameParams) (*pr
 //
 // TODO(rfindley): why wouldn't we want to show an error to the user, if the
 // user initiated a rename request at the cursor?
-func (s *server) PrepareRename(ctx context.Context, params *protocol.PrepareRenameParams) (*protocol.PrepareRenamePlaceholder, error) {
+func (s *Server) PrepareRename(ctx context.Context, params *protocol.PrepareRenameParams) (*protocol.PrepareRenamePlaceholder, error) {
 	ctx, done := event.Start(ctx, "server.PrepareRename", label.URI.Of(params.TextDocument.URI))
 	defer done()
 

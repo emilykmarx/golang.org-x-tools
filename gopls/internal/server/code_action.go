@@ -20,7 +20,7 @@ import (
 	"golang.org/x/tools/internal/event"
 )
 
-func (s *server) CodeAction(ctx context.Context, params *protocol.CodeActionParams) ([]protocol.CodeAction, error) {
+func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionParams) ([]protocol.CodeAction, error) {
 	ctx, done := event.Start(ctx, "server.CodeAction")
 	defer done()
 
@@ -232,7 +232,7 @@ func triggerKind(params *protocol.CodeActionParams) protocol.CodeActionTriggerKi
 //
 // This feature allows capable clients to preview and selectively apply the diff
 // instead of applying the whole thing unconditionally through workspace/applyEdit.
-func (s *server) ResolveCodeAction(ctx context.Context, ca *protocol.CodeAction) (*protocol.CodeAction, error) {
+func (s *Server) ResolveCodeAction(ctx context.Context, ca *protocol.CodeAction) (*protocol.CodeAction, error) {
 	ctx, done := event.Start(ctx, "server.ResolveCodeAction")
 	defer done()
 
@@ -283,7 +283,7 @@ func (s *server) ResolveCodeAction(ctx context.Context, ca *protocol.CodeAction)
 // protocol.Diagnostic.Data field or, if there were none, by creating
 // actions from edits associated with a matching Diagnostic from the
 // set of stored diagnostics for this file.
-func (s *server) codeActionsMatchingDiagnostics(ctx context.Context, uri protocol.DocumentURI, snapshot *cache.Snapshot, pds []protocol.Diagnostic, enabled func(protocol.CodeActionKind) bool) ([]protocol.CodeAction, error) {
+func (s *Server) codeActionsMatchingDiagnostics(ctx context.Context, uri protocol.DocumentURI, snapshot *cache.Snapshot, pds []protocol.Diagnostic, enabled func(protocol.CodeActionKind) bool) ([]protocol.CodeAction, error) {
 	var actions []protocol.CodeAction
 	var unbundled []protocol.Diagnostic // diagnostics without bundled code actions in their Data field
 	for _, pd := range pds {
@@ -341,7 +341,7 @@ func codeActionsForDiagnostic(ctx context.Context, snapshot *cache.Snapshot, sd 
 	return actions, nil
 }
 
-func (s *server) findMatchingDiagnostics(uri protocol.DocumentURI, pd protocol.Diagnostic) []*cache.Diagnostic {
+func (s *Server) findMatchingDiagnostics(uri protocol.DocumentURI, pd protocol.Diagnostic) []*cache.Diagnostic {
 	s.diagnosticsMu.Lock()
 	defer s.diagnosticsMu.Unlock()
 
@@ -364,7 +364,7 @@ func (s *server) findMatchingDiagnostics(uri protocol.DocumentURI, pd protocol.D
 	return sds
 }
 
-func (s *server) getSupportedCodeActions() []protocol.CodeActionKind {
+func (s *Server) getSupportedCodeActions() []protocol.CodeActionKind {
 	allCodeActionKinds := make(map[protocol.CodeActionKind]struct{})
 	for _, kinds := range s.Options().SupportedCodeActions {
 		for kind := range kinds {

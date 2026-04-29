@@ -44,7 +44,7 @@ func New(session *cache.Session, client protocol.ClientCloser, options *settings
 	// If this assignment fails to compile after a protocol
 	// upgrade, it means that one or more new methods need new
 	// stub declarations in unimplemented.go.
-	return &server{
+	return &Server{
 		diagnostics:         make(map[protocol.DocumentURI]*fileDiagnostics),
 		watchedGlobPatterns: nil, // empty
 		changedFiles:        make(map[protocol.DocumentURI]unit),
@@ -85,7 +85,7 @@ func (s serverState) String() string {
 // A server holds the server-side state of a single client/server
 // session or connection; it conceptually corresponds to a single call
 // to accept(2), not to listen(2) as the name "server" might suggest.
-type server struct {
+type Server struct {
 	client protocol.ClientCloser
 
 	stateMu sync.Mutex
@@ -192,7 +192,7 @@ type server struct {
 	runGovulncheckInProgress atomic.Bool
 }
 
-func (s *server) WorkDoneProgressCancel(ctx context.Context, params *protocol.WorkDoneProgressCancelParams) error {
+func (s *Server) WorkDoneProgressCancel(ctx context.Context, params *protocol.WorkDoneProgressCancelParams) error {
 	ctx, done := event.Start(ctx, "server.WorkDoneProgressCancel")
 	defer done()
 
@@ -230,7 +230,7 @@ type web struct {
 
 // getWeb returns the web server associated with this
 // LSP server, creating it on first request.
-func (s *server) getWeb() (*web, error) {
+func (s *Server) getWeb() (*web, error) {
 	s.webOnce.Do(func() {
 		s.web, s.webErr = s.initWeb()
 	})
@@ -241,7 +241,7 @@ func (s *server) getWeb() (*web, error) {
 // serves package documentation and suchlike.
 //
 // Clients should use [getWeb].
-func (s *server) initWeb() (*web, error) {
+func (s *Server) initWeb() (*web, error) {
 	// Use 64 random bits as the base of the URL namespace.
 	// This ensures that URLs are unguessable to any local
 	// processes that connect to the server, preventing

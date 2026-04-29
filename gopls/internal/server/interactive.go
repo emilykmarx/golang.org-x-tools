@@ -18,7 +18,7 @@ import (
 // elements in the client. Based on the requested param.Source, it queries the
 // underlying session data (like workspace symbols) and returns a list of enum
 // entries matching the user's query.
-func (s *server) InteractiveListEnum(ctx context.Context, param *protocol.InteractiveListEnumParams) ([]protocol.FormEnumEntry, error) {
+func (s *Server) InteractiveListEnum(ctx context.Context, param *protocol.InteractiveListEnumParams) ([]protocol.FormEnumEntry, error) {
 	ctx, done := event.Start(ctx, "server.interactiveListEnum")
 	defer done()
 

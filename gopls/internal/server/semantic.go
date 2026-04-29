@@ -15,15 +15,15 @@ import (
 	"golang.org/x/tools/internal/event"
 )
 
-func (s *server) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
+func (s *Server) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
 	return s.semanticTokens(ctx, params.TextDocument, nil)
 }
 
-func (s *server) SemanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (*protocol.SemanticTokens, error) {
+func (s *Server) SemanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (*protocol.SemanticTokens, error) {
 	return s.semanticTokens(ctx, params.TextDocument, &params.Range)
 }
 
-func (s *server) semanticTokens(ctx context.Context, td protocol.TextDocumentIdentifier, rng *protocol.Range) (*protocol.SemanticTokens, error) {
+func (s *Server) semanticTokens(ctx context.Context, td protocol.TextDocumentIdentifier, rng *protocol.Range) (*protocol.SemanticTokens, error) {
 	ctx, done := event.Start(ctx, "server.semanticTokens", label.URI.Of(td.URI))
 	defer done()
 

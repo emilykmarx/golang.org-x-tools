@@ -26,7 +26,7 @@ type codeLensMetadata struct {
 
 // CodeLens reports the set of available CodeLenses
 // (range-associated commands) in the given file.
-func (s *server) CodeLens(ctx context.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {
+func (s *Server) CodeLens(ctx context.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {
 	ctx, done := event.Start(ctx, "server.CodeLens", label.URI.Of(params.TextDocument.URI))
 	defer done()
 

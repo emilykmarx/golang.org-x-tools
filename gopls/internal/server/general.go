@@ -41,7 +41,7 @@ import (
 	"golang.org/x/tools/internal/xcontext"
 )
 
-func (s *server) Initialize(ctx context.Context, params *protocol.ParamInitialize) (*protocol.InitializeResult, error) {
+func (s *Server) Initialize(ctx context.Context, params *protocol.ParamInitialize) (*protocol.InitializeResult, error) {
 	ctx, done := event.Start(ctx, "server.Initialize")
 	defer done()
 
@@ -224,7 +224,7 @@ func (s *server) Initialize(ctx context.Context, params *protocol.ParamInitializ
 	}, nil
 }
 
-func (s *server) Initialized(ctx context.Context, params *protocol.InitializedParams) error {
+func (s *Server) Initialized(ctx context.Context, params *protocol.InitializedParams) error {
 	ctx, done := event.Start(ctx, "server.Initialized")
 	defer done()
 
@@ -273,7 +273,7 @@ func (s *server) Initialized(ctx context.Context, params *protocol.InitializedPa
 // raising a showMessage notification if so.
 //
 // It should be called after views change.
-func (s *server) checkViewGoVersions() {
+func (s *Server) checkViewGoVersions() {
 	oldestVersion, fromBuild := go1Point(), true
 	for _, view := range s.session.Views() {
 		viewVersion := view.GoVersion()
@@ -316,7 +316,7 @@ func go1Point() int {
 // directories) to the session. It does not return an error, though it
 // may report an error to the client over LSP if one or more folders
 // had problems, for example, folders with unsupported file system.
-func (s *server) addFolders(ctx context.Context, folders []protocol.WorkspaceFolder) {
+func (s *Server) addFolders(ctx context.Context, folders []protocol.WorkspaceFolder) {
 	originalViews := len(s.session.Views())
 	viewErrors := make(map[protocol.URI]error)
 
@@ -413,7 +413,7 @@ func (s *server) addFolders(ctx context.Context, folders []protocol.WorkspaceFol
 // updateWatchedDirectories syncs the server-side file watcher and client-side
 // registrations with the current workspace patterns. If the directories to
 // watch have changed, it unregisters and re-registers client notifications.
-func (s *server) updateWatchedDirectories(ctx context.Context) error {
+func (s *Server) updateWatchedDirectories(ctx context.Context) error {
 	patterns := s.session.FileWatchingGlobPatterns(ctx)
 
 	// Note: Currently, the server-side watcher acts as a complement to the
@@ -459,7 +459,7 @@ func (s *server) updateWatchedDirectories(ctx context.Context) error {
 // updateServerSideWatcher synchronizes the file watcher's lifecycle with the
 // current session settings (creating, replacing, or closing it as needed)
 // and updates the directories it monitors based on the provided patterns.
-func (s *server) updateServerSideWatcher(ctx context.Context, patterns map[protocol.RelativePattern]unit) error {
+func (s *Server) updateServerSideWatcher(ctx context.Context, patterns map[protocol.RelativePattern]unit) error {
 	wantMode := s.Options().FileWatcher
 	s.fileWatcherMu.Lock()
 	defer s.fileWatcherMu.Unlock()
@@ -527,7 +527,7 @@ func watchedFilesCapabilityID(id int) string {
 // registerWatchedDirectoriesLocked sends the workspace/didChangeWatchedFiles
 // registrations to the client and updates s.watchedDirectories.
 // The caller must not subsequently mutate patterns.
-func (s *server) registerWatchedDirectoriesLocked(ctx context.Context, patterns map[protocol.RelativePattern]unit) error {
+func (s *Server) registerWatchedDirectoriesLocked(ctx context.Context, patterns map[protocol.RelativePattern]unit) error {
 	if !s.Options().DynamicWatchedFilesSupported {
 		return nil
 	}
@@ -572,7 +572,7 @@ func (s *server) registerWatchedDirectoriesLocked(ctx context.Context, patterns 
 // Options returns the current server options.
 //
 // The caller must not modify the result.
-func (s *server) Options() *settings.Options {
+func (s *Server) Options() *settings.Options {
 	s.optionsMu.Lock()
 	defer s.optionsMu.Unlock()
 	return s.options
@@ -581,13 +581,13 @@ func (s *server) Options() *settings.Options {
 // SetOptions sets the current server options.
 //
 // The caller must not subsequently modify the options.
-func (s *server) SetOptions(opts *settings.Options) {
+func (s *Server) SetOptions(opts *settings.Options) {
 	s.optionsMu.Lock()
 	defer s.optionsMu.Unlock()
 	s.options = opts
 }
 
-func (s *server) newFolder(ctx context.Context, folder protocol.DocumentURI, name string, opts *settings.Options) (*cache.Folder, error) {
+func (s *Server) newFolder(ctx context.Context, folder protocol.DocumentURI, name string, opts *settings.Options) (*cache.Folder, error) {
 	env, err := cache.FetchGoEnv(ctx, folder, opts)
 	if err != nil {
 		return nil, err
@@ -628,7 +628,7 @@ func (s *server) newFolder(ctx context.Context, folder protocol.DocumentURI, nam
 // folder, and populates options with the result.
 //
 // If folder is "", fetchFolderOptions makes an unscoped request.
-func (s *server) fetchFolderOptions(ctx context.Context, folder protocol.DocumentURI) (*settings.Options, error) {
+func (s *Server) fetchFolderOptions(ctx context.Context, folder protocol.DocumentURI) (*settings.Options, error) {
 	opts := s.Options()
 	if !opts.ConfigurationSupported {
 		return opts, nil
@@ -657,7 +657,7 @@ func (s *server) fetchFolderOptions(ctx context.Context, folder protocol.Documen
 	return opts, nil
 }
 
-func (s *server) eventuallyShowMessage(ctx context.Context, msg *protocol.ShowMessageParams) {
+func (s *Server) eventuallyShowMessage(ctx context.Context, msg *protocol.ShowMessageParams) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	if s.state == serverInitialized {
@@ -666,7 +666,7 @@ func (s *server) eventuallyShowMessage(ctx context.Context, msg *protocol.ShowMe
 	s.notifications = append(s.notifications, msg)
 }
 
-func (s *server) handleOptionResult(ctx context.Context, applied []telemetry.CounterPath, optionErrors []error) {
+func (s *Server) handleOptionResult(ctx context.Context, applied []telemetry.CounterPath, optionErrors []error) {
 	for _, path := range applied {
 		path = append(settings.CounterPath{"gopls", "setting"}, path...)
 		counter.Inc(path.FullName())
@@ -715,7 +715,7 @@ func (s *server) handleOptionResult(ctx context.Context, applied []telemetry.Cou
 
 // Shutdown implements the 'shutdown' LSP handler. It releases resources
 // associated with the server and waits for all ongoing work to complete.
-func (s *server) Shutdown(ctx context.Context) error {
+func (s *Server) Shutdown(ctx context.Context) error {
 	ctx, done := event.Start(ctx, "server.Shutdown")
 	defer done()
 
@@ -737,7 +737,7 @@ func (s *server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (s *server) Exit(ctx context.Context) error {
+func (s *Server) Exit(ctx context.Context) error {
 	ctx, done := event.Start(ctx, "server.Exit")
 	defer done()
 

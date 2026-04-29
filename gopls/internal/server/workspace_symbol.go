@@ -14,7 +14,7 @@ import (
 	"golang.org/x/tools/internal/event"
 )
 
-func (s *server) Symbol(ctx context.Context, params *protocol.WorkspaceSymbolParams) (_ []protocol.SymbolInformation, rerr error) {
+func (s *Server) Symbol(ctx context.Context, params *protocol.WorkspaceSymbolParams) (_ []protocol.SymbolInformation, rerr error) {
 	recordLatency := telemetry.StartLatencyTimer("symbol")
 	defer func() {
 		recordLatency(ctx, rerr)

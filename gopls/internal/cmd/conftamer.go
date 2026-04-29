@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 
+	"golang.org/x/tools/gopls/internal/server"
 	"golang.org/x/tools/internal/tool"
 )
 
@@ -37,6 +38,9 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	}
 	defer cli.terminate(ctx)
 	fmt.Println("help i'm trapped in a computer")
+	if local_server, ok := cli.server.(*server.Server); ok {
+		local_server.ImplementationMore()
+	}
 
 	return nil
 }

@@ -91,7 +91,7 @@ func (m ModificationSource) String() string {
 	}
 }
 
-func (s *server) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) error {
+func (s *Server) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) error {
 	ctx, done := event.Start(ctx, "server.DidOpen", label.URI.Of(params.TextDocument.URI))
 	defer done()
 
@@ -120,7 +120,7 @@ func (s *server) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocume
 	}}, FromDidOpen)
 }
 
-func (s *server) DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) error {
+func (s *Server) DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) error {
 	ctx, done := event.Start(ctx, "server.DidChange", label.URI.Of(params.TextDocument.URI))
 	defer done()
 
@@ -143,7 +143,7 @@ func (s *server) DidChange(ctx context.Context, params *protocol.DidChangeTextDo
 
 // warnAboutModifyingGeneratedFiles shows a warning if a user tries to edit a
 // generated file for the first time.
-func (s *server) warnAboutModifyingGeneratedFiles(ctx context.Context, uri protocol.DocumentURI) error {
+func (s *Server) warnAboutModifyingGeneratedFiles(ctx context.Context, uri protocol.DocumentURI) error {
 	s.changedFilesMu.Lock()
 	_, ok := s.changedFiles[uri]
 	if !ok {
@@ -174,7 +174,7 @@ func (s *server) warnAboutModifyingGeneratedFiles(ctx context.Context, uri proto
 	return nil
 }
 
-func (s *server) DidChangeWatchedFiles(ctx context.Context, params *protocol.DidChangeWatchedFilesParams) error {
+func (s *Server) DidChangeWatchedFiles(ctx context.Context, params *protocol.DidChangeWatchedFilesParams) error {
 	ctx, done := event.Start(ctx, "server.DidChangeWatchedFiles")
 	defer done()
 
@@ -190,7 +190,7 @@ func (s *server) DidChangeWatchedFiles(ctx context.Context, params *protocol.Did
 	return s.didModifyFiles(ctx, modifications, FromDidChangeWatchedFiles)
 }
 
-func (s *server) DidSave(ctx context.Context, params *protocol.DidSaveTextDocumentParams) error {
+func (s *Server) DidSave(ctx context.Context, params *protocol.DidSaveTextDocumentParams) error {
 	ctx, done := event.Start(ctx, "server.DidSave", label.URI.Of(params.TextDocument.URI))
 	defer done()
 
@@ -204,7 +204,7 @@ func (s *server) DidSave(ctx context.Context, params *protocol.DidSaveTextDocume
 	return s.didModifyFiles(ctx, []file.Modification{c}, FromDidSave)
 }
 
-func (s *server) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) error {
+func (s *Server) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) error {
 	ctx, done := event.Start(ctx, "server.DidClose", label.URI.Of(params.TextDocument.URI))
 	defer done()
 
@@ -218,7 +218,7 @@ func (s *server) DidClose(ctx context.Context, params *protocol.DidCloseTextDocu
 	}, FromDidClose)
 }
 
-func (s *server) didModifyFiles(ctx context.Context, modifications []file.Modification, cause ModificationSource) error {
+func (s *Server) didModifyFiles(ctx context.Context, modifications []file.Modification, cause ModificationSource) error {
 	// Something happened. Wake up a quiescent file watcher.
 	s.fileWatcherMu.Lock()
 	if s.fileWatcher != nil {
@@ -285,7 +285,7 @@ func (s *server) didModifyFiles(ctx context.Context, modifications []file.Modifi
 	return s.updateWatchedDirectories(ctx)
 }
 
-func (s *server) handleModuleChanges(ctx context.Context, modifications []file.Modification, cause ModificationSource) {
+func (s *Server) handleModuleChanges(ctx context.Context, modifications []file.Modification, cause ModificationSource) {
 	// If any change in this batch is not a module metadata file, gopls will treat
 	// the entire batch as a bulk operation (like a git branch switch). This is to
 	// avoid doing expensive dependency checks for every module file in a
@@ -322,7 +322,7 @@ func (s *server) handleModuleChanges(ctx context.Context, modifications []file.M
 // context and modification id to use for said diagnosis.
 //
 // Only the keys of viewsToDiagnose are used; the changed files are irrelevant.
-func (s *server) needsDiagnosis(ctx context.Context, viewsToDiagnose map[*cache.View][]protocol.DocumentURI) (context.Context, uint64) {
+func (s *Server) needsDiagnosis(ctx context.Context, viewsToDiagnose map[*cache.View][]protocol.DocumentURI) (context.Context, uint64) {
 	s.modificationMu.Lock()
 	defer s.modificationMu.Unlock()
 	if s.cancelPrevDiagnostics != nil {
@@ -347,7 +347,7 @@ func DiagnosticWorkTitle(cause ModificationSource) string {
 	return fmt.Sprintf("diagnosing %v", cause)
 }
 
-func (s *server) changedText(ctx context.Context, uri protocol.DocumentURI, changes []protocol.TextDocumentContentChangeEvent) ([]byte, error) {
+func (s *Server) changedText(ctx context.Context, uri protocol.DocumentURI, changes []protocol.TextDocumentContentChangeEvent) ([]byte, error) {
 	if len(changes) == 0 {
 		return nil, fmt.Errorf("%w: no content changes provided", jsonrpc2.ErrInternal)
 	}
@@ -361,7 +361,7 @@ func (s *server) changedText(ctx context.Context, uri protocol.DocumentURI, chan
 	return s.applyIncrementalChanges(ctx, uri, changes)
 }
 
-func (s *server) applyIncrementalChanges(ctx context.Context, uri protocol.DocumentURI, changes []protocol.TextDocumentContentChangeEvent) ([]byte, error) {
+func (s *Server) applyIncrementalChanges(ctx context.Context, uri protocol.DocumentURI, changes []protocol.TextDocumentContentChangeEvent) ([]byte, error) {
 	fh, err := s.session.ReadFile(ctx, uri)
 	if err != nil {
 		return nil, err
@@ -400,7 +400,7 @@ func (s *server) applyIncrementalChanges(ctx context.Context, uri protocol.Docum
 }
 
 // increment counters if any of the completions look like there were used
-func (s *server) checkEfficacy(uri protocol.DocumentURI, version int32, change protocol.TextDocumentContentChangePartial) {
+func (s *Server) checkEfficacy(uri protocol.DocumentURI, version int32, change protocol.TextDocumentContentChangePartial) {
 	s.efficacyMu.Lock()
 	defer s.efficacyMu.Unlock()
 	if s.efficacyURI != uri {

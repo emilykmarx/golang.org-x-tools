@@ -43,7 +43,7 @@ import (
 //   - support multiple views
 //   - add orphaned file diagnostics
 //   - support go.mod, go.work files
-func (s *server) Diagnostic(ctx context.Context, params *protocol.DocumentDiagnosticParams) (*protocol.DocumentDiagnosticReport, error) {
+func (s *Server) Diagnostic(ctx context.Context, params *protocol.DocumentDiagnosticParams) (*protocol.DocumentDiagnosticReport, error) {
 	ctx, done := event.Start(ctx, "server.Diagnostic")
 	defer done()
 
@@ -119,7 +119,7 @@ func sortDiagnostics(d []*cache.Diagnostic) {
 	})
 }
 
-func (s *server) diagnoseChangedViews(ctx context.Context, modID uint64, lastChange map[*cache.View][]protocol.DocumentURI, cause ModificationSource) {
+func (s *Server) diagnoseChangedViews(ctx context.Context, modID uint64, lastChange map[*cache.View][]protocol.DocumentURI, cause ModificationSource) {
 	// Collect views needing diagnosis.
 	s.modificationMu.Lock()
 	needsDiagnosis := moremaps.KeySlice(s.viewsToDiagnose)
@@ -198,7 +198,7 @@ func (s *server) diagnoseChangedViews(ctx context.Context, modID uint64, lastCha
 // if an operation creates a new snapshot, it is responsible for ensuring that
 // snapshot (or a subsequent snapshot in the same View) is eventually
 // diagnosed.
-func (s *server) diagnoseSnapshot(ctx context.Context, snapshot *cache.Snapshot, changedURIs []protocol.DocumentURI, delay time.Duration) {
+func (s *Server) diagnoseSnapshot(ctx context.Context, snapshot *cache.Snapshot, changedURIs []protocol.DocumentURI, delay time.Duration) {
 	ctx, done := event.Start(ctx, "server.diagnoseSnapshot", snapshot.Labels()...)
 	defer done()
 
@@ -309,7 +309,7 @@ func diagnoseChangedFiles(ctx context.Context, snapshot *cache.Snapshot, uris []
 	return diags, nil
 }
 
-func (s *server) diagnose(ctx context.Context, snapshot *cache.Snapshot) (diagMap, error) {
+func (s *Server) diagnose(ctx context.Context, snapshot *cache.Snapshot) (diagMap, error) {
 	ctx, done := event.Start(ctx, "server.diagnose", snapshot.Labels()...)
 	defer done()
 
@@ -546,7 +546,7 @@ func (s *server) diagnose(ctx context.Context, snapshot *cache.Snapshot) (diagMa
 	return diagnostics, nil
 }
 
-func (s *server) compilerOptDetailsDiagnostics(ctx context.Context, snapshot *cache.Snapshot, toDiagnose map[metadata.PackageID]*metadata.Package) (diagMap, error) {
+func (s *Server) compilerOptDetailsDiagnostics(ctx context.Context, snapshot *cache.Snapshot, toDiagnose map[metadata.PackageID]*metadata.Package) (diagMap, error) {
 	// Process requested diagnostics about compiler optimization details.
 	//
 	// TODO(rfindley): This should memoize its results if the package has not changed.
@@ -582,7 +582,7 @@ func (s *server) compilerOptDetailsDiagnostics(ctx context.Context, snapshot *ca
 //
 // This can be used for ensuring gopls publishes diagnostics after certain file
 // events.
-func (s *server) mustPublishDiagnostics(uri protocol.DocumentURI) {
+func (s *Server) mustPublishDiagnostics(uri protocol.DocumentURI) {
 	s.diagnosticsMu.Lock()
 	defer s.diagnosticsMu.Unlock()
 
@@ -599,7 +599,7 @@ const WorkspaceLoadFailure = "Error loading workspace"
 //
 // If err is nil, or if there are no open files, it clears any existing error
 // progress report.
-func (s *server) updateCriticalErrorStatus(ctx context.Context, snapshot *cache.Snapshot, err *cache.InitializationError) {
+func (s *Server) updateCriticalErrorStatus(ctx context.Context, snapshot *cache.Snapshot, err *cache.InitializationError) {
 	s.criticalErrorStatusMu.Lock()
 	defer s.criticalErrorStatusMu.Unlock()
 
@@ -630,7 +630,7 @@ func (s *server) updateCriticalErrorStatus(ctx context.Context, snapshot *cache.
 
 // updateDiagnostics records the result of diagnosing a snapshot, and publishes
 // any diagnostics that need to be updated on the client.
-func (s *server) updateDiagnostics(ctx context.Context, snapshot *cache.Snapshot, diagnostics diagMap, final bool) {
+func (s *Server) updateDiagnostics(ctx context.Context, snapshot *cache.Snapshot, diagnostics diagMap, final bool) {
 	ctx, done := event.Start(ctx, "server.publishDiagnostics")
 	defer done()
 
@@ -733,7 +733,7 @@ func (s *server) updateDiagnostics(ctx context.Context, snapshot *cache.Snapshot
 
 // updateOrphanedFileDiagnostics records and publishes orphaned file
 // diagnostics as a given modification time.
-func (s *server) updateOrphanedFileDiagnostics(ctx context.Context, modID uint64, diagnostics diagMap) error {
+func (s *Server) updateOrphanedFileDiagnostics(ctx context.Context, modID uint64, diagnostics diagMap) error {
 	views := s.session.Views()
 	viewSet := make(viewSet)
 	for _, v := range views {
@@ -785,7 +785,7 @@ func (s *server) updateOrphanedFileDiagnostics(ctx context.Context, modID uint64
 // publishFileDiagnosticsLocked publishes a fileDiagnostics value, while holding s.diagnosticsMu.
 //
 // If the publication succeeds, it updates f.publishedHash and f.mustPublish.
-func (s *server) publishFileDiagnosticsLocked(ctx context.Context, views viewSet, uri protocol.DocumentURI, version int32, f *fileDiagnostics) error {
+func (s *Server) publishFileDiagnosticsLocked(ctx context.Context, views viewSet, uri protocol.DocumentURI, version int32, f *fileDiagnostics) error {
 	// We add a disambiguating suffix (e.g. " [darwin,arm64]") to
 	// each diagnostic that doesn't occur in the default view;
 	// see golang/go#65496.
@@ -906,7 +906,7 @@ func (s *server) publishFileDiagnosticsLocked(ctx context.Context, views viewSet
 	return nil
 }
 
-func (s *server) shouldIgnoreError(snapshot *cache.Snapshot, err error) bool {
+func (s *Server) shouldIgnoreError(snapshot *cache.Snapshot, err error) bool {
 	if err == nil { // if there is no error at all
 		return false
 	}

@@ -20,7 +20,7 @@ import (
 	"golang.org/x/tools/internal/event"
 )
 
-func (s *server) DidChangeWorkspaceFolders(ctx context.Context, params *protocol.DidChangeWorkspaceFoldersParams) error {
+func (s *Server) DidChangeWorkspaceFolders(ctx context.Context, params *protocol.DidChangeWorkspaceFoldersParams) error {
 	for _, folder := range params.Event.Removed {
 		if !strings.HasPrefix(folder.URI, "file://") {
 			// Some clients that support virtual file systems may send workspace change messages
@@ -42,7 +42,7 @@ func (s *server) DidChangeWorkspaceFolders(ctx context.Context, params *protocol
 
 // addView returns a Snapshot and a release function that must be
 // called when it is no longer needed.
-func (s *server) addView(ctx context.Context, name string, dir protocol.DocumentURI) (*cache.Snapshot, func(), error) {
+func (s *Server) addView(ctx context.Context, name string, dir protocol.DocumentURI) (*cache.Snapshot, func(), error) {
 	s.stateMu.Lock()
 	state := s.state
 	s.stateMu.Unlock()
@@ -61,7 +61,7 @@ func (s *server) addView(ctx context.Context, name string, dir protocol.Document
 	return snapshot, release, err
 }
 
-func (s *server) DidChangeConfiguration(ctx context.Context, _ *protocol.DidChangeConfigurationParams) error {
+func (s *Server) DidChangeConfiguration(ctx context.Context, _ *protocol.DidChangeConfigurationParams) error {
 	ctx, done := event.Start(ctx, "server.DidChangeConfiguration")
 	defer done()
 
@@ -151,7 +151,7 @@ func (s *server) DidChangeConfiguration(ctx context.Context, _ *protocol.DidChan
 	return nil
 }
 
-func (s *server) DidCreateFiles(ctx context.Context, params *protocol.CreateFilesParams) error {
+func (s *Server) DidCreateFiles(ctx context.Context, params *protocol.CreateFilesParams) error {
 	ctx, done := event.Start(ctx, "server.DidCreateFiles")
 	defer done()
 

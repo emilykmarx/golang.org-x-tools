@@ -14,7 +14,7 @@ import (
 	"golang.org/x/tools/internal/event"
 )
 
-func (s *server) PrepareTypeHierarchy(ctx context.Context, params *protocol.TypeHierarchyPrepareParams) ([]protocol.TypeHierarchyItem, error) {
+func (s *Server) PrepareTypeHierarchy(ctx context.Context, params *protocol.TypeHierarchyPrepareParams) ([]protocol.TypeHierarchyItem, error) {
 	ctx, done := event.Start(ctx, "server.PrepareTypeHierarchy")
 	defer done()
 
@@ -30,7 +30,7 @@ func (s *server) PrepareTypeHierarchy(ctx context.Context, params *protocol.Type
 	return nil, fmt.Errorf("unsupported file type: %v", fh)
 }
 
-func (s *server) Subtypes(ctx context.Context, params *protocol.TypeHierarchySubtypesParams) ([]protocol.TypeHierarchyItem, error) {
+func (s *Server) Subtypes(ctx context.Context, params *protocol.TypeHierarchySubtypesParams) ([]protocol.TypeHierarchyItem, error) {
 	ctx, done := event.Start(ctx, "server.Subtypes")
 	defer done()
 
@@ -46,7 +46,7 @@ func (s *server) Subtypes(ctx context.Context, params *protocol.TypeHierarchySub
 	return nil, fmt.Errorf("unsupported file type: %v", fh)
 }
 
-func (s *server) Supertypes(ctx context.Context, params *protocol.TypeHierarchySupertypesParams) ([]protocol.TypeHierarchyItem, error) {
+func (s *Server) Supertypes(ctx context.Context, params *protocol.TypeHierarchySupertypesParams) ([]protocol.TypeHierarchyItem, error) {
 	ctx, done := event.Start(ctx, "server.Supertypes")
 	defer done()
 

@@ -14,7 +14,7 @@ import (
 	"golang.org/x/tools/internal/event"
 )
 
-func (s *server) FoldingRange(ctx context.Context, params *protocol.FoldingRangeParams) ([]protocol.FoldingRange, error) {
+func (s *Server) FoldingRange(ctx context.Context, params *protocol.FoldingRangeParams) ([]protocol.FoldingRange, error) {
 	ctx, done := event.Start(ctx, "server.FoldingRange", label.URI.Of(params.TextDocument.URI))
 	defer done()
 

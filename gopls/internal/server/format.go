@@ -16,7 +16,7 @@ import (
 	"golang.org/x/tools/internal/event"
 )
 
-func (s *server) Formatting(ctx context.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
+func (s *Server) Formatting(ctx context.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
 	ctx, done := event.Start(ctx, "server.Formatting", label.URI.Of(params.TextDocument.URI))
 	defer done()
 

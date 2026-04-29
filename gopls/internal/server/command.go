@@ -48,7 +48,7 @@ import (
 	"golang.org/x/tools/internal/xcontext"
 )
 
-func (s *server) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (any, error) {
+func (s *Server) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (any, error) {
 	ctx, done := event.Start(ctx, "server.ExecuteCommand")
 	defer done()
 
@@ -86,7 +86,7 @@ func (s *server) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCom
 }
 
 type commandHandler struct {
-	s      *server
+	s      *Server
 	params *protocol.ExecuteCommandParams
 }
 
@@ -908,7 +908,7 @@ func (c *commandHandler) GoGetPackage(ctx context.Context, args command.GoGetPac
 	})
 }
 
-func (s *server) runGoModUpdateCommands(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, run func(invoke func(...string) (*bytes.Buffer, error)) error) error {
+func (s *Server) runGoModUpdateCommands(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, run func(invoke func(...string) (*bytes.Buffer, error)) error) error {
 	// TODO(rfindley): can/should this use findRootPattern?
 	modURI := snapshot.GoModForFile(uri)
 	if modURI == "" {
@@ -1015,7 +1015,7 @@ func addModuleRequire(invoke func(...string) (*bytes.Buffer, error), args []stri
 }
 
 // TODO(rfindley): inline.
-func (s *server) getUpgrades(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, modules []string) (map[string]string, error) {
+func (s *Server) getUpgrades(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, modules []string) (map[string]string, error) {
 	args := append([]string{"-mod=readonly", "-m", "-u", "-json"}, modules...)
 	inv, cleanup, err := snapshot.GoCommandInvocation(cache.NetworkOK, uri.DirPath(), "list", args)
 	if err != nil {
@@ -1352,7 +1352,7 @@ func (c *commandHandler) RunGovulncheck(ctx context.Context, args command.Vulnch
 }
 
 // runVulncheck executes a vulnerability scan and updates the server's state.
-func (s *server) runVulncheck(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, pattern string, out io.Writer) (*vulncheck.Result, error) {
+func (s *Server) runVulncheck(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, pattern string, out io.Writer) (*vulncheck.Result, error) {
 	dir := uri.DirPath()
 	result, err := scan.RunGovulncheck(ctx, pattern, snapshot, dir, out)
 	if err != nil {

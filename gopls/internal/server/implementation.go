@@ -15,7 +15,7 @@ import (
 	"golang.org/x/tools/internal/event"
 )
 
-func (s *server) Implementation(ctx context.Context, params *protocol.ImplementationParams) (_ []protocol.Location, rerr error) {
+func (s *Server) Implementation(ctx context.Context, params *protocol.ImplementationParams) (_ []protocol.Location, rerr error) {
 	recordLatency := telemetry.StartLatencyTimer("implementation")
 	defer func() {
 		recordLatency(ctx, rerr)
@@ -33,4 +33,8 @@ func (s *server) Implementation(ctx context.Context, params *protocol.Implementa
 		return nil, nil // empty result
 	}
 	return golang.Implementation(ctx, snapshot, fh, params.Range)
+}
+
+func (s *Server) ImplementationMore() {
+	golang.ImplementationMore()
 }

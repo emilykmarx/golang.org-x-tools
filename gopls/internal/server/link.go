@@ -30,7 +30,7 @@ import (
 	"mvdan.cc/xurls/v2"
 )
 
-func (s *server) DocumentLink(ctx context.Context, params *protocol.DocumentLinkParams) (links []protocol.DocumentLink, err error) {
+func (s *Server) DocumentLink(ctx context.Context, params *protocol.DocumentLinkParams) (links []protocol.DocumentLink, err error) {
 	ctx, done := event.Start(ctx, "server.DocumentLink")
 	defer done()
 

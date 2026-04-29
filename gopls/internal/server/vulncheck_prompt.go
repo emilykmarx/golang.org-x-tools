@@ -126,7 +126,7 @@ func getDependencyHashes(uri protocol.DocumentURI) (contentHash string, pathHash
 	return contentHash, pathHash, nil
 }
 
-func (s *server) checkDependencyChanges(ctx context.Context, uri protocol.DocumentURI) {
+func (s *Server) checkDependencyChanges(ctx context.Context, uri protocol.DocumentURI) {
 	if s.Options().Vulncheck != settings.ModeVulncheckPrompt {
 		return
 	}
@@ -214,7 +214,7 @@ func recordVulncheckupgradeAction(action vulnupgradeAction) {
 	}
 }
 
-func (s *server) handleVulncheck(ctx context.Context, uri protocol.DocumentURI) {
+func (s *Server) handleVulncheck(ctx context.Context, uri protocol.DocumentURI) {
 	_, snapshot, release, err := s.session.FileOf(ctx, uri)
 	if err != nil {
 		event.Error(ctx, "getting file snapshot failed", err)
@@ -324,7 +324,7 @@ func computeModulesToUpgrade(findings []*govulncheck.Finding) (affecting map[str
 	return affecting, stdLibVulns, modulesToUpgrade
 }
 
-func (s *server) upgradeModules(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, modulesToUpgrade map[string]string) error {
+func (s *Server) upgradeModules(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, modulesToUpgrade map[string]string) error {
 	if err := s.runGoGet(ctx, snapshot, uri, modulesToUpgrade); err != nil {
 		return err
 	}
@@ -354,7 +354,7 @@ func (s *server) upgradeModules(ctx context.Context, snapshot *cache.Snapshot, u
 	return nil
 }
 
-func (s *server) runGoGet(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, modulesToUpgrade map[string]string) error {
+func (s *Server) runGoGet(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, modulesToUpgrade map[string]string) error {
 	work := s.progress.Start(ctx, "Upgrading Modules", "Running go get...", nil, nil)
 	defer work.End(ctx, "Done.")
 
@@ -371,7 +371,7 @@ func (s *server) runGoGet(ctx context.Context, snapshot *cache.Snapshot, uri pro
 	return nil
 }
 
-func (s *server) runGoModTidy(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI) error {
+func (s *Server) runGoModTidy(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI) error {
 	work := s.progress.Start(ctx, "Upgrading Modules", "Running go mod tidy...", nil, nil)
 	defer work.End(ctx, "Done.")
 

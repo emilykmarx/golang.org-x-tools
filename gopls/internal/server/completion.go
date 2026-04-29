@@ -21,7 +21,7 @@ import (
 	"golang.org/x/tools/internal/event"
 )
 
-func (s *server) Completion(ctx context.Context, params *protocol.CompletionParams) (_ *protocol.CompletionList, rerr error) {
+func (s *Server) Completion(ctx context.Context, params *protocol.CompletionParams) (_ *protocol.CompletionList, rerr error) {
 	recordLatency := telemetry.StartLatencyTimer("completion")
 	defer func() {
 		recordLatency(ctx, rerr)
@@ -98,7 +98,7 @@ func (s *server) Completion(ctx context.Context, params *protocol.CompletionPara
 	}, nil
 }
 
-func (s *server) saveLastCompletion(uri protocol.DocumentURI, version int32, items []protocol.CompletionItem, pos protocol.Position) {
+func (s *Server) saveLastCompletion(uri protocol.DocumentURI, version int32, items []protocol.CompletionItem, pos protocol.Position) {
 	s.efficacyMu.Lock()
 	defer s.efficacyMu.Unlock()
 	s.efficacyVersion = version
