@@ -58,20 +58,46 @@ func Implementation(ctx context.Context, snapshot *cache.Snapshot, f file.Handle
 	ctx, done := event.Start(ctx, "golang.Implementation")
 	defer done()
 
-	locs, err := implementations(ctx, snapshot, f, rng)
+	impls, err := implementations(ctx, snapshot, f, rng)
 	if err != nil {
 		return nil, err
 	}
+	locs := []protocol.Location{}
+	for _, impl := range impls {
+		locs = append(locs, impl.Loc)
+	}
+
 	slices.SortFunc(locs, protocol.CompareLocation)
 	locs = slices.Compact(locs) // de-duplicate
 	return locs, nil
 }
 
-func ImplementationMore() {
-	fmt.Println("AAAHHHHH")
+// Include the extra info returned for interface implementers, not just their locations
+func ImplementationMoreInfo(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rng protocol.Range) ([]Implementer, error) {
+	ctx, done := event.Start(ctx, "golang.Implementation")
+	defer done()
+
+	impls, err := implementations(ctx, snapshot, f, rng)
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(impls, func(a Implementer, b Implementer) int { return protocol.CompareLocation(a.Loc, b.Loc) })
+	// de-duplicate considering all fields, not just location: if type U implements it,
+	// type T that embeds U will be returned with the same location but different pkgPath:typeName.
+	// Which is correct, since T inherits U's implementation
+	impls = slices.Compact(impls)
+	return impls, nil
 }
 
-func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]protocol.Location, error) {
+type Implementer struct {
+	Loc protocol.Location
+	// only populated if interface implementer (vs func signature implementer)
+	PkgPath     metadata.PackagePath
+	TypeName    string
+	IsInterface bool
+}
+
+func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]Implementer, error) {
 	// Type check the current package.
 	pkg, pgf, err := NarrowestPackageForFile(ctx, snapshot, fh.URI())
 	if err != nil {
@@ -85,13 +111,17 @@ func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Hand
 
 	// Find implementations based on func signatures.
 	if locs, err := implFuncs(pkg, cur, start, end); err != errNotHandled {
-		return locs, err
+		impls := []Implementer{}
+		for _, loc := range locs {
+			impls = append(impls, Implementer{Loc: loc})
+		}
+		return impls, err
 	}
 
 	// Find implementations based on method sets.
 	var (
-		locsMu sync.Mutex
-		locs   []protocol.Location
+		locsMu       sync.Mutex
+		Implementers []Implementer
 	)
 	// relation=0 here means infer direction of the relation
 	// (Supertypes/Subtypes) from concreteness of query type/method.
@@ -99,12 +129,12 @@ func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Hand
 	// so that one could ask for, say, the superinterfaces of io.ReadCloser;
 	// see https://github.com/golang/go/issues/68641#issuecomment-2269293762.)
 	const relation = methodsets.TypeRelation(0)
-	err = implementationsMsets(ctx, snapshot, pkg, cur, relation, func(_ metadata.PackagePath, _ string, _ bool, loc protocol.Location) {
+	err = implementationsMsets(ctx, snapshot, pkg, cur, relation, func(pkgPath metadata.PackagePath, typeName string, isInterface bool, loc protocol.Location) {
 		locsMu.Lock()
-		locs = append(locs, loc)
+		Implementers = append(Implementers, Implementer{Loc: loc, PkgPath: pkgPath, TypeName: typeName, IsInterface: isInterface})
 		locsMu.Unlock()
 	})
-	return locs, err
+	return Implementers, err
 }
 
 // An implYieldFunc is a callback called for each match produced by the implementation machinery.

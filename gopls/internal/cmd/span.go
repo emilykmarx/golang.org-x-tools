@@ -7,6 +7,7 @@ package cmd
 // span and point represent positions and ranges in text files.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path"
@@ -234,4 +235,23 @@ func (s span) Format(f fmt.State, c rune) {
 	if printOffset {
 		fmt.Fprintf(f, "#%d", s.v.End.Offset)
 	}
+}
+
+// convert locations to spans for user-friendly 1-indexed line
+// and column numbers
+func locsToSpans(ctx context.Context, cli *client, locs []protocol.Location) ([]string, error) {
+	var spans []string
+	for _, loc := range locs {
+		f, err := cli.openFile(ctx, loc.URI)
+		if err != nil {
+			return nil, err
+		}
+		span, err := f.locationSpan(loc)
+		if err != nil {
+			return nil, err
+		}
+		spans = append(spans, fmt.Sprint(span))
+	}
+	sort.Strings(spans)
+	return spans, nil
 }

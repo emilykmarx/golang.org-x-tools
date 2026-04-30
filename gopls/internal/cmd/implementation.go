@@ -8,7 +8,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"sort"
 
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/internal/tool"
@@ -34,6 +33,23 @@ Example:
 	printFlagDefaults(f)
 }
 
+func locStrToImplParams(ctx context.Context, locstr string, cli *client) (*protocol.ImplementationParams, error) {
+	from := parseSpan(locstr)
+	file, err := cli.openFile(ctx, from.URI())
+	if err != nil {
+		return nil, err
+	}
+
+	loc, err := file.spanLocation(from)
+	if err != nil {
+		return nil, err
+	}
+
+	return &protocol.ImplementationParams{
+		TextDocumentPositionParams: protocol.LocationTextDocumentPositionParams(loc),
+	}, nil
+}
+
 func (i *implementation) Run(ctx context.Context, args ...string) error {
 	if len(args) != 1 {
 		return tool.CommandLineErrorf("implementation expects 1 argument (position)")
@@ -45,39 +61,19 @@ func (i *implementation) Run(ctx context.Context, args ...string) error {
 	}
 	defer cli.terminate(ctx)
 
-	from := parseSpan(args[0])
-	file, err := cli.openFile(ctx, from.URI())
+	p, err := locStrToImplParams(ctx, args[0], cli)
+	if err != nil {
+		return err
+	}
+	implementations, err := cli.server.Implementation(ctx, p)
 	if err != nil {
 		return err
 	}
 
-	loc, err := file.spanLocation(from)
+	spans, err := locsToSpans(ctx, cli, implementations)
 	if err != nil {
 		return err
 	}
-
-	p := protocol.ImplementationParams{
-		TextDocumentPositionParams: protocol.LocationTextDocumentPositionParams(loc),
-	}
-	implementations, err := cli.server.Implementation(ctx, &p)
-	if err != nil {
-		return err
-	}
-
-	var spans []string
-	for _, impl := range implementations {
-		f, err := cli.openFile(ctx, impl.URI)
-		if err != nil {
-			return err
-		}
-		span, err := f.locationSpan(impl)
-		if err != nil {
-			return err
-		}
-		spans = append(spans, fmt.Sprint(span))
-	}
-	sort.Strings(spans)
-
 	for _, s := range spans {
 		fmt.Println(s)
 	}

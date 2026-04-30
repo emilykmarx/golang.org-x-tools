@@ -8,7 +8,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"sort"
 
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/internal/tool"
@@ -68,22 +67,11 @@ func (r *references) Run(ctx context.Context, args ...string) error {
 	if err != nil {
 		return err
 	}
-	var spans []string
-	for _, l := range locations {
-		f, err := cli.openFile(ctx, l.URI)
-		if err != nil {
-			return err
-		}
-		// convert location to span for user-friendly 1-indexed line
-		// and column numbers
-		span, err := f.locationSpan(l)
-		if err != nil {
-			return err
-		}
-		spans = append(spans, fmt.Sprint(span))
+	spans, err := locsToSpans(ctx, cli, locations)
+	if err != nil {
+		return err
 	}
 
-	sort.Strings(spans)
 	for _, s := range spans {
 		fmt.Println(s)
 	}

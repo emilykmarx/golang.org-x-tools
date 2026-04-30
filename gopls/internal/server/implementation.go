@@ -35,6 +35,22 @@ func (s *Server) Implementation(ctx context.Context, params *protocol.Implementa
 	return golang.Implementation(ctx, snapshot, fh, params.Range)
 }
 
-func (s *Server) ImplementationMore() {
-	golang.ImplementationMore()
+func (s *Server) ImplementationMoreInfo(ctx context.Context, params *protocol.ImplementationParams) (_ []golang.Implementer, rerr error) {
+	recordLatency := telemetry.StartLatencyTimer("implementation")
+	defer func() {
+		recordLatency(ctx, rerr)
+	}()
+
+	ctx, done := event.Start(ctx, "server.Implementation", label.URI.Of(params.TextDocument.URI))
+	defer done()
+
+	fh, snapshot, release, err := s.session.FileOf(ctx, params.TextDocument.URI)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if snapshot.FileKind(fh) != file.Go {
+		return nil, nil // empty result
+	}
+	return golang.ImplementationMoreInfo(ctx, snapshot, fh, params.Range)
 }
