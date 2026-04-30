@@ -7,6 +7,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"go/types"
 
 	"golang.org/x/tools/gopls/internal/file"
 	"golang.org/x/tools/gopls/internal/goasm"
@@ -45,6 +46,34 @@ func (s *Server) Definition(ctx context.Context, params *protocol.DefinitionPara
 	}
 }
 
+func (s *Server) DefinitionMoreInfo(ctx context.Context, params *protocol.DefinitionParams) (_ []protocol.Location, _ *types.Object, rerr error) {
+	recordLatency := telemetry.StartLatencyTimer("definition")
+	defer func() {
+		recordLatency(ctx, rerr)
+	}()
+
+	ctx, done := event.Start(ctx, "server.Definition", label.URI.Of(params.TextDocument.URI))
+	defer done()
+
+	// TODO(rfindley): definition requests should be multiplexed across all views.
+	fh, snapshot, release, err := s.session.FileOf(ctx, params.TextDocument.URI)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer release()
+	switch kind := snapshot.FileKind(fh); kind {
+	case file.Tmpl:
+		locs, err := template.Definition(snapshot, fh, params.Range)
+		return locs, nil, err
+	case file.Go:
+		return golang.DefinitionMoreInfo(ctx, snapshot, fh, params.Range)
+	case file.Asm:
+		locs, err := goasm.Definition(ctx, snapshot, fh, params.Range)
+		return locs, nil, err
+	default:
+		return nil, nil, fmt.Errorf("can't find definitions for file type %s", kind)
+	}
+}
 func (s *Server) TypeDefinition(ctx context.Context, params *protocol.TypeDefinitionParams) ([]protocol.Location, error) {
 	ctx, done := event.Start(ctx, "server.TypeDefinition", label.URI.Of(params.TextDocument.URI))
 	defer done()

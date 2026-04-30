@@ -27,26 +27,32 @@ import (
 
 // Definition handles the textDocument/definition request for Go files.
 func Definition(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]protocol.Location, error) {
+	locs, _, err := DefinitionMoreInfo(ctx, snapshot, fh, rng)
+	return locs, err
+}
+
+// Always populate locations; also populate object if applicable (i.e. is definition of identifier)
+func DefinitionMoreInfo(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]protocol.Location, *types.Object, error) {
 	ctx, done := event.Start(ctx, "golang.Definition")
 	defer done()
 
 	pkg, pgf, err := NarrowestPackageForFile(ctx, snapshot, fh.URI())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	start, end, err := pgf.RangePos(rng)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cur, _ := pgf.Cursor().FindByPos(start, end) // can't fail
 
 	// Handle the case where the range is in an import.
 	importLocations, err := importDefinition(ctx, snapshot, pkg, pgf, start, end)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(importLocations) > 0 {
-		return importLocations, nil
+		return importLocations, nil, nil
 	}
 
 	// Handle the case where the cursor is in the package name.
@@ -62,27 +68,27 @@ func Definition(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, r
 		}
 		loc, err := declFile.NodeLocation(declFile.File.Name)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return []protocol.Location{loc}, nil
+		return []protocol.Location{loc}, nil, nil
 	}
 
 	// Handle the case where the cursor is in a linkname directive.
 	locations, err := linknameDefinition(ctx, snapshot, pgf.Mapper, rng)
 	if !errors.Is(err, ErrNoLinkname) {
-		return locations, err // may be success or failure
+		return locations, nil, err // may be success or failure
 	}
 
 	// Handle the case where the cursor is in an embed directive.
 	locations, err = embedDefinition(pgf.Mapper, rng)
 	if !errors.Is(err, ErrNoEmbed) {
-		return locations, err // may be success or failure
+		return locations, nil, err // may be success or failure
 	}
 
 	// Handle the case where the cursor is in a doc link.
 	locations, err = docLinkDefinition(ctx, snapshot, pkg, pgf, start, end)
 	if !errors.Is(err, errNoCommentReference) {
-		return locations, err // may be success or failure
+		return locations, nil, err // may be success or failure
 	}
 
 	// Handle definition requests for various special kinds of syntax node.
@@ -103,13 +109,13 @@ func Definition(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, r
 		}
 		// Inv: funcType != nil, as a return stmt cannot appear outside a function.
 		if funcType.Results == nil {
-			return nil, nil // no result variables
+			return nil, nil, nil // no result variables
 		}
 		loc, err := pgf.NodeLocation(funcType.Results)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return []protocol.Location{loc}, nil
+		return []protocol.Location{loc}, nil, nil
 
 	case *ast.BranchStmt:
 		// Handle the case where the cursor is on a goto, break or continue statement by returning the
@@ -119,13 +125,13 @@ func Definition(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, r
 		switch node.Tok {
 		case token.GOTO:
 			if !isLabeled {
-				return nil, fmt.Errorf("undefined label")
+				return nil, nil, fmt.Errorf("undefined label")
 			}
 			loc, err := pgf.PosLocation(label.Pos(), label.Pos()+token.Pos(len(label.Name())))
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			return []protocol.Location{loc}, nil
+			return []protocol.Location{loc}, nil, nil
 
 		case token.BREAK, token.CONTINUE:
 			// Find innermost relevant ancestor for break/continue.
@@ -146,20 +152,21 @@ func Definition(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, r
 					}
 					loc, err := pgf.PosLocation(start, end)
 					if err != nil {
-						return nil, err
+						return nil, nil, err
 					}
-					return []protocol.Location{loc}, nil
+					return []protocol.Location{loc}, nil, nil
 				case *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
 					if node.Tok == token.BREAK {
 						loc, err := pgf.PosLocation(n.End()-1, n.End())
 						if err != nil {
-							return nil, err
+							return nil, nil, err
 						}
-						return []protocol.Location{loc}, nil
+						return []protocol.Location{loc}, nil, nil
 					}
 				case *ast.FuncDecl, *ast.FuncLit:
 					// bad syntax; avoid jumping outside the current function
-					return nil, nil
+					// CONFTAMER: Should this really be a nil err?
+					return nil, nil, nil
 				}
 			}
 		}
@@ -168,7 +175,8 @@ func Definition(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, r
 	// The general case: the cursor is on (or near) an identifier.
 	objects, err := objectsAt(pkg.TypesInfo(), cur)
 	if err != nil {
-		return nil, nil
+		// CONFTAMER: Should this really be a nil err?
+		return nil, nil, nil
 	}
 	obj := objects[0].obj
 	cur = objects[0].cur // nearby
@@ -176,7 +184,8 @@ func Definition(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, r
 	if !ok {
 		// objectsAt can return a non-Ident (e.g. ImportSpec),
 		// but we dealt with them earlier. Can't happen?
-		return nil, nil
+		// CONFTAMER: Should this really be a nil err?
+		return nil, &obj, nil
 	}
 
 	// If the query position was an embedded field, we want to jump
@@ -196,16 +205,17 @@ func Definition(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, r
 		if decl, ok := decl.(*ast.FuncDecl); ok &&
 			decl.Body == nil &&
 			astutil.NodeContains(decl.Name, astutil.RangeOf(start, end)) {
-			return nonGoDefinition(ctx, snapshot, pkg, decl.Name.Name)
+			locs, err := nonGoDefinition(ctx, snapshot, pkg, decl.Name.Name)
+			return locs, &obj, err
 		}
 	}
 
 	// Finally, map the object position.
 	loc, err := ObjectLocation(ctx, pkg.FileSet(), snapshot, obj)
 	if err != nil {
-		return nil, err
+		return nil, &obj, err
 	}
-	return []protocol.Location{loc}, nil
+	return []protocol.Location{loc}, &obj, nil
 }
 
 // builtinDecl returns the parsed Go file and node corresponding to a builtin
