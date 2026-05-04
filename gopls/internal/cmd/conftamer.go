@@ -7,6 +7,7 @@ import (
 	"go/types"
 	"slices"
 
+	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
 	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/server"
@@ -53,7 +54,8 @@ func unmarshalImpls(ctx context.Context, cli *client, local_server *server.Serve
 }
 
 // Type definition of type that implements method at location `method_name_loc`
-func implementingTypeDefinition(ctx context.Context, cli *client, local_server *server.Server, method_name_loc protocol.Location) ([]protocol.Location, *types.Object, error) {
+func implementingTypeDefinition(ctx context.Context, cli *client, local_server *server.Server,
+	method_name_loc protocol.Location) ([]protocol.Location, *types.Object, error) {
 	// 1. method name location => type name location
 	// TODO proper way of doing this with AST (this assumes single space between type name and method name)
 	type_name_loc := method_name_loc
@@ -89,9 +91,11 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		return err
 	}
 	defer cli.terminate(ctx)
+	ctypes_graph := ct.NewCTypeGraph()
 
 	// 1. Find types that contain config file contents
 	// i.e. those that implement UnmarshalYAML
+	// TODO also find all types passed as 2nd arg to yaml.Unmarshal - for any that don't impl Unmarshal, record their params
 
 	local_server := cli.server.(*server.Server)
 	unmarshalImpls, err := unmarshalImpls(ctx, cli, local_server)
@@ -99,17 +103,38 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		return err
 	}
 
-	// 2. Find params in those types
+	// 2. Find params in unmarshaling types
 	for _, unmarshalImpl := range unmarshalImpls {
 		defn_locs, defn_obj, err := implementingTypeDefinition(ctx, cli, local_server, unmarshalImpl.Loc)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("TYPE DEFN: %+v\n", defn_locs[0])
-		fmt.Printf("OBJ DEFN: %+v\n", *defn_obj)
+		nice_defn_locs, err := locsToSpans(ctx, cli, defn_locs)
+		if err != nil {
+			return err
+		}
+
+		err = ct.AddCType(nice_defn_locs, defn_obj, ctypes_graph)
+		if err != nil {
+			return err
+		}
 	}
 
-	// 3. Go up the tree of types
+	// 3. Find edges between unmarshaling types
+	err = ct.FindCTypeEdges(ctypes_graph)
+	if err != nil {
+		return err
+	}
+
+	// 4. Find param key prefixes
+	err = ct.FindParamKeys(ctypes_graph)
+	if err != nil {
+		return err
+	}
+
+	// TODO (minor): get this automatically from go.mod (or at least take it as CLI argument)
+	module_name := "github.com/prometheus/prometheus"
+	ct.PrettyPrint(ctypes_graph, false, module_name+"/")
 
 	return nil
 }

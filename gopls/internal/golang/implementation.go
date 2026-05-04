@@ -91,7 +91,8 @@ func ImplementationMoreInfo(ctx context.Context, snapshot *cache.Snapshot, f fil
 
 type Implementer struct {
 	Loc protocol.Location
-	// only populated if interface implementer (vs func signature implementer)
+
+	// Rest is only populated if interface implementer (vs func signature implementer)
 	PkgPath     metadata.PackagePath
 	TypeName    string
 	IsInterface bool
