@@ -23,6 +23,7 @@ require (
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
+	github.com/dominikbraun/graph v0.23.0 // indirect
 	github.com/fatih/camelcase v1.0.0 // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
 	github.com/google/safehtml v0.1.0 // indirect
@@ -37,3 +38,4 @@ require (
 )
 
 replace golang.org/x/tools => ..
+replace github.com/dominikbraun/graph => ../../graph

@@ -108,20 +108,11 @@ func FindParamKeys(g CTypeGraph) error {
 				param_key += "."
 				// LEFT OFF append the param key
 				return false // continue
-			})
+			}, true, false)
 		}
 
 	}
 	return nil
-}
-
-func anyMapKey(m map[string]graph.Edge[string], visited map[string]struct{}) string {
-	for k := range m {
-		if _, ok := visited[k]; ok {
-			return k
-		}
-	}
-	return ""
 }
 
 // If !all, just print <package.type>
@@ -135,35 +126,16 @@ func PrettyPrint(g CTypeGraph, all bool, cutprefix string) error {
 
 	for ctype_name, in_edges := range m {
 		// A root of the graph (no incoming edges)
-		indent_levels := make(map[string]int)
 		if len(in_edges) == 0 {
-			cur_root := true
-			visited := make(map[string]struct{})
 			graph.DFS(g, ctype_name, func(n string) bool {
-				visited[n] = struct{}{}
-				cur_in_edges := m[n]
-				indent_level := 0
-				if len(cur_in_edges) > 0 {
-					// Indent by one more than parent (for some parent we've visited -
-					// possible to have parents in subtrees with a different root, e.g. HTTPClientConfig is in many subtrees)
-					parent := anyMapKey(cur_in_edges, visited)
-					indent_level = indent_levels[parent] + 1
-					indent_levels[n] = indent_level
-					cur_root = false
-				}
 				if !all {
 					short_name, _ := strings.CutPrefix(n, cutprefix)
-					tab := ""
-					if cur_root {
-						tab = "ROOT: "
-					}
-					for i := 0; i < indent_level; i++ {
-						tab += "\t"
-					}
-					fmt.Printf("%v%v\n", tab, short_name)
+					fmt.Printf("%v\n", short_name)
 				}
 				return false // continue
-			})
+			}, true, true) // all paths
+
+			fmt.Println()
 		}
 	}
 	return nil
