@@ -16,28 +16,32 @@ import (
 
 // conftamer implements the conftamer verb for gopls
 type conftamer struct {
-	TODOflag bool `flag:"d,declaration" help:"include the declaration of the specified identifier in the results"`
-	app      *Application
+	app           *Application
+	UnmarshalDefn string `flag:"u,unmarshal_defn" help:"Location of the unmarshal interface definition"`
 }
+
+const (
+	DEFAULT_UNMARSHAL_DEFN = "/home/emily/go/pkg/mod/gopkg.in/yaml.v2@v2.4.0/yaml.go:33:3"
+)
 
 func (c *conftamer) Name() string      { return "conftamer" }
 func (c *conftamer) Parent() string    { return c.app.Name() }
-func (c *conftamer) Usage() string     { return "[conftamer-flags] <TODO>" }
-func (c *conftamer) ShortHelp() string { return "TODO short help" }
+func (c *conftamer) Usage() string     { return "[conftamer-flags]" }
+func (c *conftamer) ShortHelp() string { return "Finds the CTypes graph" }
 func (c *conftamer) DetailedHelp(f *flag.FlagSet) {
 	fmt.Fprint(f.Output(), `
-	TODO
-conftamer-flags:
-`)
+	conftamer-flags:`)
 	printFlagDefaults(f)
+	fmt.Fprintf(f.Output(), `
+	Default: %[1]v
+`, DEFAULT_UNMARSHAL_DEFN) // unsure how to put this in the struct tag for the flag
 }
 
 // Type names that implement the UnmarshalYAML interface
-func unmarshalImpls(ctx context.Context, cli *client, local_server *server.Server) ([]golang.Implementer, error) {
+func (c *conftamer) unmarshalImpls(ctx context.Context, cli *client, local_server *server.Server) ([]golang.Implementer, error) {
 	// TODO find definition of UnmarshalYAML properly (and other unmarshal pkgs)
-	unmarshal_defn := "/home/emily/go/pkg/mod/gopkg.in/yaml.v2@v2.4.0/yaml.go:33:3"
 	other_unmarshal_pkgs := []string{"gopkg.in/yaml.v3", "sigs.k8s.io/yaml/goyaml.v2"}
-	p, err := locStrToImplParams(ctx, unmarshal_defn, cli)
+	p, err := locStrToImplParams(ctx, c.UnmarshalDefn, cli)
 	if err != nil {
 		return nil, err
 	}
@@ -82,8 +86,13 @@ func implementingTypeDefinition(ctx context.Context, cli *client, local_server *
 }
 
 func (c *conftamer) Run(ctx context.Context, args ...string) error {
+	fmt.Println("STARTING CTYPES FINDER")
+
 	if len(args) != 0 {
-		return tool.CommandLineErrorf("conftamer expects no arguments")
+		return tool.CommandLineErrorf("conftamer expects no arguments (but flags are ok)")
+	}
+	if c.UnmarshalDefn == "" {
+		c.UnmarshalDefn = DEFAULT_UNMARSHAL_DEFN
 	}
 
 	cli, _, err := c.app.connect(ctx)
@@ -98,12 +107,12 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	// TODO also find all types passed as 2nd arg to yaml.Unmarshal - for any that don't impl Unmarshal, record their params
 
 	local_server := cli.server.(*server.Server)
-	unmarshalImpls, err := unmarshalImpls(ctx, cli, local_server)
+	unmarshalImpls, err := c.unmarshalImpls(ctx, cli, local_server)
 	if err != nil {
 		return err
 	}
 
-	// 2. Find params in unmarshaling types
+	// 2. Find all unmarshaling types
 	for _, unmarshalImpl := range unmarshalImpls {
 		defn_locs, defn_obj, err := implementingTypeDefinition(ctx, cli, local_server, unmarshalImpl.Loc)
 		if err != nil {
@@ -126,15 +135,16 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		return err
 	}
 
-	// 4. Find param key prefixes
-	err = ct.FindParamKeys(ctypes_graph)
+	// 4. Find param keys and corresponding source code expressions
+	err = ct.GetCTypeParams(ctypes_graph)
 	if err != nil {
 		return err
 	}
 
-	// TODO (minor): get this automatically from go.mod (or at least take it as CLI argument)
-	module_name := "github.com/prometheus/prometheus"
-	ct.PrettyPrint(ctypes_graph, false, module_name+"/")
+	err = ct.PrettyPrint(ctypes_graph, false, ct.ModulePrefix)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

@@ -30,6 +30,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -38,6 +39,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"golang.org/x/tools/gopls/internal/cmd"
 	"golang.org/x/tools/gopls/internal/debug"
 	"golang.org/x/tools/gopls/internal/protocol"
@@ -47,6 +49,28 @@ import (
 	"golang.org/x/tools/internal/tool"
 	"golang.org/x/tools/txtar"
 )
+
+// TestConftamer tests the 'conftamer' subcommand (conftamer.go).
+func TestConftamer(t *testing.T) {
+	t.Parallel()
+	module_path := "./testdata/conftamer/main.go"
+	fd, err := os.Open(module_path)
+	require.NoError(t, err)
+	defer fd.Close()
+	module_path, err = filepath.Abs(module_path)
+	require.NoError(t, err)
+
+	module_src, err := io.ReadAll(fd)
+	require.NoError(t, err)
+	tree := writeTree(t, string(module_src))
+	// If change testdata, may need to update this lineno accordingly
+	// See comment in testdata file for why we pass -u (hack for testing)
+	unmarshal_lineno := 12
+	u_flag := fmt.Sprintf("%v:%v:3", module_path, unmarshal_lineno)
+	res := gopls(t, tree, "conftamer", "-u", u_flag)
+	res.checkExit(true)
+	fmt.Println(res.stdout)
+}
 
 // TestVersion tests the 'version' subcommand (info.go).
 func TestVersion(t *testing.T) {
