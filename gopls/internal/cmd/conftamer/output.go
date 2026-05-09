@@ -1,0 +1,79 @@
+package conftamer
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"github.com/dominikbraun/graph"
+)
+
+/* Utilities for printing and parsing the output of the CTypes finder */
+
+type TestNode struct {
+	ID          string
+	Stored_down map[Stored]struct{}
+}
+
+// Make the test logs easily checkable
+
+// Used to unmarshal/marshal maps with key of type Stored
+func (a Stored) MarshalText() (text []byte, err error) {
+	return []byte(fmt.Sprintf("%v %v", a.FieldInfo.Field, a.FieldInfo.Tag)), nil
+}
+func (a *Stored) UnmarshalText(text []byte) error {
+	parts := strings.Fields(string(text))
+	if len(parts) > 0 {
+		a.FieldInfo.Field = parts[0]
+		a.FieldInfo.Tag = parts[1]
+	} else {
+		a.FieldInfo = FieldInfo{} // make empty ones marshal correctly
+	}
+	return nil
+}
+
+// If !all, just print <package.type>
+// Remove cutprefix from type when printing
+// Prints depth-first starting from each root (so each CType will be printed once for every root it's reachable from)
+func PrettyPrint(g CTypeGraph, all bool, cutprefix string) error {
+	all_nodes := []TestNode{}
+	var visit_err error
+	err := graph.DFSAllStartingNodes(g, func(n FullTypeName) bool {
+		if !all {
+			short_name, _ := strings.CutPrefix(string(n), cutprefix)
+			fmt.Printf("%v\n", short_name)
+		} else {
+			node, err := g.Vertex(n)
+			if err != nil {
+				visit_err = err
+			}
+
+			all_nodes = append(all_nodes, TestNode{ID: node.TypeInfo.Name(), Stored_down: node.Stored_down})
+		}
+		return false // continue
+	}, graph.UpdatePathVertices[CTypeNode]{}, true, true, false) // all paths, print indents
+
+	if err != nil || visit_err != nil {
+		return err
+	}
+
+	if all {
+		marshaled, err := json.Marshal(all_nodes)
+		if err != nil {
+			return err
+		}
+		// Need to write in this fancy way for test to be able to unmarshal it
+		var buf bytes.Buffer
+		buf.Write(marshaled)
+		_, err = io.Copy(os.Stdout, &buf)
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

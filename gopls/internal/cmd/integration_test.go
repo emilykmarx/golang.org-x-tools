@@ -27,6 +27,7 @@ package cmd_test
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -35,12 +36,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/tools/gopls/internal/cmd"
+	"golang.org/x/tools/gopls/internal/cmd/conftamer"
 	"golang.org/x/tools/gopls/internal/debug"
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/util/bug"
@@ -59,6 +63,9 @@ func TestConftamer(t *testing.T) {
 	defer fd.Close()
 	module_path, err = filepath.Abs(module_path)
 	require.NoError(t, err)
+	module_parts := strings.Split(module_path, ".")
+	test_pkg := strings.Join(module_parts[:3], ".")
+	module_prefix := "command-line-arguments" + test_pkg + "." // for pretty-print
 
 	module_src, err := io.ReadAll(fd)
 	require.NoError(t, err)
@@ -67,9 +74,53 @@ func TestConftamer(t *testing.T) {
 	// See comment in testdata file for why we pass -u (hack for testing)
 	unmarshal_lineno := 12
 	u_flag := fmt.Sprintf("%v:%v:3", module_path, unmarshal_lineno)
-	res := gopls(t, tree, "conftamer", "-u", u_flag)
+	res := gopls(t, tree, "conftamer", "-u", u_flag, "-m", module_prefix)
 	res.checkExit(true)
-	fmt.Println(res.stdout)
+	fmt.Println(res.stderr)
+
+	// CHECK OUTPUT
+	test_out := []conftamer.TestNode{}
+	ok := res.toJSON(&test_out)
+	require.Equal(t, true, ok)
+	expected_out := []conftamer.TestNode{
+		{ID: "Root", Stored_down: map[conftamer.Stored]struct{}{
+			conftamer.Stored{}: struct{}{}, // initialized with a blank entry
+		}},
+		{ID: "A", Stored_down: map[conftamer.Stored]struct{}{
+			// Root pushes A ".A => `a`"
+			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".A", Tag: "a"}}: struct{}{},
+		}},
+		{ID: "X", Stored_down: map[conftamer.Stored]struct{}{
+			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".X", Tag: "x"}}: struct{}{},
+		}},
+		{ID: "B", Stored_down: map[conftamer.Stored]struct{}{
+			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".A.B", Tag: "a.b"}}: struct{}{},
+			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".X.B", Tag: "x.b"}}: struct{}{},
+		}},
+		{ID: "C", Stored_down: map[conftamer.Stored]struct{}{
+			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".A.B.C", Tag: "a.b.c"}}: struct{}{},
+			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".X.B.C", Tag: "x.b.c"}}: struct{}{},
+		}},
+		{ID: "D", Stored_down: map[conftamer.Stored]struct{}{
+			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".A.B.D", Tag: "a.b.d"}}: struct{}{},
+			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".X.B.D", Tag: "x.b.d"}}: struct{}{},
+		}},
+	}
+
+	sortfunc := func(a, b conftamer.TestNode) int {
+		return cmp.Compare(a.ID, b.ID)
+	}
+	equalfunc := func(a, b conftamer.TestNode) bool {
+		return a.ID == b.ID
+	}
+	// Ignore order of printing
+	slices.SortFunc(expected_out, sortfunc)
+	slices.SortFunc(test_out, sortfunc)
+	test_out = slices.CompactFunc(test_out, equalfunc) // ignore dups from visiting a node twice
+
+	if !reflect.DeepEqual(expected_out, test_out) {
+		t.Fatalf("Expected %v\nActual %v", expected_out, test_out)
+	}
 }
 
 // TestVersion tests the 'version' subcommand (info.go).

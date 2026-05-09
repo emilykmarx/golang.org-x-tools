@@ -18,6 +18,7 @@ import (
 type conftamer struct {
 	app           *Application
 	UnmarshalDefn string `flag:"u,unmarshal_defn" help:"Location of the unmarshal interface definition"`
+	ModulePrefix  string `flag:"m,module_prefix" help:"Prefix of module path (used to pretty-print)"`
 }
 
 const (
@@ -86,8 +87,6 @@ func implementingTypeDefinition(ctx context.Context, cli *client, local_server *
 }
 
 func (c *conftamer) Run(ctx context.Context, args ...string) error {
-	fmt.Println("STARTING CTYPES FINDER")
-
 	if len(args) != 0 {
 		return tool.CommandLineErrorf("conftamer expects no arguments (but flags are ok)")
 	}
@@ -141,7 +140,7 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		return err
 	}
 
-	err = ct.PrettyPrint(ctypes_graph, false, ct.ModulePrefix)
+	err = ct.PrettyPrint(ctypes_graph, true, c.ModulePrefix)
 	if err != nil {
 		return err
 	}

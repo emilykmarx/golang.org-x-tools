@@ -8,8 +8,8 @@ import (
 
 /* Utilities for interacting with info from gopls */
 
-func typeName(type_info *types.TypeName) string {
-	return type_info.Pkg().Path() + "." + type_info.Name()
+func typeName(type_info *types.TypeName) FullTypeName {
+	return FullTypeName(type_info.Pkg().Path() + "." + type_info.Name())
 }
 
 func IsStruct(type_info *types.TypeName) *types.Struct {
