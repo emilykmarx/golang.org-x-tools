@@ -16,6 +16,7 @@ import (
 type TestNode struct {
 	ID          string
 	Stored_down map[Stored]struct{}
+	Stored_up   map[Stored]struct{}
 }
 
 // Make the test logs easily checkable
@@ -51,10 +52,14 @@ func PrettyPrint(g CTypeGraph, all bool, cutprefix string) error {
 				visit_err = err
 			}
 
-			all_nodes = append(all_nodes, TestNode{ID: node.TypeInfo.Name(), Stored_down: node.Stored_down})
+			all_nodes = append(all_nodes, TestNode{
+				ID:          node.TypeInfo.Name(),
+				Stored_down: node.Stored_down,
+				Stored_up:   node.Stored_up,
+			})
 		}
 		return false // continue
-	}, graph.UpdatePathVertices[CTypeNode]{}, true, true, false) // all paths, print indents
+	}, graph.UpdatePathVertices[CTypeNode]{}, true, true, graph.Forwards)
 
 	if err != nil || visit_err != nil {
 		return err
@@ -68,7 +73,13 @@ func PrettyPrint(g CTypeGraph, all bool, cutprefix string) error {
 		// Need to write in this fancy way for test to be able to unmarshal it
 		var buf bytes.Buffer
 		buf.Write(marshaled)
-		_, err = io.Copy(os.Stdout, &buf)
+		outfile := "stored.log"
+		f, err := os.Create(outfile)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(f, &buf)
 
 		if err != nil {
 			return err

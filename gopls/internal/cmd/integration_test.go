@@ -44,7 +44,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/tools/gopls/internal/cmd"
-	"golang.org/x/tools/gopls/internal/cmd/conftamer"
+	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
 	"golang.org/x/tools/gopls/internal/debug"
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/util/bug"
@@ -74,52 +74,116 @@ func TestConftamer(t *testing.T) {
 	// See comment in testdata file for why we pass -u (hack for testing)
 	unmarshal_lineno := 12
 	u_flag := fmt.Sprintf("%v:%v:3", module_path, unmarshal_lineno)
+	// Need to print res.stderr/out to see it, unless checkExit fails
 	res := gopls(t, tree, "conftamer", "-u", u_flag, "-m", module_prefix)
 	res.checkExit(true)
 	fmt.Println(res.stderr)
+	fmt.Println(res.stdout)
 
 	// CHECK OUTPUT
-	test_out := []conftamer.TestNode{}
-	ok := res.toJSON(&test_out)
-	require.Equal(t, true, ok)
-	expected_out := []conftamer.TestNode{
-		{ID: "Root", Stored_down: map[conftamer.Stored]struct{}{
-			conftamer.Stored{}: struct{}{}, // initialized with a blank entry
-		}},
-		{ID: "A", Stored_down: map[conftamer.Stored]struct{}{
-			// Root pushes A ".A => `a`"
-			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".A", Tag: "a"}}: struct{}{},
-		}},
-		{ID: "X", Stored_down: map[conftamer.Stored]struct{}{
-			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".X", Tag: "x"}}: struct{}{},
-		}},
-		{ID: "B", Stored_down: map[conftamer.Stored]struct{}{
-			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".A.B", Tag: "a.b"}}: struct{}{},
-			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".X.B", Tag: "x.b"}}: struct{}{},
-		}},
-		{ID: "C", Stored_down: map[conftamer.Stored]struct{}{
-			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".A.B.C", Tag: "a.b.c"}}: struct{}{},
-			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".X.B.C", Tag: "x.b.c"}}: struct{}{},
-		}},
-		{ID: "D", Stored_down: map[conftamer.Stored]struct{}{
-			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".A.B.D", Tag: "a.b.d"}}: struct{}{},
-			conftamer.Stored{FieldInfo: conftamer.FieldInfo{Field: ".X.B.D", Tag: "x.b.d"}}: struct{}{},
-		}},
+	actual_stored := []ct.TestNode{}
+	stored_down_file := filepath.Join(tree, "stored.log")
+	fileToJSON(t, &actual_stored, stored_down_file)
+	full_keys := []ct.FieldInfo{
+		// A-prefixed
+		ct.FieldInfo{Field: ".A.B.C", Tag: "a.b.c"}, // C-postfixed
+		ct.FieldInfo{Field: ".A.B.D", Tag: "a.b.d"}, // D-postfixed
+		// X-prefixed
+		ct.FieldInfo{Field: ".X.B.C", Tag: "x.b.c"}, // C-postfixed
+		ct.FieldInfo{Field: ".X.B.D", Tag: "x.b.d"}, // D-postfixed
 	}
 
-	sortfunc := func(a, b conftamer.TestNode) int {
+	expected_stored := []ct.TestNode{
+		{ID: "Root",
+			Stored_down: map[ct.Stored]struct{}{
+				ct.Stored{}: struct{}{}, // initialized with a blank entry
+			},
+			Stored_up: map[ct.Stored]struct{}{
+				// all entries
+				ct.Stored{FieldInfo: full_keys[0]}: struct{}{},
+				ct.Stored{FieldInfo: full_keys[1]}: struct{}{},
+				ct.Stored{FieldInfo: full_keys[2]}: struct{}{},
+				ct.Stored{FieldInfo: full_keys[3]}: struct{}{},
+			}},
+		{ID: "A",
+			Stored_down: map[ct.Stored]struct{}{
+				// Root pushes A ".A => `a`"
+				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".A", Tag: "a"}}: struct{}{},
+			},
+			Stored_up: map[ct.Stored]struct{}{
+				// full A-prefixed entries
+				ct.Stored{FieldInfo: full_keys[0]}: struct{}{},
+				ct.Stored{FieldInfo: full_keys[1]}: struct{}{},
+			}},
+		{ID: "X",
+			Stored_down: map[ct.Stored]struct{}{
+				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".X", Tag: "x"}}: struct{}{},
+			},
+			Stored_up: map[ct.Stored]struct{}{
+				// full X-prefixed entries
+				ct.Stored{FieldInfo: full_keys[2]}: struct{}{},
+				ct.Stored{FieldInfo: full_keys[3]}: struct{}{},
+			}},
+		{ID: "B",
+			Stored_down: map[ct.Stored]struct{}{
+				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".A.B", Tag: "a.b"}}: struct{}{},
+				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".X.B", Tag: "x.b"}}: struct{}{},
+			},
+			Stored_up: map[ct.Stored]struct{}{
+				// all entries
+				ct.Stored{FieldInfo: full_keys[0]}: struct{}{},
+				ct.Stored{FieldInfo: full_keys[1]}: struct{}{},
+				ct.Stored{FieldInfo: full_keys[2]}: struct{}{},
+				ct.Stored{FieldInfo: full_keys[3]}: struct{}{},
+			}},
+		{ID: "C",
+			Stored_down: map[ct.Stored]struct{}{
+				// full C-postfixed entries
+				ct.Stored{FieldInfo: full_keys[0]}: struct{}{},
+				ct.Stored{FieldInfo: full_keys[2]}: struct{}{},
+			},
+			Stored_up: map[ct.Stored]struct{}{
+				// full C-postfixed entries (same as stored_down)
+				ct.Stored{FieldInfo: full_keys[0]}: struct{}{},
+				ct.Stored{FieldInfo: full_keys[2]}: struct{}{},
+			},
+		},
+		{ID: "D",
+			Stored_down: map[ct.Stored]struct{}{
+				// full D-postfixed entries
+				ct.Stored{FieldInfo: full_keys[1]}: struct{}{},
+				ct.Stored{FieldInfo: full_keys[3]}: struct{}{},
+			},
+			Stored_up: map[ct.Stored]struct{}{
+				// full D-postfixed entries (same as stored_down)
+				ct.Stored{FieldInfo: full_keys[1]}: struct{}{},
+				ct.Stored{FieldInfo: full_keys[3]}: struct{}{},
+			},
+		},
+	}
+
+	sortfunc := func(a, b ct.TestNode) int {
 		return cmp.Compare(a.ID, b.ID)
 	}
-	equalfunc := func(a, b conftamer.TestNode) bool {
+	equalfunc := func(a, b ct.TestNode) bool {
 		return a.ID == b.ID
 	}
 	// Ignore order of printing
-	slices.SortFunc(expected_out, sortfunc)
-	slices.SortFunc(test_out, sortfunc)
-	test_out = slices.CompactFunc(test_out, equalfunc) // ignore dups from visiting a node twice
+	slices.SortFunc(expected_stored, sortfunc)
+	slices.SortFunc(actual_stored, sortfunc)
+	actual_stored = slices.CompactFunc(actual_stored, equalfunc) // ignore dups from visiting a node twice
 
-	if !reflect.DeepEqual(expected_out, test_out) {
-		t.Fatalf("Expected %v\nActual %v", expected_out, test_out)
+	if !reflect.DeepEqual(expected_stored, actual_stored) {
+		// Find out which were wrong
+		for i, n := range expected_stored {
+			if !reflect.DeepEqual(n.Stored_down, actual_stored[i].Stored_down) {
+				t.Logf("%v stored_down WRONG:\nExpected %v\nActual %v", n.ID, n.Stored_down, actual_stored[i].Stored_down)
+			}
+			if !reflect.DeepEqual(n.Stored_up, actual_stored[i].Stored_up) {
+				t.Logf("%v stored_up WRONG:\nExpected %v\nActual %v", n.ID, n.Stored_up, actual_stored[i].Stored_up)
+			}
+		}
+		t.Fatalf("Expected %v\nActual %v", expected_stored, actual_stored)
 	}
 }
 
@@ -1317,6 +1381,17 @@ func (res *result) toJSON(ptr any) bool {
 		return false
 	}
 	return true
+}
+
+func fileToJSON(t *testing.T, ptr any, filename string) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("failed to open %v: %v", filename, err)
+	}
+
+	if err := json.Unmarshal([]byte(data), ptr); err != nil {
+		t.Fatalf("invalid JSON %v", err)
+	}
 }
 
 // checkContent checks that the contents of the file are as expected.

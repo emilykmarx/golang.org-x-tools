@@ -136,12 +136,7 @@ func pathParent(path string, child FullTypeName) FullTypeName {
 	return FullTypeName(path_parts[child_i-1])
 }
 
-// For each CType:
-// Get the full names of the parameters it can access (prefixing with <section.subsection...>),
-// and via which expression(s) (e.g. A.B.C for CType A, B.C for CType B)
-func GetCTypeParams(g CTypeGraph) error {
-	// 1. PUSH DOWN: Accumulate full param keys and field keys at leaves
-
+func pushDown(g CTypeGraph) error {
 	// parent and child are copies - return the new PARENT
 	// Initialize roots (receive nothing pushed down)
 	initializeRoots := func(parent CTypeNode, child CTypeNode) CTypeNode {
@@ -181,9 +176,10 @@ func GetCTypeParams(g CTypeGraph) error {
 	update_vertices := graph.UpdatePathVertices[CTypeNode]{
 		UpdateChild:  &pushDown,
 		UpdateParent: &initializeRoots,
+		UpdateFirst:  graph.Parent,
 	}
 
-	err := graph.DFSAllStartingNodes(g, func(ctype_name FullTypeName) bool { return false }, update_vertices, true, false, false) // forwards
+	err := graph.DFSAllStartingNodes(g, func(ctype_name FullTypeName) bool { return false }, update_vertices, true, false, graph.Forwards)
 	if err != nil {
 		// TODO unsure what to do about cycles
 		if errors.Is(err, graph.ErrCycleFound) {
@@ -191,8 +187,71 @@ func GetCTypeParams(g CTypeGraph) error {
 		return err
 	}
 
-	// LEFT OFF do 2 and 3
-	// 2. PUSH UP: Push full param keys and field keys all the way up, truncating field keys (roots need all, leaves need none)
-	// 3. Clip irrelevant parts of field keys, output result
+	return nil
+}
+
+func pushUp(g CTypeGraph) error {
+	// parent and child are copies - return the new CHILD
+	// Initialize leaves (receive nothing pushed up)
+	initializeLeaves := func(parent CTypeNode, child CTypeNode) CTypeNode {
+		// Initialize leaf (receives nothing pushed up)
+		leaf := child.Stored_up == nil
+		if leaf {
+			child.Stored_up = child.Stored_down // all the info has been pushed down to leaves
+		}
+
+		return child
+	}
+
+	// parent and child are copies - return the new PARENT
+	pushUp := func(parent CTypeNode, child CTypeNode) CTypeNode {
+
+		if parent.Stored_up == nil {
+			parent.Stored_up = make(map[Stored]struct{})
+			// Could clear out parent.Stored_down at this point too (all the relevant info is coming up from the leaves now)
+		}
+
+		for child_stored := range child.Stored_up {
+			// CHILD: Send all stored only if parent is parent in corresponding path
+			// PARENT: Remove field keys corresponding to types before me in path, add to stored
+			if pathParent(child_stored.Path, CTypeNodeHash(child)) == CTypeNodeHash(parent) {
+				parent.Stored_up[child_stored] = struct{}{}
+			}
+		}
+
+		return parent
+	}
+
+	update_vertices := graph.UpdatePathVertices[CTypeNode]{
+		UpdateChild:  &initializeLeaves,
+		UpdateParent: &pushUp,
+		UpdateFirst:  graph.Child,
+	}
+
+	err := graph.DFSAllStartingNodes(g, func(ctype_name FullTypeName) bool { return false }, update_vertices, true, false, graph.Backwards)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// For each CType:
+// Get the full names of the parameters it can access (prefixing with <section.subsection...>),
+// and via which expression(s) (e.g. A.B.C for CType A, B.C for CType B)
+func GetCTypeParams(g CTypeGraph) error {
+	// 1. PUSH DOWN: Accumulate full param keys and field keys at leaves
+	err := pushDown(g)
+	if err != nil {
+		return err
+	}
+
+	// 2. PUSH UP: Push full param keys and field keys all the way up
+	err = pushUp(g)
+	if err != nil {
+		return err
+	}
+	// 3. Clip irrelevant parts of field keys(roots need all, leaves need none), output result
+	// LEFT OFF do  3
 	return nil
 }
