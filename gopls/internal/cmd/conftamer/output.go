@@ -13,10 +13,12 @@ import (
 
 /* Utilities for printing and parsing the output of the CTypes finder */
 
+// When adding a field, remember to populate it while outputting - and upate marshal/unmarshal support if needed
 type TestNode struct {
-	ID          string
-	Stored_down map[Stored]struct{}
-	Stored_up   map[Stored]struct{}
+	ID           string
+	Stored_down  map[Stored]struct{}
+	Stored_up    map[Stored]struct{}
+	Stored_final map[Stored]struct{}
 }
 
 // Make the test logs easily checkable
@@ -27,9 +29,12 @@ func (a Stored) MarshalText() (text []byte, err error) {
 }
 func (a *Stored) UnmarshalText(text []byte) error {
 	parts := strings.Fields(string(text))
-	if len(parts) > 0 {
+	if len(parts) == 2 {
 		a.FieldInfo.Field = parts[0]
 		a.FieldInfo.Tag = parts[1]
+	} else if len(parts) == 1 {
+		// if field key is "", parts is just the tag
+		a.FieldInfo.Tag = parts[0]
 	} else {
 		a.FieldInfo = FieldInfo{} // make empty ones marshal correctly
 	}
@@ -53,9 +58,10 @@ func PrettyPrint(g CTypeGraph, all bool, cutprefix string) error {
 			}
 
 			all_nodes = append(all_nodes, TestNode{
-				ID:          node.TypeInfo.Name(),
-				Stored_down: node.Stored_down,
-				Stored_up:   node.Stored_up,
+				ID:           node.TypeInfo.Name(),
+				Stored_down:  node.Stored_down,
+				Stored_up:    node.Stored_up,
+				Stored_final: node.Stored_final,
 			})
 		}
 		return false // continue
@@ -87,4 +93,10 @@ func PrettyPrint(g CTypeGraph, all bool, cutprefix string) error {
 	}
 
 	return nil
+}
+
+// For convenience, remove the package name
+func shortHash(full FullTypeName) string {
+	hash_parts := strings.Split(string(full), ".")
+	return hash_parts[len(hash_parts)-1]
 }

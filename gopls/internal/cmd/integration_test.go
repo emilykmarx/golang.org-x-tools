@@ -92,19 +92,47 @@ func TestConftamer(t *testing.T) {
 		ct.FieldInfo{Field: ".X.B.C", Tag: "x.b.c"}, // C-postfixed
 		ct.FieldInfo{Field: ".X.B.D", Tag: "x.b.d"}, // D-postfixed
 	}
+	ax_keys := []ct.FieldInfo{
+		// A-prefixed
+		ct.FieldInfo{Field: ".B.C", Tag: "a.b.c"}, // C-postfixed
+		ct.FieldInfo{Field: ".B.D", Tag: "a.b.d"}, // D-postfixed
+		// X-prefixed
+		ct.FieldInfo{Field: ".B.C", Tag: "x.b.c"}, // C-postfixed
+		ct.FieldInfo{Field: ".B.D", Tag: "x.b.d"}, // D-postfixed
+	}
+	b_keys := []ct.FieldInfo{
+		// A-prefixed
+		ct.FieldInfo{Field: ".C", Tag: "a.b.c"}, // C-postfixed
+		ct.FieldInfo{Field: ".D", Tag: "a.b.d"}, // D-postfixed
+		// X-prefixed
+		ct.FieldInfo{Field: ".C", Tag: "x.b.c"}, // C-postfixed
+		ct.FieldInfo{Field: ".D", Tag: "x.b.d"}, // D-postfixed
+	}
+	cd_keys := []ct.FieldInfo{
+		// A-prefixed
+		ct.FieldInfo{Field: "", Tag: "a.b.c"}, // C-postfixed
+		ct.FieldInfo{Field: "", Tag: "a.b.d"}, // D-postfixed
+		// X-prefixed
+		ct.FieldInfo{Field: "", Tag: "x.b.c"}, // C-postfixed
+		ct.FieldInfo{Field: "", Tag: "x.b.d"}, // D-postfixed
+	}
 
-	expected_stored := []ct.TestNode{
-		{ID: "Root",
-			Stored_down: map[ct.Stored]struct{}{
-				ct.Stored{}: struct{}{}, // initialized with a blank entry
-			},
-			Stored_up: map[ct.Stored]struct{}{
-				// all entries
-				ct.Stored{FieldInfo: full_keys[0]}: struct{}{},
-				ct.Stored{FieldInfo: full_keys[1]}: struct{}{},
-				ct.Stored{FieldInfo: full_keys[2]}: struct{}{},
-				ct.Stored{FieldInfo: full_keys[3]}: struct{}{},
-			}},
+	root := ct.TestNode{
+		ID: "Root",
+		Stored_down: map[ct.Stored]struct{}{
+			ct.Stored{}: struct{}{}, // initialized with a blank entry
+		},
+		Stored_up: map[ct.Stored]struct{}{
+			// all entries
+			ct.Stored{FieldInfo: full_keys[0]}: struct{}{},
+			ct.Stored{FieldInfo: full_keys[1]}: struct{}{},
+			ct.Stored{FieldInfo: full_keys[2]}: struct{}{},
+			ct.Stored{FieldInfo: full_keys[3]}: struct{}{},
+		},
+	}
+	root.Stored_final = root.Stored_up // root has full keys
+
+	rest := []ct.TestNode{
 		{ID: "A",
 			Stored_down: map[ct.Stored]struct{}{
 				// Root pushes A ".A => `a`"
@@ -114,7 +142,12 @@ func TestConftamer(t *testing.T) {
 				// full A-prefixed entries
 				ct.Stored{FieldInfo: full_keys[0]}: struct{}{},
 				ct.Stored{FieldInfo: full_keys[1]}: struct{}{},
-			}},
+			},
+			Stored_final: map[ct.Stored]struct{}{
+				ct.Stored{FieldInfo: ax_keys[0]}: struct{}{},
+				ct.Stored{FieldInfo: ax_keys[1]}: struct{}{},
+			},
+		},
 		{ID: "X",
 			Stored_down: map[ct.Stored]struct{}{
 				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".X", Tag: "x"}}: struct{}{},
@@ -123,7 +156,12 @@ func TestConftamer(t *testing.T) {
 				// full X-prefixed entries
 				ct.Stored{FieldInfo: full_keys[2]}: struct{}{},
 				ct.Stored{FieldInfo: full_keys[3]}: struct{}{},
-			}},
+			},
+			Stored_final: map[ct.Stored]struct{}{
+				ct.Stored{FieldInfo: ax_keys[2]}: struct{}{},
+				ct.Stored{FieldInfo: ax_keys[3]}: struct{}{},
+			},
+		},
 		{ID: "B",
 			Stored_down: map[ct.Stored]struct{}{
 				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".A.B", Tag: "a.b"}}: struct{}{},
@@ -135,7 +173,14 @@ func TestConftamer(t *testing.T) {
 				ct.Stored{FieldInfo: full_keys[1]}: struct{}{},
 				ct.Stored{FieldInfo: full_keys[2]}: struct{}{},
 				ct.Stored{FieldInfo: full_keys[3]}: struct{}{},
-			}},
+			},
+			Stored_final: map[ct.Stored]struct{}{
+				ct.Stored{FieldInfo: b_keys[0]}: struct{}{},
+				ct.Stored{FieldInfo: b_keys[1]}: struct{}{},
+				ct.Stored{FieldInfo: b_keys[2]}: struct{}{},
+				ct.Stored{FieldInfo: b_keys[3]}: struct{}{},
+			},
+		},
 		{ID: "C",
 			Stored_down: map[ct.Stored]struct{}{
 				// full C-postfixed entries
@@ -146,6 +191,10 @@ func TestConftamer(t *testing.T) {
 				// full C-postfixed entries (same as stored_down)
 				ct.Stored{FieldInfo: full_keys[0]}: struct{}{},
 				ct.Stored{FieldInfo: full_keys[2]}: struct{}{},
+			},
+			Stored_final: map[ct.Stored]struct{}{
+				ct.Stored{FieldInfo: cd_keys[0]}: struct{}{},
+				ct.Stored{FieldInfo: cd_keys[2]}: struct{}{},
 			},
 		},
 		{ID: "D",
@@ -159,8 +208,15 @@ func TestConftamer(t *testing.T) {
 				ct.Stored{FieldInfo: full_keys[1]}: struct{}{},
 				ct.Stored{FieldInfo: full_keys[3]}: struct{}{},
 			},
+			Stored_final: map[ct.Stored]struct{}{
+				ct.Stored{FieldInfo: cd_keys[1]}: struct{}{},
+				ct.Stored{FieldInfo: cd_keys[3]}: struct{}{},
+			},
 		},
 	}
+
+	expected_stored := []ct.TestNode{root}
+	expected_stored = append(expected_stored, rest...)
 
 	sortfunc := func(a, b ct.TestNode) int {
 		return cmp.Compare(a.ID, b.ID)
@@ -181,6 +237,9 @@ func TestConftamer(t *testing.T) {
 			}
 			if !reflect.DeepEqual(n.Stored_up, actual_stored[i].Stored_up) {
 				t.Logf("%v stored_up WRONG:\nExpected %v\nActual %v", n.ID, n.Stored_up, actual_stored[i].Stored_up)
+			}
+			if !reflect.DeepEqual(n.Stored_final, actual_stored[i].Stored_final) {
+				t.Logf("%v stored_final WRONG:\nExpected %v\nActual %v", n.ID, n.Stored_final, actual_stored[i].Stored_final)
 			}
 		}
 		t.Fatalf("Expected %v\nActual %v", expected_stored, actual_stored)

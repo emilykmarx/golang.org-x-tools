@@ -26,9 +26,10 @@ type FieldInfo struct {
 
 type CTypeNode struct {
 	// The rest of the info about the type
-	TypeInfo    types.TypeName
-	Stored_down map[Stored]struct{} // becomes irrelevant once entire push down pass is done
-	Stored_up   map[Stored]struct{}
+	TypeInfo     types.TypeName
+	Stored_down  map[Stored]struct{} // becomes irrelevant once entire push down pass is done
+	Stored_up    map[Stored]struct{}
+	Stored_final map[Stored]struct{}
 	// Field type => how this CType can access that type via its own fields
 	// (For fields that are also CTypes, there is one map entry for each edge to that type)
 	Children map[FullTypeName][]FieldInfo // Can be edge attr (unless leaf) - slice bc can hv multiple fields of same type
@@ -190,14 +191,35 @@ func pushDown(g CTypeGraph) error {
 	return nil
 }
 
+// Remove keys corresponding to nodes before n in path (if any).
+// Don't do this in-place in Stored_up, since parent needs this info
+func updateFieldKeys(n CTypeNode, stored Stored) Stored {
+	// XXX if node is inline, no corresponding key. Any other tag options to handle?
+	path_i := pathIdx(stored.Path, CTypeNodeHash(n))
+	if path_i == pathLen(stored.Path)-1 {
+		stored.FieldInfo.Field = "" // leaf
+	} else {
+		key_parts := strings.Split(stored.FieldInfo.Field, ".")
+		key_parts = key_parts[1:] // part[0] is "" due to leading "."
+		key := strings.Join(key_parts[path_i:], ".")
+		key = "." + key
+		stored.FieldInfo.Field = key
+	}
+
+	return stored
+}
+
 func pushUp(g CTypeGraph) error {
 	// parent and child are copies - return the new CHILD
 	// Initialize leaves (receive nothing pushed up)
 	initializeLeaves := func(parent CTypeNode, child CTypeNode) CTypeNode {
-		// Initialize leaf (receives nothing pushed up)
 		leaf := child.Stored_up == nil
 		if leaf {
 			child.Stored_up = child.Stored_down // all the info has been pushed down to leaves
+			child.Stored_final = make(map[Stored]struct{})
+			for stored := range child.Stored_up {
+				child.Stored_final[updateFieldKeys(child, stored)] = struct{}{}
+			}
 		}
 
 		return child
@@ -210,12 +232,17 @@ func pushUp(g CTypeGraph) error {
 			parent.Stored_up = make(map[Stored]struct{})
 			// Could clear out parent.Stored_down at this point too (all the relevant info is coming up from the leaves now)
 		}
+		if parent.Stored_final == nil {
+			parent.Stored_final = make(map[Stored]struct{})
+		}
 
 		for child_stored := range child.Stored_up {
 			// CHILD: Send all stored only if parent is parent in corresponding path
-			// PARENT: Remove field keys corresponding to types before me in path, add to stored
 			if pathParent(child_stored.Path, CTypeNodeHash(child)) == CTypeNodeHash(parent) {
+				// PARENT: Remove field keys corresponding to types before me in path, add to stored_final
+				// (separate from stored_up since parent needs the removed keys)
 				parent.Stored_up[child_stored] = struct{}{}
+				parent.Stored_final[updateFieldKeys(parent, child_stored)] = struct{}{}
 			}
 		}
 
@@ -247,11 +274,10 @@ func GetCTypeParams(g CTypeGraph) error {
 	}
 
 	// 2. PUSH UP: Push full param keys and field keys all the way up
+	// Also clip irrelevant parts of field keys (roots need all, leaves need none)
 	err = pushUp(g)
 	if err != nil {
 		return err
 	}
-	// 3. Clip irrelevant parts of field keys(roots need all, leaves need none), output result
-	// LEFT OFF do  3
 	return nil
 }
