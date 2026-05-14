@@ -37,6 +37,28 @@ references-flags:
 	printFlagDefaults(f)
 }
 
+func locStrToRefParams(ctx context.Context, locstr string, cli *client, includeDecl bool) (*protocol.ReferenceParams, error) {
+	from := parseSpan(locstr)
+	file, err := cli.openFile(ctx, from.URI())
+	if err != nil {
+		return nil, err
+	}
+
+	loc, err := file.spanLocation(from)
+	if err != nil {
+		return nil, err
+	}
+
+	p := protocol.ReferenceParams{
+		Context: protocol.ReferenceContext{
+			IncludeDeclaration: includeDecl,
+		},
+		TextDocumentPositionParams: protocol.LocationTextDocumentPositionParams(loc),
+	}
+
+	return &p, nil
+}
+
 func (r *references) Run(ctx context.Context, args ...string) error {
 	if len(args) != 1 {
 		return tool.CommandLineErrorf("references expects 1 argument (position)")
@@ -48,22 +70,12 @@ func (r *references) Run(ctx context.Context, args ...string) error {
 	}
 	defer cli.terminate(ctx)
 
-	from := parseSpan(args[0])
-	file, err := cli.openFile(ctx, from.URI())
+	p, err := locStrToRefParams(ctx, args[0], cli, r.IncludeDeclaration)
 	if err != nil {
 		return err
 	}
-	loc, err := file.spanLocation(from)
-	if err != nil {
-		return err
-	}
-	p := protocol.ReferenceParams{
-		Context: protocol.ReferenceContext{
-			IncludeDeclaration: r.IncludeDeclaration,
-		},
-		TextDocumentPositionParams: protocol.LocationTextDocumentPositionParams(loc),
-	}
-	locations, err := cli.server.References(ctx, &p)
+
+	locations, err := cli.server.References(ctx, p)
 	if err != nil {
 		return err
 	}

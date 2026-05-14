@@ -61,7 +61,7 @@ func IncomingCalls(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle
 	ctx, done := event.Start(ctx, "golang.IncomingCalls")
 	defer done()
 
-	refs, err := references(ctx, snapshot, fh, rng, false)
+	refs, _, err := references(ctx, snapshot, fh, rng, false)
 	if err != nil {
 		if errors.Is(err, ErrNoIdentFound) || errors.Is(err, errNoObjectFound) {
 			return nil, nil

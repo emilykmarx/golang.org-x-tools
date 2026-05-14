@@ -43,7 +43,7 @@ import (
 // definitions before uses) to the object denoted by the identifier at
 // the given file/position, searching the entire workspace.
 func References(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range, includeDeclaration bool) ([]protocol.Location, error) {
-	references, err := references(ctx, snapshot, fh, rng, includeDeclaration)
+	references, _, err := references(ctx, snapshot, fh, rng, includeDeclaration)
 	if err != nil {
 		return nil, err
 	}
@@ -52,6 +52,18 @@ func References(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, r
 		locations[i] = ref.location
 	}
 	return locations, nil
+}
+
+func ReferencesMoreInfo(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range, includeDeclaration bool) ([]protocol.Location, []Implementer, error) {
+	references, structs, err := references(ctx, snapshot, fh, rng, includeDeclaration)
+	if err != nil {
+		return nil, nil, err
+	}
+	locations := make([]protocol.Location, len(references))
+	for i, ref := range references {
+		locations[i] = ref.location
+	}
+	return locations, structs, nil
 }
 
 // A reference describes an identifier that refers to the same
@@ -65,24 +77,25 @@ type reference struct {
 // references returns a list of all references (sorted with
 // definitions before uses) to the object denoted by the identifier at
 // the given file/position, searching the entire workspace.
-func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rng protocol.Range, includeDeclaration bool) ([]reference, error) {
+func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rng protocol.Range, includeDeclaration bool) ([]reference, []Implementer, error) {
 	ctx, done := event.Start(ctx, "golang.references")
 	defer done()
 
 	// Is the cursor within the package name declaration?
 	_, inPackageName, err := parsePackageNameDecl(ctx, snapshot, f, rng)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var refs []reference
+	var structs []Implementer
 	if inPackageName {
 		refs, err = packageReferences(ctx, snapshot, f.URI())
 	} else {
-		refs, err = ordinaryReferences(ctx, snapshot, f.URI(), rng)
+		refs, structs, err = ordinaryReferences(ctx, snapshot, f.URI(), rng)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	sort.Slice(refs, func(i, j int) bool {
@@ -105,7 +118,7 @@ func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rn
 	}
 	refs = out
 
-	return refs, nil
+	return refs, structs, nil
 }
 
 // packageReferences returns a list of references to the package
@@ -215,7 +228,7 @@ func packageReferences(ctx context.Context, snapshot *cache.Snapshot, uri protoc
 }
 
 // ordinaryReferences computes references for all ordinary objects (not package declarations).
-func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, rng protocol.Range) ([]reference, error) {
+func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, rng protocol.Range) ([]reference, []Implementer, error) {
 	// Strategy: use the reference information computed by the
 	// type checker to find the declaration. First type-check this
 	// package to find the declaration, then type check the
@@ -229,20 +242,20 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 	// package reports the more broadly referenced object.
 	pkg, pgf, err := NarrowestPackageForFile(ctx, snapshot, uri)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Find the selected object (declaration or reference).
 	// For struct{T}, we choose the field (Def) over the type (Use).
 	start, end, err := pgf.RangePos(rng)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cur, _ := pgf.Cursor().FindByPos(start, end) // can't fail
 
 	candidates, err := objectsAt(pkg.TypesInfo(), cur)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Pick first object arbitrarily.
 	// The case variables of a type switch have different
@@ -251,7 +264,7 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 
 	// nil, error, error.Error, iota, or other built-in?
 	if isBuiltin(obj) {
-		return nil, fmt.Errorf("references to builtin %q are not supported", obj.Name())
+		return nil, nil, fmt.Errorf("references to builtin %q are not supported", obj.Name())
 	}
 
 	// Find metadata of all packages containing the object's defining file.
@@ -260,10 +273,10 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 	declURI := protocol.URIFromPath(declPosn.Filename)
 	variants, err := snapshot.MetadataForFile(ctx, declURI, false)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(variants) == 0 {
-		return nil, fmt.Errorf("no packages for file %q", declURI) // can't happen
+		return nil, nil, fmt.Errorf("no packages for file %q", declURI) // can't happen
 	}
 	// (variants must include ITVs for reverse dependency computation below.)
 
@@ -286,7 +299,7 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 		// We restrict references to this subset.
 		workspace, err := snapshot.WorkspaceMetadata(ctx)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		workspaceMap := make(map[PackageID]*metadata.Package, len(workspace))
 		workspaceIDs := make([]PackageID, 0, len(workspace))
@@ -333,7 +346,7 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 		// combining the metadata graph traversals.)
 		for _, mp := range variants {
 			if err := addRdeps(mp.ID, transitive); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
@@ -348,17 +361,18 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 		// such types.
 		if recv := effectiveReceiver(obj); recv != nil {
 			if err := expandMethodSearch(ctx, snapshot, workspaceIDs, obj.(*types.Func), recv, addRdeps, globalTargets, expansions); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 	}
 
-	// The search functions will call report(loc) for each hit.
+	// The search functions will call report(loc) for each hit, passing parent_struct_name if loc is of a use in a struct
 	var (
-		refsMu sync.Mutex
-		refs   []reference
+		refsMu         sync.Mutex
+		refs           []reference
+		parent_structs []Implementer
 	)
-	report := func(loc protocol.Location, isDecl bool) {
+	report := func(loc protocol.Location, parent_struct *Implementer, isDecl bool) {
 		ref := reference{
 			isDeclaration: isDecl,
 			location:      loc,
@@ -366,6 +380,9 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 		}
 		refsMu.Lock()
 		refs = append(refs, ref)
+		if parent_struct != nil {
+			parent_structs = append(parent_structs, *parent_struct)
+		}
 		refsMu.Unlock()
 	}
 
@@ -424,7 +441,8 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 			// Report the locations of the declaration(s).
 			// TODO(adonovan): what about for corresponding methods? Add tests.
 			for _, o := range objects {
-				report(mustLocation(pgf, o.cur.Node()), true)
+				// This is the declaration, so no parent struct
+				report(mustLocation(pgf, o.cur.Node()), nil, true)
 			}
 
 			// Convert objects list to targets set.
@@ -468,7 +486,8 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 		})
 	}
 
-	// Compute global references for selected reverse dependencies.
+	// Compute global references for selected reverse dependencies,
+	// i.e. references in a package other than the declaring one
 	group.Go(func() error {
 		var globalIDs []PackageID
 		for id := range globalScope {
@@ -480,16 +499,35 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 		}
 		for _, index := range indexes {
 			for _, loc := range index.Lookup(globalTargets) {
-				report(loc, false)
+				ref_pkg, ref_pgf, ref_cursor, err := locToCursor(ctx, snapshot, loc)
+				if err != nil {
+					return err
+				}
+				parent_struct := enclosingStruct(ref_pkg, ref_pgf, *ref_cursor)
+				report(loc, parent_struct, false)
 			}
 		}
 		return nil
 	})
 
 	if err := group.Wait(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return refs, nil
+	return refs, parent_structs, nil
+}
+
+func locToCursor(ctx context.Context, snapshot *cache.Snapshot, loc protocol.Location) (*cache.Package, *parsego.File, *inspector.Cursor, error) {
+	pkg, pgf, err := NarrowestPackageForFile(ctx, snapshot, loc.URI)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	start, end, err := pgf.RangePos(loc.Range)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	cur, _ := pgf.Cursor().FindByPos(start, end) // can't fail
+	return pkg, pgf, &cur, nil
 }
 
 // expandMethodSearch expands the scope and targets of a global search
@@ -562,7 +600,7 @@ func expandMethodSearch(ctx context.Context, snapshot *cache.Snapshot, workspace
 // localReferences traverses syntax and reports each reference to one
 // of the target objects, or (if correspond is set) an object that
 // corresponds to one of them via interface satisfaction.
-func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspond bool, report func(loc protocol.Location, isDecl bool)) error {
+func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspond bool, report func(loc protocol.Location, parent_struct *Implementer, isDecl bool)) error {
 	// If we're searching for references to a method optionally
 	// broaden the search to include references to corresponding
 	// methods of mutually assignable receiver types.
@@ -614,10 +652,34 @@ func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspo
 				continue
 			}
 			if obj, ok := pkg.TypesInfo().Uses[id]; ok && matches(obj) {
-				report(mustLocation(pgf, id), false)
+				// Found a use
+				parent_struct := enclosingStruct(pkg, pgf, curId)
+				report(mustLocation(pgf, id), parent_struct, false)
 			}
 		}
 	}
+	return nil
+}
+
+// Find the struct enclosing the node, if any
+func enclosingStruct(pkg *cache.Package, pgf *parsego.File, curId inspector.Cursor) *Implementer {
+	for struct_type_cursor := range curId.Enclosing((*ast.StructType)(nil)) {
+		// Assumes the parent node of a StructType is always the TypeSpec -
+		// not true for anonymous structs, maybe others?
+		struct_type_spec_node := struct_type_cursor.Parent().Node()
+		struct_type_spec, ok := struct_type_spec_node.(*ast.TypeSpec)
+		if !ok {
+			match_loc := mustLocation(pgf, curId.Node().(*ast.Ident))
+			fmt.Printf("Found enclosing struct for field at %+v (0-indexed) but parent is not a TypeSpec - anonymous struct?\n", match_loc)
+			return nil
+		}
+		struct_loc := mustLocation(pgf, struct_type_spec)
+		parent_struct_name := struct_type_spec.Name.Name
+		// TypeSpec location start is struct name and end is the closing brace => move end back to start so it's within the name
+		struct_loc.Range.End = struct_loc.Range.Start
+		return &Implementer{Loc: struct_loc, TypeName: parent_struct_name, PkgPath: pkg.Metadata().PkgPath}
+	}
+
 	return nil
 }
 
