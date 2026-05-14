@@ -63,19 +63,21 @@ func TestConftamer(t *testing.T) {
 	defer fd.Close()
 	module_path, err = filepath.Abs(module_path)
 	require.NoError(t, err)
-	module_parts := strings.Split(module_path, ".")
-	test_pkg := strings.Join(module_parts[:3], ".")
-	module_prefix := "command-line-arguments" + test_pkg + "." // for pretty-print
 
 	module_src, err := io.ReadAll(fd)
 	require.NoError(t, err)
-	tree := writeTree(t, string(module_src))
-	// If change testdata, may need to update this lineno accordingly
-	// See comment in testdata file for why we pass -u (hack for testing)
-	unmarshal_lineno := 12
-	u_flag := fmt.Sprintf("%v:%v:3", module_path, unmarshal_lineno)
+
+	module_src_prefix := `
+-- go.mod --
+module example.com
+go 1.18
+
+-- a/a.go --
+	`
+	// Full name of package of stuff in a/a.go is example.com/a (despite the package directive in the testdata)
+	tree := writeTree(t, module_src_prefix+string(module_src))
 	// Need to print res.stderr/out to see it, unless checkExit fails
-	res := gopls(t, tree, "conftamer", "-u", u_flag, "-m", module_prefix)
+	res := gopls(t, tree, "conftamer", "-m", "example.com/")
 	res.checkExit(true)
 	fmt.Println(res.stderr)
 	fmt.Println(res.stdout)

@@ -7,11 +7,6 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-// Hack for testing (implementing the real interface doesn't work in test framework) - test hardcodes this line number
-type Unmarshaler interface {
-	UnmarshalYAML(unmarshal func(interface{}) error) error
-}
-
 /* CTypes graph with multiple leaves, multiple paths to each leaf */
 
 type Root struct {
