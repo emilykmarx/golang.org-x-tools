@@ -711,7 +711,7 @@ func cursorToTypeInfo(target_node ast.Node, subtree inspector.Cursor, pkg *cache
 		return nil, fmt.Errorf("cursorToTypeInfo - err getting object: %v", err.Error())
 	}
 	if len(objs) != 1 {
-		// shouldn't happen?
+		// only happens in switch
 		return nil, fmt.Errorf("cursorToTypeInfo - %v objects, expected one", len(objs))
 	}
 	typeinfo, ok := objs[0].obj.(*types.TypeName)

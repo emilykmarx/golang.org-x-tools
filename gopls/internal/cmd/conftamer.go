@@ -131,9 +131,9 @@ func getChildFieldCTypes(ctx context.Context, cli *client, local_server *server.
 			return nil, fmt.Errorf("locStrToDefnParams: %v", err.Error())
 		}
 
-		field_ctypes, err := local_server.StructFieldTypeObjs(ctx, p)
+		field_ctypes, err := local_server.EnclosedTypes(ctx, p)
 		if err != nil {
-			return nil, fmt.Errorf("StructFieldTypeObjs: %v", err.Error())
+			return nil, fmt.Errorf("EnclosedTypes: %v", err.Error())
 		}
 		new_child_ctypes, err := cTypeLocsToSpans(ctx, cli, field_ctypes)
 		if err != nil {

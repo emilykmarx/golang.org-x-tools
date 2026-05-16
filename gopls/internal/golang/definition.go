@@ -218,52 +218,61 @@ func DefinitionMoreInfo(ctx context.Context, snapshot *cache.Snapshot, fh file.H
 	return []protocol.Location{loc}, &obj, nil
 }
 
-// Assume target is a struct and find info on the types of its fields.
-// rng should be somewhere in the identifier of the type name
-func StructFieldTypes(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]Implementer, error) {
-	// translate given loc to the struct type decl
-	struct_loc, _, err := DefinitionMoreInfo(ctx, snapshot, fh, rng)
+// Find info on any types enclosed in the passed type (e.g. types of the fields enclosed in a struct).
+// rng should be somewhere in the identifier of the type name.
+func EnclosedTypes(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]Implementer, error) {
+	// translate given loc to the type decl
+	struct_loc, err := TypeDefinition(ctx, snapshot, fh, rng)
 	if err != nil {
 		return nil, err
 	}
 	if len(struct_loc) != 1 {
-		return nil, fmt.Errorf("StructFieldTypes call to DefinitionMoreInfo returned wrong number of locs %v", len(struct_loc))
+		return nil, fmt.Errorf("EnclosedTypes call to DefinitionMoreInfo returned wrong number of locs %v", len(struct_loc))
 	}
-	return StructFieldTypeObjs(ctx, snapshot, struct_loc[0])
+	return EnclosedTypeObjs(ctx, snapshot, struct_loc[0])
 }
 
-// For each struct field's TYPE: get the type's object and some location of the type identifier
-// struct_loc must be identifier of struct name in struct decl
-func StructFieldTypeObjs(ctx context.Context, snapshot *cache.Snapshot, struct_loc protocol.Location) ([]Implementer, error) {
+// For each type enclosed in the passed type:
+// get the type's object and some location of the type identifier.
+// decl_name must be identifier of type name in the enclosing type decl
+func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name protocol.Location) ([]Implementer, error) {
 	// (obj.cur in DefinitionMoreInfo is cursor of identifier passed to Definition, not of declaration)
-	pkg, pgf, struct_cursor, err := locToCursor(ctx, snapshot, struct_loc)
+	pkg, pgf, parent_cursor, err := locToCursor(ctx, snapshot, decl_name)
 	if err != nil {
-		return nil, fmt.Errorf("StructFieldTypeObjs: err from locToCursor %v", err.Error())
+		return nil, fmt.Errorf("EnclosedTypeObjs: err from locToCursor %v", err.Error())
 	}
+	parent_type_name := parent_cursor.Node().(*ast.Ident).Name
 
-	parent := struct_cursor.Parent().Node()
+	parent := parent_cursor.Parent().Node()
 	if _, ok := parent.(*ast.TypeSpec); !ok {
 		// will this ever happen?
-		return nil, fmt.Errorf("StructFieldTypeObjs called on identifier that is not child of TypeSpec")
+		return nil, fmt.Errorf("EnclosedTypeObjs called on identifier that is not child of TypeSpec")
 	}
 
-	// struct_cursor is identifier of struct name in struct decl
-	// Its parent is struct TypeSpec
-	// All fields are descendants of the TypeSpec
-	field_types := []Implementer{}
-	for field_cursor := range struct_cursor.Parent().Preorder((*ast.Field)(nil)) {
-		field_node := field_cursor.Node()
-		field_type := field_node.(*ast.Field).Type.(*ast.Ident) // identifier of field type name
-		field_typeinfo, err := cursorToTypeInfo(field_type, struct_cursor.Parent(), pkg)
-		if err != nil {
-			return nil, err
+	// parent_cursor is identifier of type name in type decl
+	// Its parent is TypeSpec
+	// All subtypes are descendants of the TypeSpec
+	child_types := []Implementer{}
+	for child_cursor := range parent_cursor.Parent().Preorder((*ast.Ident)(nil)) {
+		child_node := child_cursor.Node().(*ast.Ident)
+		if child_node.Name == parent_type_name {
+			// The parent itself
+			continue
 		}
 
-		field_type_loc := mustLocation(pgf, field_type)
-		field_types = append(field_types, Implementer{Loc: field_type_loc, TypeInfo: field_typeinfo})
+		// identifier - check if it's of a type name
+		child_typeinfo, err := cursorToTypeInfo(child_node, parent_cursor.Parent(), pkg)
+		if err != nil {
+			// Not a type name
+			// TODO (conftamer) (minor) Some of these errors may be actual errors
+			continue
+		}
+
+		child_type_loc := mustLocation(pgf, child_node)
+		child_types = append(child_types, Implementer{Loc: child_type_loc, TypeInfo: child_typeinfo})
 	}
 
-	return field_types, nil
+	return child_types, nil
 }
 
 // builtinDecl returns the parsed Go file and node corresponding to a builtin

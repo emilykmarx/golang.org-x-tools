@@ -75,7 +75,7 @@ func (s *Server) DefinitionMoreInfo(ctx context.Context, params *protocol.Defini
 	}
 }
 
-func (s *Server) StructFieldTypeObjs(ctx context.Context, params *protocol.DefinitionParams) (_ []golang.Implementer, rerr error) {
+func (s *Server) EnclosedTypes(ctx context.Context, params *protocol.DefinitionParams) (_ []golang.Implementer, rerr error) {
 	recordLatency := telemetry.StartLatencyTimer("definition")
 	defer func() {
 		recordLatency(ctx, rerr)
@@ -91,7 +91,7 @@ func (s *Server) StructFieldTypeObjs(ctx context.Context, params *protocol.Defin
 	defer release()
 	switch kind := snapshot.FileKind(fh); kind {
 	case file.Go:
-		return golang.StructFieldTypes(ctx, snapshot, fh, params.Range)
+		return golang.EnclosedTypes(ctx, snapshot, fh, params.Range)
 	default:
 		return nil, fmt.Errorf("can't find struct field types for file type %s", kind)
 	}
