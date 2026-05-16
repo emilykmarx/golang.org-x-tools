@@ -503,7 +503,10 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 				if err != nil {
 					return err
 				}
-				parent_struct := enclosingStruct(ref_pkg, ref_pgf, *ref_cursor)
+				parent_struct, err := enclosingStruct(ref_pkg, ref_pgf, *ref_cursor)
+				if err != nil {
+					return err
+				}
 				report(loc, parent_struct, false)
 			}
 		}
@@ -653,7 +656,10 @@ func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspo
 			}
 			if obj, ok := pkg.TypesInfo().Uses[id]; ok && matches(obj) {
 				// Found a use
-				parent_struct := enclosingStruct(pkg, pgf, curId)
+				parent_struct, err := enclosingStruct(pkg, pgf, curId)
+				if err != nil {
+					return err
+				}
 				report(mustLocation(pgf, id), parent_struct, false)
 			}
 		}
@@ -661,26 +667,58 @@ func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspo
 	return nil
 }
 
-// Find the struct enclosing the node, if any
-func enclosingStruct(pkg *cache.Package, pgf *parsego.File, curId inspector.Cursor) *Implementer {
+// Find the struct enclosing the identifier node given by curId, if any
+func enclosingStruct(pkg *cache.Package, pgf *parsego.File, curId inspector.Cursor) (*Implementer, error) {
+	field_name := curId.Node().(*ast.Ident).Name
+	field_loc := mustLocation(pgf, curId.Node().(*ast.Ident))
+	err_str := fmt.Sprintf("enclosing struct for field name %v at %+v (0-indexed)", field_name, field_loc)
+
 	for struct_type_cursor := range curId.Enclosing((*ast.StructType)(nil)) {
+		// Found parent struct => get its info
+
 		// Assumes the parent node of a StructType is always the TypeSpec -
 		// not true for anonymous structs, maybe others?
-		struct_type_spec_node := struct_type_cursor.Parent().Node()
-		struct_type_spec, ok := struct_type_spec_node.(*ast.TypeSpec)
+		struct_type_spec_cursor := struct_type_cursor.Parent()
+		struct_type_spec, ok := struct_type_spec_cursor.Node().(*ast.TypeSpec)
 		if !ok {
-			match_loc := mustLocation(pgf, curId.Node().(*ast.Ident))
-			fmt.Printf("Found enclosing struct for field at %+v (0-indexed) but parent is not a TypeSpec - anonymous struct?\n", match_loc)
-			return nil
+			fmt.Printf("Found " + err_str + " but parent is not a TypeSpec - anonymous struct?\n")
+			return nil, nil // not an error (assuming this only happens for anonymous structs)
 		}
+
+		parent_typeinfo, err := cursorToTypeInfo(struct_type_spec.Name, struct_type_cursor.Parent(), pkg)
+		if err != nil {
+			return nil, err
+		}
+
 		struct_loc := mustLocation(pgf, struct_type_spec)
-		parent_struct_name := struct_type_spec.Name.Name
 		// TypeSpec location start is struct name and end is the closing brace => move end back to start so it's within the name
 		struct_loc.Range.End = struct_loc.Range.Start
-		return &Implementer{Loc: struct_loc, TypeName: parent_struct_name, PkgPath: pkg.Metadata().PkgPath}
+
+		return &Implementer{Loc: struct_loc, TypeInfo: parent_typeinfo}, nil
 	}
 
-	return nil
+	return nil, nil // no enclosing struct
+}
+
+// Assuming target is in subtree and is the identifier of a type, find its type info.
+func cursorToTypeInfo(target_node ast.Node, subtree inspector.Cursor, pkg *cache.Package) (*types.TypeName, error) {
+	target_cursor, ok := subtree.FindNode(target_node) // convert to cursor
+	if !ok {
+		return nil, fmt.Errorf("cursorToTypeInfo - couldn't find target cursor")
+	}
+	objs, err := objectsAt(pkg.TypesInfo(), target_cursor)
+	if err != nil {
+		return nil, fmt.Errorf("cursorToTypeInfo - err getting object: %v", err.Error())
+	}
+	if len(objs) != 1 {
+		// shouldn't happen?
+		return nil, fmt.Errorf("cursorToTypeInfo - %v objects, expected one", len(objs))
+	}
+	typeinfo, ok := objs[0].obj.(*types.TypeName)
+	if !ok {
+		return nil, fmt.Errorf("cursorToTypeInfo - obj %+v is not a type", objs[0].obj)
+	}
+	return typeinfo, nil
 }
 
 // effectiveReceiver returns the effective receiver type for method-set

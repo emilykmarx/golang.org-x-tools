@@ -42,28 +42,25 @@ func (a *Stored) UnmarshalText(text []byte) error {
 }
 
 // If !all, just print <package.type>
-// Remove cutprefix from type when printing
+// Remove cutprefix from type when printing and storing test logs
 // Prints depth-first starting from each root (so each CType will be printed once for every root it's reachable from)
-func PrettyPrint(g CTypeGraph, all bool, cutprefix string) error {
+func PrettyPrint(g CTypeGraph, cutprefix string) error {
 	all_nodes := []TestNode{}
 	var visit_err error
 	err := graph.DFSAllStartingNodes(g, func(n FullTypeName) bool {
-		if !all {
-			short_name, _ := strings.CutPrefix(string(n), cutprefix)
-			fmt.Printf("%v\n", short_name)
-		} else {
-			node, err := g.Vertex(n)
-			if err != nil {
-				visit_err = err
-			}
-
-			all_nodes = append(all_nodes, TestNode{
-				ID:           node.TypeInfo.Name(),
-				Stored_down:  node.Stored_down,
-				Stored_up:    node.Stored_up,
-				Stored_final: node.Stored_final,
-			})
+		short_name, _ := strings.CutPrefix(string(n), cutprefix)
+		fmt.Printf("%v\n", short_name)
+		node, err := g.Vertex(n)
+		if err != nil {
+			visit_err = err
 		}
+
+		all_nodes = append(all_nodes, TestNode{
+			ID:           short_name,
+			Stored_down:  node.Stored_down,
+			Stored_up:    node.Stored_up,
+			Stored_final: node.Stored_final,
+		})
 		return false // continue
 	}, graph.UpdatePathVertices[CTypeNode]{}, true, true, graph.Forwards)
 
@@ -71,25 +68,23 @@ func PrettyPrint(g CTypeGraph, all bool, cutprefix string) error {
 		return err
 	}
 
-	if all {
-		marshaled, err := json.Marshal(all_nodes)
-		if err != nil {
-			return err
-		}
-		// Need to write in this fancy way for test to be able to unmarshal it
-		var buf bytes.Buffer
-		buf.Write(marshaled)
-		outfile := "stored.log"
-		f, err := os.Create(outfile)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		_, err = io.Copy(f, &buf)
+	marshaled, err := json.Marshal(all_nodes)
+	if err != nil {
+		return err
+	}
+	// Need to write in this fancy way for test to be able to unmarshal it
+	var buf bytes.Buffer
+	buf.Write(marshaled)
+	outfile := "stored.log"
+	f, err := os.Create(outfile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(f, &buf)
 
-		if err != nil {
-			return err
-		}
+	if err != nil {
+		return err
 	}
 
 	return nil

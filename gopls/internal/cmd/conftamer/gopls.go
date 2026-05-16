@@ -8,7 +8,7 @@ import (
 
 /* Utilities for interacting with info from gopls */
 
-func typeName(type_info *types.TypeName) FullTypeName {
+func TypeName(type_info *types.TypeName) FullTypeName {
 	return FullTypeName(type_info.Pkg().Path() + "." + type_info.Name())
 }
 

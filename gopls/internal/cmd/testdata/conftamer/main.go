@@ -7,56 +7,37 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-/* CTypes graph with multiple leaves, multiple paths to each leaf */
+/* CTypes graph with multiple leaves, multiple paths to each leaf.
+A type in the middle of the graph implements UnmarshalYAML.
+XXX struct tags, fields that are ptr/[] */
 
 type Root struct {
-	A A
-	X X
+	A_field A
+	X_field X
 }
 type A struct {
-	B B
+	B_field B
 }
 type X struct {
-	B B
+	B_field B
 }
 type B struct {
-	C C
-	D D
+	C_field C
+	D_field D
 }
 type C string
 type D string
 
-func (c *Root) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	*c = Root{}
-	type plain Root
-	return unmarshal((*plain)(c))
-}
 func (c *A) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	*c = A{}
 	type plain A
 	return unmarshal((*plain)(c))
 }
-func (c *X) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	*c = X{}
-	type plain X
-	return unmarshal((*plain)(c))
-}
-func (c *B) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	*c = B{}
-	type plain B
-	return unmarshal((*plain)(c))
-}
-func (c *C) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	return unmarshal((*string)(c))
-}
-func (c *D) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	return unmarshal((*string)(c))
-}
 
 // Here for convenience for now
 func main() {
-	b := B{C: "val", D: "val"}
-	a := Root{A: A{B: b}, X: X{B: b}}
+	b := B{C_field: "val", D_field: "val"}
+	a := Root{A_field: A{B_field: b}, X_field: X{B_field: b}}
 
 	unmarshaled, err := yaml.Marshal(a)
 	if err != nil {

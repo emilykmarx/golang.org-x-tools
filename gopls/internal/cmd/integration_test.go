@@ -54,69 +54,40 @@ import (
 	"golang.org/x/tools/txtar"
 )
 
-// TestConftamer tests the 'conftamer' subcommand (conftamer.go).
-func TestConftamer(t *testing.T) {
-	t.Parallel()
-	module_path := "./testdata/conftamer/main.go"
-	fd, err := os.Open(module_path)
-	require.NoError(t, err)
-	defer fd.Close()
-	module_path, err = filepath.Abs(module_path)
-	require.NoError(t, err)
+// TestConftamer* tests the 'conftamer' subcommand (conftamer.go).
 
-	module_src, err := io.ReadAll(fd)
-	require.NoError(t, err)
-
-	module_src_prefix := `
--- go.mod --
-module example.com
-go 1.18
-
--- a/a.go --
-	`
-	// Full name of package of stuff in a/a.go is example.com/a (despite the package directive in the testdata)
-	tree := writeTree(t, module_src_prefix+string(module_src))
-	// Need to print res.stderr/out to see it, unless checkExit fails
-	res := gopls(t, tree, "conftamer", "-m", "example.com/")
-	res.checkExit(true)
-	fmt.Println(res.stderr)
-	fmt.Println(res.stdout)
-
-	// CHECK OUTPUT
-	actual_stored := []ct.TestNode{}
-	stored_down_file := filepath.Join(tree, "stored.log")
-	fileToJSON(t, &actual_stored, stored_down_file)
+func TestConftamerFields(t *testing.T) {
 	full_keys := []ct.FieldInfo{
 		// A-prefixed
-		ct.FieldInfo{Field: ".A.B.C", Tag: "a.b.c"}, // C-postfixed
-		ct.FieldInfo{Field: ".A.B.D", Tag: "a.b.d"}, // D-postfixed
+		ct.FieldInfo{Field: ".A_field.B_field.C_field", Tag: "a_field.b_field.c_field"}, // C-postfixed
+		ct.FieldInfo{Field: ".A_field.B_field.D_field", Tag: "a_field.b_field.d_field"}, // D-postfixed
 		// X-prefixed
-		ct.FieldInfo{Field: ".X.B.C", Tag: "x.b.c"}, // C-postfixed
-		ct.FieldInfo{Field: ".X.B.D", Tag: "x.b.d"}, // D-postfixed
+		ct.FieldInfo{Field: ".X_field.B_field.C_field", Tag: "x_field.b_field.c_field"}, // C-postfixed
+		ct.FieldInfo{Field: ".X_field.B_field.D_field", Tag: "x_field.b_field.d_field"}, // D-postfixed
 	}
 	ax_keys := []ct.FieldInfo{
 		// A-prefixed
-		ct.FieldInfo{Field: ".B.C", Tag: "a.b.c"}, // C-postfixed
-		ct.FieldInfo{Field: ".B.D", Tag: "a.b.d"}, // D-postfixed
+		ct.FieldInfo{Field: ".B_field.C_field", Tag: "a_field.b_field.c_field"}, // C-postfixed
+		ct.FieldInfo{Field: ".B_field.D_field", Tag: "a_field.b_field.d_field"}, // D-postfixed
 		// X-prefixed
-		ct.FieldInfo{Field: ".B.C", Tag: "x.b.c"}, // C-postfixed
-		ct.FieldInfo{Field: ".B.D", Tag: "x.b.d"}, // D-postfixed
+		ct.FieldInfo{Field: ".B_field.C_field", Tag: "x_field.b_field.c_field"}, // C-postfixed
+		ct.FieldInfo{Field: ".B_field.D_field", Tag: "x_field.b_field.d_field"}, // D-postfixed
 	}
 	b_keys := []ct.FieldInfo{
 		// A-prefixed
-		ct.FieldInfo{Field: ".C", Tag: "a.b.c"}, // C-postfixed
-		ct.FieldInfo{Field: ".D", Tag: "a.b.d"}, // D-postfixed
+		ct.FieldInfo{Field: ".C_field", Tag: "a_field.b_field.c_field"}, // C-postfixed
+		ct.FieldInfo{Field: ".D_field", Tag: "a_field.b_field.d_field"}, // D-postfixed
 		// X-prefixed
-		ct.FieldInfo{Field: ".C", Tag: "x.b.c"}, // C-postfixed
-		ct.FieldInfo{Field: ".D", Tag: "x.b.d"}, // D-postfixed
+		ct.FieldInfo{Field: ".C_field", Tag: "x_field.b_field.c_field"}, // C-postfixed
+		ct.FieldInfo{Field: ".D_field", Tag: "x_field.b_field.d_field"}, // D-postfixed
 	}
 	cd_keys := []ct.FieldInfo{
 		// A-prefixed
-		ct.FieldInfo{Field: "", Tag: "a.b.c"}, // C-postfixed
-		ct.FieldInfo{Field: "", Tag: "a.b.d"}, // D-postfixed
+		ct.FieldInfo{Field: "", Tag: "a_field.b_field.c_field"}, // C-postfixed
+		ct.FieldInfo{Field: "", Tag: "a_field.b_field.d_field"}, // D-postfixed
 		// X-prefixed
-		ct.FieldInfo{Field: "", Tag: "x.b.c"}, // C-postfixed
-		ct.FieldInfo{Field: "", Tag: "x.b.d"}, // D-postfixed
+		ct.FieldInfo{Field: "", Tag: "x_field.b_field.c_field"}, // C-postfixed
+		ct.FieldInfo{Field: "", Tag: "x_field.b_field.d_field"}, // D-postfixed
 	}
 
 	root := ct.TestNode{
@@ -137,8 +108,8 @@ go 1.18
 	rest := []ct.TestNode{
 		{ID: "A",
 			Stored_down: map[ct.Stored]struct{}{
-				// Root pushes A ".A => `a`"
-				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".A", Tag: "a"}}: struct{}{},
+				// Root pushes A ".A_field => `a`"
+				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".A_field", Tag: "a_field"}}: struct{}{},
 			},
 			Stored_up: map[ct.Stored]struct{}{
 				// full A-prefixed entries
@@ -152,7 +123,7 @@ go 1.18
 		},
 		{ID: "X",
 			Stored_down: map[ct.Stored]struct{}{
-				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".X", Tag: "x"}}: struct{}{},
+				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".X_field", Tag: "x_field"}}: struct{}{},
 			},
 			Stored_up: map[ct.Stored]struct{}{
 				// full X-prefixed entries
@@ -166,8 +137,8 @@ go 1.18
 		},
 		{ID: "B",
 			Stored_down: map[ct.Stored]struct{}{
-				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".A.B", Tag: "a.b"}}: struct{}{},
-				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".X.B", Tag: "x.b"}}: struct{}{},
+				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".A_field.B_field", Tag: "a_field.b_field"}}: struct{}{},
+				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".X_field.B_field", Tag: "x_field.b_field"}}: struct{}{},
 			},
 			Stored_up: map[ct.Stored]struct{}{
 				// all entries
@@ -220,6 +191,41 @@ go 1.18
 	expected_stored := []ct.TestNode{root}
 	expected_stored = append(expected_stored, rest...)
 
+	runTestConftamer(t, "main.go", expected_stored)
+}
+
+func runTestConftamer(t *testing.T, module_file string, expected_stored []ct.TestNode) {
+	t.Parallel()
+	module_path := "./testdata/conftamer/" + module_file
+	fd, err := os.Open(module_path)
+	require.NoError(t, err)
+	defer fd.Close()
+	module_path, err = filepath.Abs(module_path)
+	require.NoError(t, err)
+
+	module_src, err := io.ReadAll(fd)
+	require.NoError(t, err)
+
+	module_src_prefix := `
+-- go.mod --
+module example.com
+go 1.18
+
+-- a/a.go --
+	`
+	// Full name of package of stuff in a/a.go is example.com/a (despite the package directive in the testdata)
+	tree := writeTree(t, module_src_prefix+string(module_src))
+	// Need to print res.stderr/out to see it, unless checkExit fails
+	res := gopls(t, tree, "conftamer", "-m", "example.com/a.")
+	res.checkExit(true)
+	fmt.Println(res.stderr)
+	fmt.Println(res.stdout)
+
+	// CHECK OUTPUT
+	actual_stored := []ct.TestNode{}
+	stored_down_file := filepath.Join(tree, "stored.log")
+	fileToJSON(t, &actual_stored, stored_down_file)
+
 	sortfunc := func(a, b ct.TestNode) int {
 		return cmp.Compare(a.ID, b.ID)
 	}
@@ -232,7 +238,7 @@ go 1.18
 	actual_stored = slices.CompactFunc(actual_stored, equalfunc) // ignore dups from visiting a node twice
 
 	if !reflect.DeepEqual(expected_stored, actual_stored) {
-		// Find out which were wrong
+		// Find out which were wrong (of the expected ones - if had more actual than expected, won't print)
 		for i, n := range expected_stored {
 			if !reflect.DeepEqual(n.Stored_down, actual_stored[i].Stored_down) {
 				t.Logf("%v stored_down WRONG:\nExpected %v\nActual %v", n.ID, n.Stored_down, actual_stored[i].Stored_down)

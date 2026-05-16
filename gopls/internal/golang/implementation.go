@@ -89,9 +89,12 @@ func ImplementationMoreInfo(ctx context.Context, snapshot *cache.Snapshot, f fil
 	return impls, nil
 }
 
+// TODO (Conftamer) (minor) rename this since it's used in other files
 type Implementer struct {
 	Loc protocol.Location
 
+	// Populated if this is a new struct CType found via a CType field, or vice versa
+	TypeInfo *types.TypeName
 	// Rest is only populated if interface implementer (vs func signature implementer)
 	PkgPath     metadata.PackagePath
 	TypeName    string

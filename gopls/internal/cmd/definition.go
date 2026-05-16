@@ -56,6 +56,23 @@ definition-flags:
 	printFlagDefaults(f)
 }
 
+func locStrToDefnParams(ctx context.Context, locstr string, cli *client) (*protocol.DefinitionParams, *protocol.Location, error) {
+	from := parseSpan(locstr)
+	file, err := cli.openFile(ctx, from.URI())
+	if err != nil {
+		return nil, nil, err
+	}
+	loc, err := file.spanLocation(from)
+	if err != nil {
+		return nil, nil, err
+	}
+	p := protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.LocationTextDocumentPositionParams(loc),
+	}
+
+	return &p, &loc, nil
+}
+
 // Run performs the definition query as specified by args and prints the
 // results to stdout.
 func (d *definition) Run(ctx context.Context, args ...string) error {
@@ -78,41 +95,34 @@ func (d *definition) Run(ctx context.Context, args ...string) error {
 		return err
 	}
 	defer cli.terminate(ctx)
-	from := parseSpan(args[0])
-	file, err := cli.openFile(ctx, from.URI())
+
+	p, loc, err := locStrToDefnParams(ctx, args[0], cli)
 	if err != nil {
 		return err
 	}
-	loc, err := file.spanLocation(from)
+	locs, err := cli.server.Definition(ctx, p)
 	if err != nil {
-		return err
-	}
-	p := protocol.DefinitionParams{
-		TextDocumentPositionParams: protocol.LocationTextDocumentPositionParams(loc),
-	}
-	locs, err := cli.server.Definition(ctx, &p)
-	if err != nil {
-		return fmt.Errorf("%v: %v", from, err)
+		return fmt.Errorf("%v: %v", args[0], err)
 	}
 
 	if len(locs) == 0 {
-		return fmt.Errorf("%v: no definition location (not an identifier?)", from)
+		return fmt.Errorf("%v: no definition location (not an identifier?)", args[0])
 	}
-	file, err = cli.openFile(ctx, locs[0].URI)
+	file, err := cli.openFile(ctx, locs[0].URI)
 	if err != nil {
-		return fmt.Errorf("%v: %v", from, err)
+		return fmt.Errorf("%v: %v", args[0], err)
 	}
 	definition, err := file.locationSpan(locs[0])
 	if err != nil {
-		return fmt.Errorf("%v: %v", from, err)
+		return fmt.Errorf("%v: %v", args[0], err)
 	}
 
 	q := protocol.HoverParams{
-		TextDocumentPositionParams: protocol.LocationTextDocumentPositionParams(loc),
+		TextDocumentPositionParams: protocol.LocationTextDocumentPositionParams(*loc),
 	}
 	hover, err := cli.server.Hover(ctx, &q)
 	if err != nil {
-		return fmt.Errorf("%v: %v", from, err)
+		return fmt.Errorf("%v: %v", args[0], err)
 	}
 	var description string
 	if hover != nil {

@@ -26,13 +26,24 @@ type FieldInfo struct {
 
 type CTypeNode struct {
 	// The rest of the info about the type
-	TypeInfo     types.TypeName
+	TypeInfo types.TypeName
+
+	// Location(s) of the type name somewhere in the code (not necessarily in the declaration) -
+	// since that is what the gopls CLI functions we use require.
+	// Format is same as expected by the gopls CLI (human-readable, can be anywhere within the identifier).
+	// If there are multiple, may only need one?
+	Loc []string
+
+	// Parameters this CType can access, and via which fields
 	Stored_down  map[Stored]struct{} // becomes irrelevant once entire push down pass is done
 	Stored_up    map[Stored]struct{}
 	Stored_final map[Stored]struct{}
+
 	// Field type => how this CType can access that type via its own fields
 	// (For fields that are also CTypes, there is one map entry for each edge to that type)
 	Children map[FullTypeName][]FieldInfo // Can be edge attr (unless leaf) - slice bc can hv multiple fields of same type
+
+	Visited bool
 }
 
 // Accumulating info about a param a node has access to
@@ -43,7 +54,7 @@ type Stored struct {
 
 func CTypeNodeHash(n CTypeNode) FullTypeName {
 	// Node is uniquely identified by package-qualified type name
-	return typeName(&n.TypeInfo)
+	return TypeName(&n.TypeInfo)
 }
 
 func NewCTypeGraph() CTypeGraph {
@@ -52,69 +63,65 @@ func NewCTypeGraph() CTypeGraph {
 }
 
 // Given the object defined at the location, record its info.
-func AddCType(defn_locs []string, obj *types.Object, g CTypeGraph) error {
-	type_info, ok := (*obj).(*types.TypeName)
-	if !ok {
-		return fmt.Errorf("obj %+v is not a type", *obj)
+func AddCType(obj *types.TypeName, defn_locs []string, g CTypeGraph) (*CTypeNode, error) {
+	new_ctype := CTypeNode{TypeInfo: *obj, Loc: defn_locs, Children: make(map[FullTypeName][]FieldInfo)}
+	err := g.AddVertex(new_ctype, func(vp *graph.VertexProperties) {})
+
+	if err != nil {
+		if errors.Is(err, graph.ErrVertexAlreadyExists) {
+			// ok, but return the existing one (so visited is correct)
+			existing, err := g.Vertex(CTypeNodeHash(new_ctype))
+			if err != nil {
+				// shouldn't happen
+				return nil, err
+			}
+			return &existing, nil
+		} else {
+			return nil, err
+		}
 	}
 
-	ctype := CTypeNode{TypeInfo: *type_info, Children: make(map[FullTypeName][]FieldInfo)}
-	err := g.AddVertex(ctype, func(vp *graph.VertexProperties) {})
-	// Tolerate dups for now: If type T embeds implementer U, unmarshalImpls() returns both,
-	// but implementingTypeDefinition() finds U only (see comment in ImplementationMoreInfo())
-	// Currently we're not using anything besides Loc in unmarshalImpl,
-	// so maybe should revert to the original implementation verb that only returns and dedups by loc
-	if err != nil && !errors.Is(err, graph.ErrVertexAlreadyExists) {
-		return err
-	}
-	return nil
+	return &new_ctype, err
 }
 
-/*
-	For struct CTypes:
-
-- Get info on fields (name and corresponding yaml key)
-- For any fields that are CTypes, add an edge
-*/
-func FindCTypeEdges(g CTypeGraph) error {
-	m, err := g.AdjacencyMap()
-	if err != nil {
-		return err
+// Add edge from struct field CType (child) to enclosing struct (parent).
+// For parent, get info on child's field (name and corresponding yaml key).
+func AddCTypeEdge(g CTypeGraph, parent CTypeNode, child CTypeNode) error {
+	struct_info := IsStruct(&parent.TypeInfo)
+	if struct_info == nil {
+		return fmt.Errorf("AddCTypeEdge currently only supported for adding edge from struct to field")
 	}
+	parent_type := CTypeNodeHash(parent)
 
-	for parent_ctype_name := range m {
-		parent_ctype, err := g.Vertex(parent_ctype_name)
+	// For any fields of child's type , get key info
+	for i := range struct_info.NumFields() {
+		field_type_str := struct_info.Field(i).Type().String() // already fully-qualified
+		// Field could be a copy, pointer, slice, slice of pointers - any others?
+		// Likely better to get this from AST - revisit we need it (for proper param and field keys)
+		field_type := FullTypeName(strings.Trim(field_type_str, "*[]"))
+
+		if field_type == CTypeNodeHash(child) {
+			// 1. Add edge - if already existed, done (don't append to parent.Children again)
+			err := g.AddEdge(parent_type, field_type)
+			if err != nil {
+				if errors.Is(err, graph.ErrEdgeAlreadyExists) {
+					continue
+				} else {
+					return err
+				}
+			}
+			// 2. Get field's param key and field key
+			param_key := FieldToParamKey(struct_info.Field(i), struct_info.Tag(i))
+			field_key := struct_info.Field(i).Name()
+			field_info := FieldInfo{Field: field_key, Tag: param_key}
+			parent.Children[field_type] = append(parent.Children[field_type], field_info)
+		}
+
+		err := g.UpdateVertex(parent_type, parent, func(vp *graph.VertexProperties) {})
 		if err != nil {
 			return err
 		}
-		if struct_info := IsStruct(&parent_ctype.TypeInfo); struct_info != nil {
-			for i := range struct_info.NumFields() {
-				field_type_str := struct_info.Field(i).Type().String() // already fully-qualified
-				// Field could be a copy, pointer, slice, slice of pointers - any others?
-				field_type := FullTypeName(strings.Trim(field_type_str, "*[]"))
-
-				// 1. Get field's param key and field key
-				param_key := FieldToParamKey(struct_info.Field(i), struct_info.Tag(i))
-				field_key := struct_info.Field(i).Name()
-				field_info := FieldInfo{Field: field_key, Tag: param_key}
-				parent_ctype.Children[field_type] = append(parent_ctype.Children[field_type], field_info)
-
-				// 2. Add edge if field type is also CType
-				if field, err := g.Vertex(field_type); err == nil {
-					err := g.AddEdge(parent_ctype_name, CTypeNodeHash(field))
-					if err != nil && !errors.Is(err, graph.ErrEdgeAlreadyExists) {
-						return err
-					}
-				}
-			}
-
-			err := g.UpdateVertex(parent_ctype_name, parent_ctype, func(vp *graph.VertexProperties) {})
-			if err != nil {
-				return err
-			}
-		}
 	}
-	// LEFT OFF if type T contains iface, add edge from T to all the iface implementers (do this after write code that uses the graph)
 	return nil
 }
 

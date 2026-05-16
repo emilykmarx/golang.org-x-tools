@@ -74,6 +74,29 @@ func (s *Server) DefinitionMoreInfo(ctx context.Context, params *protocol.Defini
 		return nil, nil, fmt.Errorf("can't find definitions for file type %s", kind)
 	}
 }
+
+func (s *Server) StructFieldTypeObjs(ctx context.Context, params *protocol.DefinitionParams) (_ []golang.Implementer, rerr error) {
+	recordLatency := telemetry.StartLatencyTimer("definition")
+	defer func() {
+		recordLatency(ctx, rerr)
+	}()
+
+	ctx, done := event.Start(ctx, "server.Definition", label.URI.Of(params.TextDocument.URI))
+	defer done()
+
+	fh, snapshot, release, err := s.session.FileOf(ctx, params.TextDocument.URI)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	switch kind := snapshot.FileKind(fh); kind {
+	case file.Go:
+		return golang.StructFieldTypes(ctx, snapshot, fh, params.Range)
+	default:
+		return nil, fmt.Errorf("can't find struct field types for file type %s", kind)
+	}
+}
+
 func (s *Server) TypeDefinition(ctx context.Context, params *protocol.TypeDefinitionParams) ([]protocol.Location, error) {
 	ctx, done := event.Start(ctx, "server.TypeDefinition", label.URI.Of(params.TextDocument.URI))
 	defer done()
