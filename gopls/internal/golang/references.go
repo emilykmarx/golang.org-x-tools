@@ -503,11 +503,11 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 				if err != nil {
 					return err
 				}
-				parent_struct, err := enclosingStruct(ref_pkg, ref_pgf, *ref_cursor)
+				parent_type, err := enclosingType(ref_pkg, ref_pgf, *ref_cursor)
 				if err != nil {
 					return err
 				}
-				report(loc, parent_struct, false)
+				report(loc, parent_type, false)
 			}
 		}
 		return nil
@@ -603,7 +603,7 @@ func expandMethodSearch(ctx context.Context, snapshot *cache.Snapshot, workspace
 // localReferences traverses syntax and reports each reference to one
 // of the target objects, or (if correspond is set) an object that
 // corresponds to one of them via interface satisfaction.
-func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspond bool, report func(loc protocol.Location, parent_struct *Implementer, isDecl bool)) error {
+func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspond bool, report func(loc protocol.Location, parent_type *Implementer, isDecl bool)) error {
 	// If we're searching for references to a method optionally
 	// broaden the search to include references to corresponding
 	// methods of mutually assignable receiver types.
@@ -656,48 +656,38 @@ func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspo
 			}
 			if obj, ok := pkg.TypesInfo().Uses[id]; ok && matches(obj) {
 				// Found a use
-				parent_struct, err := enclosingStruct(pkg, pgf, curId)
+				parent_type, err := enclosingType(pkg, pgf, curId)
 				if err != nil {
 					return err
 				}
-				report(mustLocation(pgf, id), parent_struct, false)
+				report(mustLocation(pgf, id), parent_type, false)
 			}
 		}
 	}
 	return nil
 }
 
-// Find the struct enclosing the identifier node given by curId, if any
-func enclosingStruct(pkg *cache.Package, pgf *parsego.File, curId inspector.Cursor) (*Implementer, error) {
-	field_name := curId.Node().(*ast.Ident).Name
-	field_loc := mustLocation(pgf, curId.Node().(*ast.Ident))
-	err_str := fmt.Sprintf("enclosing struct for field name %v at %+v (0-indexed)", field_name, field_loc)
+// child_cursor is an identifier in a reference.
+// If reference is part of a type declaration, find the type being declared
+// (e.g. a struct containing a field of child_cursor's type)
+func enclosingType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector.Cursor) (*Implementer, error) {
+	for parent_cursor := range child_cursor.Enclosing((*ast.TypeSpec)(nil)) {
+		// Found parent type => get its info
+		parent_node := parent_cursor.Node().(*ast.TypeSpec)
 
-	for struct_type_cursor := range curId.Enclosing((*ast.StructType)(nil)) {
-		// Found parent struct => get its info
-
-		// Assumes the parent node of a StructType is always the TypeSpec -
-		// not true for anonymous structs, maybe others?
-		struct_type_spec_cursor := struct_type_cursor.Parent()
-		struct_type_spec, ok := struct_type_spec_cursor.Node().(*ast.TypeSpec)
-		if !ok {
-			fmt.Printf("Found " + err_str + " but parent is not a TypeSpec - anonymous struct?\n")
-			return nil, nil // not an error (assuming this only happens for anonymous structs)
-		}
-
-		parent_typeinfo, err := cursorToTypeInfo(struct_type_spec.Name, struct_type_cursor.Parent(), pkg)
+		parent_typeinfo, err := cursorToTypeInfo(parent_node.Name, parent_cursor, pkg)
 		if err != nil {
 			return nil, err
 		}
 
-		struct_loc := mustLocation(pgf, struct_type_spec)
+		parent_type_loc := mustLocation(pgf, parent_node)
 		// TypeSpec location start is struct name and end is the closing brace => move end back to start so it's within the name
-		struct_loc.Range.End = struct_loc.Range.Start
+		parent_type_loc.Range.End = parent_type_loc.Range.Start
 
-		return &Implementer{Loc: struct_loc, TypeInfo: parent_typeinfo}, nil
+		return &Implementer{Loc: parent_type_loc, TypeInfo: parent_typeinfo}, nil
 	}
 
-	return nil, nil // no enclosing struct
+	return nil, nil // no enclosing type
 }
 
 // Assuming target is in subtree and is the identifier of a type, find its type info.

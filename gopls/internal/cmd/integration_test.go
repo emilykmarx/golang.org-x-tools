@@ -238,7 +238,7 @@ go 1.18
 	actual_stored = slices.CompactFunc(actual_stored, equalfunc) // ignore dups from visiting a node twice
 
 	if !reflect.DeepEqual(expected_stored, actual_stored) {
-		// Find out which were wrong (of the expected ones - if had more actual than expected, won't print)
+		// Nodes we expected to find, but found with the wrong info
 		for i, n := range expected_stored {
 			if !reflect.DeepEqual(n.Stored_down, actual_stored[i].Stored_down) {
 				t.Logf("%v stored_down WRONG:\nExpected %v\nActual %v", n.ID, n.Stored_down, actual_stored[i].Stored_down)
@@ -250,7 +250,12 @@ go 1.18
 				t.Logf("%v stored_final WRONG:\nExpected %v\nActual %v", n.ID, n.Stored_final, actual_stored[i].Stored_final)
 			}
 		}
-		t.Fatalf("Expected %v\nActual %v", expected_stored, actual_stored)
+
+		// Nodes we didn't expect to find
+		for _, n := range actual_stored[len(expected_stored):] {
+			t.Logf("Unexpected node %v: %+v", n.ID, n)
+		}
+		t.Fatalf("\n\nExpected != actual\nExpected:\n %v\nActual:\n %v", expected_stored, actual_stored)
 	}
 }
 
