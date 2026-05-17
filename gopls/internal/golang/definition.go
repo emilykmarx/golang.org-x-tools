@@ -244,10 +244,12 @@ func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name p
 	parent_type_name := parent_cursor.Node().(*ast.Ident).Name
 
 	parent := parent_cursor.Parent().Node()
-	if _, ok := parent.(*ast.TypeSpec); !ok {
+	parent_typedecl, ok := parent.(*ast.TypeSpec)
+	if !ok {
 		// will this ever happen?
 		return nil, fmt.Errorf("EnclosedTypeObjs called on identifier that is not child of TypeSpec")
 	}
+	is_struct_field := isStructDecl(parent_typedecl)
 
 	// parent_cursor is identifier of type name in type decl
 	// Its parent is TypeSpec
@@ -275,7 +277,7 @@ func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name p
 		}
 
 		child_type_loc := mustLocation(pgf, child_node)
-		child_types = append(child_types, Implementer{Loc: child_type_loc, TypeInfo: child_typeinfo})
+		child_types = append(child_types, Implementer{Loc: child_type_loc, TypeInfo: child_typeinfo, IsStructField: is_struct_field})
 	}
 
 	return child_types, nil

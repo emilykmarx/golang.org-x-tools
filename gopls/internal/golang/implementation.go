@@ -93,9 +93,13 @@ func ImplementationMoreInfo(ctx context.Context, snapshot *cache.Snapshot, f fil
 type Implementer struct {
 	Loc protocol.Location
 
-	// Populated if this is a new struct CType found via a CType field, or vice versa
+	/* Populated if this is an enclosing/enclosed type, found via the enclosed/enclosing type */
+	// Info about the type
 	TypeInfo *types.TypeName
-	// Rest is only populated if interface implementer (vs func signature implementer)
+	// Whether the enclosing-enclosed relationship is via struct field
+	IsStructField bool
+
+	/* Populated if interface implementer */
 	PkgPath     metadata.PackagePath
 	TypeName    string
 	IsInterface bool
