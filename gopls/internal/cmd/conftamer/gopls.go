@@ -12,8 +12,8 @@ func TypeName(type_info *types.TypeName) FullTypeName {
 	return FullTypeName(type_info.Pkg().Path() + "." + type_info.Name())
 }
 
-func IsStruct(type_info *types.TypeName) *types.Struct {
-	if struct_info, ok := type_info.Type().Underlying().(*types.Struct); ok {
+func IsStruct(type_info types.Type) *types.Struct {
+	if struct_info, ok := type_info.Underlying().(*types.Struct); ok {
 		return struct_info
 	}
 	return nil

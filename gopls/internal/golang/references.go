@@ -669,6 +669,7 @@ func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspo
 
 // child_cursor is an identifier in a reference.
 // If reference is part of a type declaration, find the type being declared
+// (If part of a nested type decl, find the innermost one)
 // (e.g. a struct containing a field of child_cursor's type)
 func enclosingType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector.Cursor) (*Implementer, error) {
 	for parent_cursor := range child_cursor.Enclosing((*ast.TypeSpec)(nil)) {
@@ -696,11 +697,9 @@ func isStructDecl(typeSpec *ast.TypeSpec) bool {
 	type_of_typedecl := typeSpec.Type
 	if _, ok := type_of_typedecl.(*ast.StructType); ok {
 		// `type X struct`
-		fmt.Printf("%v IS struct decl\n", typeSpec.Name.Name)
 		return true
 	} else {
 		// `type X <other type>` (type_of_typedecl is Ident), or Parent isn't a struct
-		fmt.Printf("%v is NOT struct decl\n", typeSpec.Name.Name)
 		return false
 	}
 }

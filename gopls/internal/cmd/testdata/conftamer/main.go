@@ -9,7 +9,8 @@ import (
 
 /* CTypes graph with multiple leaves, multiple paths to each leaf.
 A type in the middle of the graph implements UnmarshalYAML.
-XXX struct tags, fields that are ptr/[] */
+Leaf has no fields.
+XXX struct tags, fields that are ptr/[], edge to type in a different pkg. */
 
 type Root struct {
 	A_field A

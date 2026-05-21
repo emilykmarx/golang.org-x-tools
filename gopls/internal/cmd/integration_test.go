@@ -56,6 +56,68 @@ import (
 
 // TestConftamer* tests the 'conftamer' subcommand (conftamer.go).
 
+func TestConftamerAlias(t *testing.T) {
+	// Param could be either depending on which type passed to marshal
+	alias_param := "alias_field.a_field"
+	real_param := "real_field.a_field"
+
+	full_keys := []ct.FieldInfo{
+		// Alias-prefixed field
+		ct.FieldInfo{Field: ".Alias_field.A_field", Tag: alias_param},
+		// Real-prefixed field
+		ct.FieldInfo{Field: ".Real_field.A_field", Tag: real_param},
+	}
+	alias_real_keys := []ct.FieldInfo{
+		ct.FieldInfo{Field: ".A_field", Tag: alias_param},
+		ct.FieldInfo{Field: ".A_field", Tag: real_param},
+	}
+
+	// param can have either tag (depending on whether AliasRoot or RealRoot was used to unmarshal) -
+	// each root finds out it can access the tag that corresponds to its field, via its own field.
+	// Ideally each root would also find out it can access the other tag (via its own field),
+	// but that would require additional handling
+
+	aliasroot := ct.TestNode{
+		ID: "AliasRoot", // aka plain, but hash is the alphabetically first one of all names
+		Stored_down: map[ct.Stored]struct{}{
+			ct.Stored{}: struct{}{}, // initialized with a blank entry
+		},
+		Stored_up: map[ct.Stored]struct{}{
+			ct.Stored{FieldInfo: full_keys[0]}: struct{}{},
+		},
+	}
+	aliasroot.Stored_final = aliasroot.Stored_up
+
+	realroot := ct.TestNode{
+		ID: "RealRoot",
+		Stored_down: map[ct.Stored]struct{}{
+			ct.Stored{}: struct{}{}, // initialized with a blank entry
+		},
+		Stored_up: map[ct.Stored]struct{}{
+			ct.Stored{FieldInfo: full_keys[1]}: struct{}{},
+		},
+	}
+	realroot.Stored_final = realroot.Stored_up
+
+	alias := ct.TestNode{
+		ID: "Alias", // aka Real
+		Stored_down: map[ct.Stored]struct{}{
+			// all entries
+			ct.Stored{FieldInfo: full_keys[0]}: struct{}{},
+			ct.Stored{FieldInfo: full_keys[1]}: struct{}{},
+		},
+		Stored_final: map[ct.Stored]struct{}{
+			ct.Stored{FieldInfo: alias_real_keys[0]}: struct{}{},
+			ct.Stored{FieldInfo: alias_real_keys[1]}: struct{}{},
+		},
+	}
+	alias.Stored_up = alias.Stored_down
+
+	expected_stored := []ct.TestNode{aliasroot, realroot, alias}
+
+	runTestConftamer(t, "alias.go", expected_stored)
+}
+
 func TestConftamerFields(t *testing.T) {
 	full_keys := []ct.FieldInfo{
 		// A-prefixed
@@ -106,7 +168,7 @@ func TestConftamerFields(t *testing.T) {
 	root.Stored_final = root.Stored_up // root has full keys
 
 	rest := []ct.TestNode{
-		{ID: "A",
+		{ID: "A", // aka plain
 			Stored_down: map[ct.Stored]struct{}{
 				// Root pushes A ".A_field => `a`"
 				ct.Stored{FieldInfo: ct.FieldInfo{Field: ".A_field", Tag: "a_field"}}: struct{}{},

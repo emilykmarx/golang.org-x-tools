@@ -47,7 +47,8 @@ func (a *Stored) UnmarshalText(text []byte) error {
 func PrettyPrint(g CTypeGraph, cutprefix string) error {
 	all_nodes := []TestNode{}
 	var visit_err error
-	err := graph.DFSAllStartingNodes(g, func(n FullTypeName) bool {
+	err := graph.DFSAllStartingNodes(g, func(n CTypeHash) bool {
+		// TODO (minor) if multiple names, print all
 		short_name, _ := strings.CutPrefix(string(n), cutprefix)
 		fmt.Printf("%v\n", short_name)
 		node, err := g.Vertex(n)
@@ -62,7 +63,7 @@ func PrettyPrint(g CTypeGraph, cutprefix string) error {
 			Stored_final: node.Stored_final,
 		})
 		return false // continue
-	}, graph.UpdatePathVertices[CTypeNode]{}, true, true, graph.Forwards)
+	}, graph.UpdatePathVertices[CTypeHash, CTypeNode]{}, true, true, graph.Forwards)
 
 	if err != nil || visit_err != nil {
 		return err
@@ -94,4 +95,14 @@ func PrettyPrint(g CTypeGraph, cutprefix string) error {
 func shortHash(full FullTypeName) string {
 	hash_parts := strings.Split(string(full), ".")
 	return hash_parts[len(hash_parts)-1]
+}
+
+func PrintStored(k Stored) {
+	fmt.Printf("%v via %v\n", k.FieldInfo.Tag, k.FieldInfo.Field)
+}
+
+func PrintStoredX(m map[Stored]struct{}) {
+	for k := range m {
+		PrintStored(k)
+	}
 }

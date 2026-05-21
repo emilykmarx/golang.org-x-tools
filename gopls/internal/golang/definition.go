@@ -219,6 +219,7 @@ func DefinitionMoreInfo(ctx context.Context, snapshot *cache.Snapshot, fh file.H
 }
 
 // Find info on any types enclosed in the passed type (e.g. types of the fields enclosed in a struct).
+// (If any are nested, find all of them).
 // rng should be somewhere in the identifier of the type name.
 func EnclosedTypes(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]Implementer, error) {
 	// translate given loc to the type decl

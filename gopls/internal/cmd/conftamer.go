@@ -7,7 +7,6 @@ import (
 	"go/types"
 	"slices"
 
-	"github.com/dominikbraun/graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
 	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/protocol"
@@ -91,9 +90,9 @@ func implementingTypeDefinition(ctx context.Context, cli *client, local_server *
 	return defn_locs, type_info, nil
 }
 
-// Find struct types that have a field of type <CType> (for the CType defined at defn_locs)
-func getParentStructCTypes(ctx context.Context, cli *client, local_server *server.Server, defn_locs []string) ([]ct.CTypeNode, error) {
-	parent_ctypes := []ct.CTypeNode{}
+// Get types that enclose this CType (which is defined at defn_locs)
+func getParentCTypes(ctx context.Context, cli *client, local_server *server.Server, defn_locs []string) ([]golang.Implementer, error) {
+	parent_ctypes := []golang.Implementer{}
 
 	for _, defn_loc := range defn_locs {
 		p, err := locStrToRefParams(ctx, defn_loc, cli, false)
@@ -101,29 +100,20 @@ func getParentStructCTypes(ctx context.Context, cli *client, local_server *serve
 			return nil, fmt.Errorf("locStrToRefParams: %v", err.Error())
 		}
 
-		_, struct_ctypes, err := local_server.ReferencesMoreInfo(ctx, p)
+		// Check CType's references for other types
+		_, enclosing_types, err := local_server.ReferencesMoreInfo(ctx, p)
 		if err != nil {
 			return nil, fmt.Errorf("ReferencesMoreInfo: %v", err.Error())
 		}
-		new_parent_ctypes, err := cTypeLocsToSpans(ctx, cli, struct_ctypes)
-		if err != nil {
-			return nil, fmt.Errorf("cTypeLocsToSpans: %v", err.Error())
-		}
-		parent_ctypes = append(parent_ctypes, new_parent_ctypes...)
+		parent_ctypes = append(parent_ctypes, enclosing_types...)
 	}
 
 	return parent_ctypes, nil
 }
 
-// If ctype is a struct, find its field types.
-func getChildFieldCTypes(ctx context.Context, cli *client, local_server *server.Server, defn_locs []string, ctype *ct.CTypeNode) ([]ct.CTypeNode, error) {
-	// Check if ctype is a struct
-	parent_struct := ct.IsStruct(&ctype.TypeInfo)
-	if parent_struct == nil {
-		return nil, nil
-	}
-
-	child_ctypes := []ct.CTypeNode{}
+// Get types enclosed in this CType (which is defined at defn_locs)
+func getChildCTypes(ctx context.Context, cli *client, local_server *server.Server, defn_locs []string) ([]golang.Implementer, error) {
+	child_ctypes := []golang.Implementer{}
 
 	for _, defn_loc := range defn_locs {
 		p, _, err := locStrToDefnParams(ctx, defn_loc, cli)
@@ -131,84 +121,96 @@ func getChildFieldCTypes(ctx context.Context, cli *client, local_server *server.
 			return nil, fmt.Errorf("locStrToDefnParams: %v", err.Error())
 		}
 
-		field_ctypes, err := local_server.EnclosedTypes(ctx, p)
+		// Check CType's type definition for other types
+		enclosed_types, err := local_server.EnclosedTypes(ctx, p)
 		if err != nil {
 			return nil, fmt.Errorf("EnclosedTypes: %v", err.Error())
 		}
-		new_child_ctypes, err := cTypeLocsToSpans(ctx, cli, field_ctypes)
-		if err != nil {
-			return nil, fmt.Errorf("cTypeLocsToSpans: %v", err.Error())
-		}
-		child_ctypes = append(child_ctypes, new_child_ctypes...)
+		child_ctypes = append(child_ctypes, enclosed_types...)
 	}
 
 	return child_ctypes, nil
 }
 
-// reformat the locations and create the corresponding nodes
-func cTypeLocsToSpans(ctx context.Context, cli *client, ctypes_raw []golang.Implementer) ([]ct.CTypeNode, error) {
-	ctypes := []ct.CTypeNode{}
-	for _, new_ctype := range ctypes_raw {
-		new_defn_locs, err := locsToSpans(ctx, cli, []protocol.Location{new_ctype.Loc})
-		if err != nil {
-			return nil, fmt.Errorf("locsToSpans: %v", err.Error())
-		}
+type NeighAge int
 
-		ctypes = append(ctypes, ct.CTypeNode{TypeInfo: *new_ctype.TypeInfo, Loc: new_defn_locs})
-	}
-
-	return ctypes, nil
-}
+const (
+	NeighIsParent NeighAge = iota
+	NeighIsChild
+)
 
 // Add all CTypes reachable from this one, stopping on reaching one we've already found
-func addReachableCTypes(ctx context.Context, cli *client, local_server *server.Server, obj *types.TypeName, defn_locs []string, g ct.CTypeGraph) error {
-	// 1. Add the CType to the graph, stopping if we've already visited it
-	// (will already exist since we added it to add an edge from its child)
+// neigh_* is info about the neighbor we found this obj via (if any)
+// defn_locs is of the obj
+func addReachableCTypes(ctx context.Context, cli *client, local_server *server.Server,
+	obj *types.TypeName, defn_locs []string, g ct.CTypeGraph, list *ct.CTypeList, neigh_name *ct.FullTypeName, neigh_age NeighAge, neigh_reason ct.NeighReason) error {
 
-	new_ctype, err := ct.AddCType(obj, defn_locs, g)
+	cur_name := ct.TypeName(obj)
+
+	// 1. Add the CType to the graph, combining with existing node if not via struct field.
+	existed, err := ct.AddCType(obj, g, list, neigh_name, neigh_reason)
 	if err != nil {
 		return fmt.Errorf("AddCType: %v", err.Error())
 	}
-	if new_ctype.Visited {
+
+	// 2. Add edge to neighbor we found obj via, if via struct field -
+	// even if already added the node for obj (need edge for all of obj's neighbors)
+	if neigh_name != nil && neigh_reason == ct.StructField {
+		neigh_hash, ok := ct.Hash(*neigh_name, list)
+		if !ok {
+			return fmt.Errorf("neighbor %v doesn't exist", neigh_hash)
+		}
+		own_hash, ok := ct.Hash(cur_name, list)
+		if !ok {
+			return fmt.Errorf("cur node %v doesn't exist", own_hash)
+		}
+		parent_hash := neigh_hash
+		child_name := cur_name
+		if neigh_age == NeighIsChild {
+			parent_hash = own_hash
+			child_name = *neigh_name
+		}
+		// Need parent's type info and child's type name =>
+		// pass HASH of parent and NAME of child
+		ct.AddCTypeEdge(g, list, parent_hash, child_name)
+	}
+
+	// Stop recursing if had already added this node.
+	if existed == ct.TypeNameExists {
 		return nil
 	}
-	visited := new_ctype
-	visited.Visited = true
-	err = g.UpdateVertex(ct.CTypeNodeHash(*new_ctype), *visited, func(vp *graph.VertexProperties) {})
-	if err != nil {
-		return err
-	}
 
-	// 2. Find direct parents and children, and nodes reachable from them
+	fmt.Printf("\nADD CTYPE %v\n", cur_name)
 
-	// 2a. Find structs that have this CType as field (new parents),
-	// and fields of this CType if it's a struct (new children)
-	parents, err := getParentStructCTypes(ctx, cli, local_server, defn_locs)
+	// 3. Find new neighbors (direct parents and children), and nodes reachable from them -
+	// i.e. find enclosing (parent) CTypes, and enclosed (child) CTypes, then recurse on them
+	parents, err := getParentCTypes(ctx, cli, local_server, defn_locs)
 	if err != nil {
 		return fmt.Errorf("getParentStructCTypes: %v", err.Error())
 	}
-	children, err := getChildFieldCTypes(ctx, cli, local_server, defn_locs, new_ctype)
+	children, err := getChildCTypes(ctx, cli, local_server, defn_locs)
 	if err != nil {
 		return fmt.Errorf("getChildFieldCTypes: %v", err.Error())
 	}
+	fmt.Printf("PARENTS: %+v\n", parents)
+	fmt.Printf("CHILDREN: %+v\n", children)
 
-	for i, neighbors := range [][]ct.CTypeNode{parents, children} {
-		for _, neigh := range neighbors {
-			// Add neighbor node but don't mark it visited yet
-			neigh_ctype, err := ct.AddCType(&neigh.TypeInfo, neigh.Loc, g)
+	for parent_or_child, new_neighbors := range [][]golang.Implementer{parents, children} {
+		for _, new := range new_neighbors {
+			new_defn_locs, err := locsToSpans(ctx, cli, []protocol.Location{new.Loc})
 			if err != nil {
-				return fmt.Errorf("AddCType neighbor: %v", err.Error())
+				return fmt.Errorf("locsToSpans: %v", err.Error())
 			}
-			// Add edge to neighbor
-			parent := neigh_ctype
-			child := new_ctype
-			if i == 1 { // just found a child
-				parent = new_ctype
-				child = neigh_ctype
+			// cur is now neigh => if found a parent, pass child as relation
+			neigh_age := NeighIsChild
+			if parent_or_child == 1 {
+				neigh_age = NeighIsParent
 			}
-			ct.AddCTypeEdge(g, *parent, *child)
-
-			err = addReachableCTypes(ctx, cli, local_server, &neigh.TypeInfo, neigh.Loc, g)
+			neigh_reason := ct.NotStructField
+			if new.IsStructField {
+				neigh_reason = ct.StructField
+			}
+			err = addReachableCTypes(ctx, cli, local_server, new.TypeInfo, new_defn_locs, g, list, &cur_name, neigh_age, neigh_reason)
 			if err != nil {
 				return fmt.Errorf("addReachableCTypes: %v", err.Error())
 			}
@@ -231,7 +233,7 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		return err
 	}
 	defer cli.terminate(ctx)
-	ctypes_graph := ct.NewCTypeGraph()
+	ctypes_graph, ctypes_list := ct.NewCTypeGraph()
 
 	// 1. Find types that contain config file contents,
 	// i.e. those that implement UnmarshalYAML
@@ -254,7 +256,7 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 			return fmt.Errorf("locsToSpans: %v", err.Error())
 		}
 
-		err = addReachableCTypes(ctx, cli, local_server, defn_obj, nice_defn_locs, ctypes_graph)
+		err = addReachableCTypes(ctx, cli, local_server, defn_obj, nice_defn_locs, ctypes_graph, &ctypes_list, nil, 0, 0)
 		if err != nil {
 			return fmt.Errorf("addReachableCTypes: %v", err.Error())
 		}
