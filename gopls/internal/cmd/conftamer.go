@@ -146,8 +146,14 @@ const (
 // neigh_* is info about the neighbor we found this obj via (if any)
 // defn_locs is of the obj
 func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, neigh_name *ct.FullTypeName, neigh_age NeighAge, neigh_reason ct.NeighReason) error {
-
 	cur_name := ct.TypeName(obj)
+
+	// Ignore types not declared in package scope
+	pkg_scope := obj.Parent().Parent() == types.Universe
+	if !pkg_scope {
+		fmt.Printf("Ignoring non-package-scope type %v\n", cur_name)
+		return nil
+	}
 
 	// 1. Add the CType to the graph, combining with existing node if not via struct field.
 	existed, err := c.ctypes.AddCType(obj, neigh_name, neigh_reason)
