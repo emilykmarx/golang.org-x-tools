@@ -14,6 +14,11 @@ import (
  * Data structures holding CTypes.
  */
 
+type CTypes struct {
+	Graph CTypeGraph
+	List  CTypeList
+}
+
 type CTypeGraph graph.Graph[CTypeHash, CTypeNode]
 
 // Makes lookup less confusing
@@ -37,9 +42,13 @@ type FieldInfo struct {
 }
 
 // NOTE to look up a type name in the CTypeGraph, first find its hash in the CTypeList
-func Hash(type_name FullTypeName, list *CTypeList) (CTypeHash, bool) {
-	hash, ok := (*list)[type_name]
+func (c *CTypes) GetHash(type_name FullTypeName) (CTypeHash, bool) {
+	hash, ok := c.List[type_name]
 	return hash, ok
+}
+
+func (c *CTypes) SetHash(type_name FullTypeName, hash CTypeHash) {
+	c.List[type_name] = hash
 }
 
 type CTypeNode struct {
@@ -66,9 +75,10 @@ func CTypeNodeHash(n CTypeNode) CTypeHash {
 	return CTypeHash(n.Names[0])
 }
 
-func NewCTypeGraph() (CTypeGraph, CTypeList) {
+func New() *CTypes {
 	g := graph.New(CTypeNodeHash, graph.Directed())
-	return g, make(CTypeList)
+	l := make(CTypeList)
+	return &CTypes{g, l}
 }
 
 type TypeNameExistence int
@@ -82,20 +92,20 @@ const (
 // Else, add obj to neighbor node.
 // Update the list accordingly.
 // Return whether obj already existed in some node.
-func combineTypes(obj *types.TypeName, g CTypeGraph, list *CTypeList, neigh_name FullTypeName) (TypeNameExistence, error) {
+func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (TypeNameExistence, error) {
 	new_name := TypeName(obj)
 
-	existing_hash, exists := Hash(new_name, list)
+	existing_hash, exists := c.GetHash(new_name)
 	existed := TypeNameNotExists
 	if exists {
 		existed = TypeNameExists
 	}
 
-	neigh_hash, ok := Hash(neigh_name, list)
+	neigh_hash, ok := c.GetHash(neigh_name)
 	if !ok {
 		return existed, fmt.Errorf("combineTypes called via neighbor %v that doesn't exist", neigh_name)
 	}
-	new_node, err := g.Vertex(neigh_hash)
+	new_node, err := c.Graph.Vertex(neigh_hash)
 	if err != nil {
 		return existed, err
 	}
@@ -109,17 +119,17 @@ func combineTypes(obj *types.TypeName, g CTypeGraph, list *CTypeList, neigh_name
 
 	if existed == TypeNameExists {
 		// Move over names and edges from existing node
-		existing_node, err := g.Vertex(existing_hash)
+		existing_node, err := c.Graph.Vertex(existing_hash)
 		if err != nil {
 			return existed, err
 		}
 		new_node.Names = append(new_node.Names, existing_node.Names...)
 
-		out_edges, in_edges, err := g.RemoveVertexWithEdges(existing_hash)
+		out_edges, in_edges, err := c.Graph.RemoveVertexWithEdges(existing_hash)
 		if err != nil {
 			return existed, err
 		}
-		err = g.AddEdges(neigh_hash, out_edges, in_edges)
+		err = c.Graph.AddEdges(neigh_hash, out_edges, in_edges)
 		if err != nil {
 			return existed, err
 		}
@@ -130,7 +140,7 @@ func combineTypes(obj *types.TypeName, g CTypeGraph, list *CTypeList, neigh_name
 
 	// Update neighbor node with new names
 	// (Stored* shouldn't be populated yet, and TypeInfo should stay the same - just need to update names)
-	err = g.UpdateVertex(neigh_hash, new_node, func(vp *graph.VertexProperties) {})
+	err = c.Graph.UpdateVertex(neigh_hash, new_node, func(vp *graph.VertexProperties) {})
 	if err != nil {
 		return existed, err
 	}
@@ -138,8 +148,8 @@ func combineTypes(obj *types.TypeName, g CTypeGraph, list *CTypeList, neigh_name
 	new_hash := CTypeNodeHash(new_node)
 
 	// 3. Update list
-	(*list)[TypeName(obj)] = new_hash
-	(*list)[neigh_name] = new_hash // hash may have changed
+	c.SetHash(TypeName(obj), new_hash)
+	c.SetHash(neigh_name, new_hash) // hash may have changed
 	fmt.Printf("COMBINED %v + %v: %+v\n", TypeName(obj), neigh_name, new_node)
 
 	return existed, nil
@@ -155,20 +165,20 @@ const (
 // Given the object defined at the location, record its info.
 // If not struct field, combine with the corresponding existing node if any.
 // Return whether existed
-func AddCType(obj *types.TypeName, g CTypeGraph, list *CTypeList, neigh_name *FullTypeName, neigh_reason NeighReason) (TypeNameExistence, error) {
+func (c *CTypes) AddCType(obj *types.TypeName, neigh_name *FullTypeName, neigh_reason NeighReason) (TypeNameExistence, error) {
 	if neigh_reason == NotStructField {
 		// combineTypes will combine with neighbor
-		return combineTypes(obj, g, list, *neigh_name)
+		return c.combineTypes(obj, *neigh_name)
 	}
 
-	_, exists := (*list)[TypeName(obj)]
+	_, exists := c.GetHash(TypeName(obj))
 	if exists {
 		return TypeNameExists, nil
 	}
 
 	// Make new node
 	new_ctype := CTypeNode{TypeInfo: obj.Type(), Names: []FullTypeName{TypeName(obj)}}
-	err := g.AddVertex(new_ctype, func(vp *graph.VertexProperties) {})
+	err := c.Graph.AddVertex(new_ctype, func(vp *graph.VertexProperties) {})
 	fmt.Printf("NEW NODE for %v\n", TypeName(obj))
 
 	if err != nil {
@@ -177,8 +187,8 @@ func AddCType(obj *types.TypeName, g CTypeGraph, list *CTypeList, neigh_name *Fu
 	}
 
 	// Add to list
-	(*list)[TypeName(obj)] = CTypeNodeHash(new_ctype)
-	return TypeNameNotExists, err
+	c.SetHash(TypeName(obj), CTypeNodeHash(new_ctype))
+	return TypeNameNotExists, nil
 }
 
 // If n is a struct, get info on all its fields (even if some aren't CTypes) -
@@ -209,8 +219,8 @@ func getFieldInfo(n CTypeNode) map[FullTypeName][]FieldInfo {
 
 // Add edge from enclosing CType (parent) to enclosed CType (child).
 // Annotate edge with info on field(s) parent type uses to access child type name.
-func AddCTypeEdge(g CTypeGraph, list *CTypeList, parent_hash CTypeHash, child_name FullTypeName) error {
-	parent_node, err := g.Vertex(parent_hash)
+func (c *CTypes) AddCTypeEdge(parent_hash CTypeHash, child_name FullTypeName) error {
+	parent_node, err := c.Graph.Vertex(parent_hash)
 	if err != nil {
 		return err
 	}
@@ -220,12 +230,12 @@ func AddCTypeEdge(g CTypeGraph, list *CTypeList, parent_hash CTypeHash, child_na
 		return fmt.Errorf("AddCTypeEdge - parent %v has no field info for child %v\n", parent_hash, child_name)
 	}
 
-	child_hash, ok := Hash(child_name, list)
+	child_hash, ok := c.GetHash(child_name)
 	if !ok {
 		return fmt.Errorf("AddCTypeEdge - child %v does not exist\n", child_name)
 	}
 
-	err = g.AddEdge(parent_hash, child_hash, graph.EdgeData(child_field))
+	err = c.Graph.AddEdge(parent_hash, child_hash, graph.EdgeData(child_field))
 	if err != nil {
 		if !errors.Is(err, graph.ErrEdgeAlreadyExists) {
 			return err
@@ -319,7 +329,7 @@ var pushDownFunc = func(g graph.Graph[CTypeHash, CTypeNode], parent CTypeNode, c
 	return child
 }
 
-func pushDown(g CTypeGraph) error {
+func (c *CTypes) pushDown() error {
 	// parent and child are copies - return the new PARENT
 	// Initialize roots (receive nothing pushed down)
 	initializeRoots := func(g graph.Graph[CTypeHash, CTypeNode], parent CTypeNode, child CTypeNode) CTypeNode {
@@ -339,7 +349,7 @@ func pushDown(g CTypeGraph) error {
 		UpdateFirst:  graph.Parent,
 	}
 
-	return graph.DFSAllStartingNodes(g, func(CTypeHash) bool { return false }, update_vertices, true, false, graph.Forwards)
+	return graph.DFSAllStartingNodes(c.Graph, func(CTypeHash) bool { return false }, update_vertices, true, false, graph.Forwards)
 }
 
 // Remove keys corresponding to nodes before n in path (if any).
@@ -362,7 +372,7 @@ func updateFieldKeys(n CTypeNode, stored Stored) Stored {
 	return stored
 }
 
-func pushUp(g CTypeGraph) error {
+func (c *CTypes) pushUp() error {
 	// parent and child are copies - return the new CHILD
 	// Initialize leaves (receive nothing pushed up)
 	initializeLeaves := func(g graph.Graph[CTypeHash, CTypeNode], parent CTypeNode, child CTypeNode) CTypeNode {
@@ -420,22 +430,22 @@ func pushUp(g CTypeGraph) error {
 		UpdateFirst:  graph.Child,
 	}
 
-	return graph.DFSAllStartingNodes(g, func(CTypeHash) bool { return false }, update_vertices, true, false, graph.Backwards)
+	return graph.DFSAllStartingNodes(c.Graph, func(CTypeHash) bool { return false }, update_vertices, true, false, graph.Backwards)
 }
 
 // For each CType:
 // Get the full names of the parameters it can access (prefixing with <section.subsection...>),
 // and via which expression(s) (e.g. A.B.C for CType A, B.C for CType B)
-func GetCTypeParams(g CTypeGraph) error {
+func (c *CTypes) GetCTypeParams() error {
 	// 1. PUSH DOWN: Accumulate full param keys and field keys at leaves
-	err := pushDown(g)
+	err := c.pushDown()
 	if err != nil {
 		return err
 	}
 
 	// 2. PUSH UP: Push full param keys and field keys all the way up
 	// Also clip irrelevant parts of field keys (roots need all, leaves need none)
-	err = pushUp(g)
+	err = c.pushUp()
 	if err != nil {
 		return err
 	}

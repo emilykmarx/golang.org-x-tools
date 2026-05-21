@@ -44,14 +44,14 @@ func (a *Stored) UnmarshalText(text []byte) error {
 // If !all, just print <package.type>
 // Remove cutprefix from type when printing and storing test logs
 // Prints depth-first starting from each root (so each CType will be printed once for every root it's reachable from)
-func PrettyPrint(g CTypeGraph, cutprefix string) error {
+func (c *CTypes) PrettyPrint(cutprefix string) error {
 	all_nodes := []TestNode{}
 	var visit_err error
-	err := graph.DFSAllStartingNodes(g, func(n CTypeHash) bool {
+	err := graph.DFSAllStartingNodes(c.Graph, func(n CTypeHash) bool {
 		// TODO (minor) if multiple names, print all
 		short_name, _ := strings.CutPrefix(string(n), cutprefix)
 		fmt.Printf("%v\n", short_name)
-		node, err := g.Vertex(n)
+		node, err := c.Graph.Vertex(n)
 		if err != nil {
 			visit_err = err
 		}
