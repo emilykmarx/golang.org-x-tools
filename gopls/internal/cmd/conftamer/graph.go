@@ -1,11 +1,15 @@
 package conftamer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"go/types"
+	"log/slog"
+	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/dominikbraun/graph"
 )
@@ -17,6 +21,7 @@ import (
 type CTypes struct {
 	Graph CTypeGraph
 	List  CTypeList
+	Log   *slog.Logger
 }
 
 type CTypeGraph graph.Graph[CTypeHash, CTypeNode]
@@ -75,10 +80,10 @@ func CTypeNodeHash(n CTypeNode) CTypeHash {
 	return CTypeHash(n.Names[0])
 }
 
-func New() *CTypes {
+func New(log *slog.Logger) *CTypes {
 	g := graph.New(CTypeNodeHash, graph.Directed())
 	l := make(CTypeList)
-	return &CTypes{g, l}
+	return &CTypes{Graph: g, List: l, Log: log}
 }
 
 type TypeNameExistence int
@@ -450,4 +455,14 @@ func (c *CTypes) GetCTypeParams() error {
 		return err
 	}
 	return nil
+}
+
+func Logf(log *slog.Logger, lvl slog.Level, format string, args ...any) {
+	if !log.Enabled(context.Background(), lvl) {
+		return
+	}
+	var pcs [1]uintptr
+	runtime.Callers(2, pcs[:])
+	r := slog.NewRecord(time.Now(), lvl, fmt.Sprintf(format, args...), pcs[0])
+	_ = log.Handler().Handle(context.Background(), r)
 }

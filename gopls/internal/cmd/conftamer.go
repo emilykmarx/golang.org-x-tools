@@ -5,6 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"go/types"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
@@ -21,6 +24,7 @@ type conftamer struct {
 	cli           *client
 	local_server  *server.Server
 	ctypes        *ct.CTypes
+	log           *slog.Logger
 	UnmarshalDefn string `flag:"u,unmarshal_defn" help:"Location of the unmarshal interface definition"`
 	ModulePrefix  string `flag:"m,module_prefix" help:"Prefix of module path (used to pretty-print)"`
 }
@@ -151,7 +155,7 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 	// Ignore types not declared in package scope
 	pkg_scope := obj.Parent().Parent() == types.Universe
 	if !pkg_scope {
-		fmt.Printf("Ignoring non-package-scope type %v\n", cur_name)
+		ct.Logf(c.log, slog.LevelInfo, "Ignoring non-package-scope type %v", cur_name)
 		return nil
 	}
 
@@ -243,7 +247,18 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	defer cli.terminate(ctx)
 	c.ctx = ctx
 	c.cli = cli
-	c.ctypes = ct.New()
+	c.log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{AddSource: true, Level: slog.LevelInfo,
+		// Shorten paths
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.SourceKey {
+				source, _ := a.Value.Any().(*slog.Source)
+				if source != nil {
+					source.File = filepath.Base(source.File)
+				}
+			}
+			return a
+		}}))
+	c.ctypes = ct.New(c.log)
 
 	// 1. Find types that contain config file contents,
 	// i.e. those that implement UnmarshalYAML
