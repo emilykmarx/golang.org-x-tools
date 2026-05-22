@@ -51,13 +51,11 @@ func (c *conftamer) unmarshalImpls() ([]golang.Implementer, error) {
 	// TODO find definition of UnmarshalYAML properly (and other unmarshal pkgs)
 	other_unmarshal_pkgs := []string{"gopkg.in/yaml.v3", "sigs.k8s.io/yaml/goyaml.v2"}
 	p, err := locStrToImplParams(c.ctx, c.UnmarshalDefn, c.cli)
-	if err != nil {
-		return nil, err
-	}
+	ct.CheckErr(err)
+
 	implementations, err := c.local_server.ImplementationMoreInfo(c.ctx, p)
-	if err != nil {
-		return nil, err
-	}
+	ct.CheckErr(err)
+
 	// Also returns the other two interface definitions from the other two yaml packages in prometheus - ignore
 	implementations = slices.DeleteFunc(implementations, func(impl golang.Implementer) bool {
 		return slices.Contains(other_unmarshal_pkgs, string(impl.PkgPath))
@@ -79,19 +77,20 @@ func (c *conftamer) implementingTypeDefinition(method_name_loc protocol.Location
 		TextDocumentPositionParams: protocol.LocationTextDocumentPositionParams(type_name_loc),
 	}
 	defn_locs, defn_obj, err := c.local_server.DefinitionMoreInfo(c.ctx, &p)
-	if err != nil {
-		return nil, nil, err
-	}
+	ct.CheckErr(err)
 
 	if len(defn_locs) == 0 {
-		return nil, nil, fmt.Errorf("%v: no definition location (not an identifier?)", type_name_loc)
+		err := fmt.Errorf("%v: no definition location (not an identifier?)", type_name_loc)
+		ct.CheckErr(err)
 	}
 	if defn_obj == nil {
-		return defn_locs, nil, fmt.Errorf("%v: no object at locs %v", type_name_loc, defn_locs)
+		err := fmt.Errorf("%v: no object at locs %v", type_name_loc, defn_locs)
+		ct.CheckErr(err)
 	}
 	type_info, ok := (*defn_obj).(*types.TypeName)
 	if !ok {
-		return nil, nil, fmt.Errorf("obj %+v is not a type", *defn_obj)
+		err := fmt.Errorf("obj %+v is not a type", *defn_obj)
+		ct.CheckErr(err)
 	}
 
 	return defn_locs, type_info, nil
@@ -103,15 +102,12 @@ func (c *conftamer) getParentCTypes(defn_locs []string) ([]golang.Implementer, e
 
 	for _, defn_loc := range defn_locs {
 		p, err := locStrToRefParams(c.ctx, defn_loc, c.cli, false)
-		if err != nil {
-			return nil, fmt.Errorf("locStrToRefParams: %v", err.Error())
-		}
+		ct.CheckErr(err)
 
 		// Check CType's references for other types
 		_, enclosing_types, err := c.local_server.ReferencesMoreInfo(c.ctx, p)
-		if err != nil {
-			return nil, fmt.Errorf("ReferencesMoreInfo: %v", err.Error())
-		}
+		ct.CheckErr(err)
+
 		parent_ctypes = append(parent_ctypes, enclosing_types...)
 	}
 
@@ -124,15 +120,11 @@ func (c *conftamer) getChildCTypes(defn_locs []string) ([]golang.Implementer, er
 
 	for _, defn_loc := range defn_locs {
 		p, _, err := locStrToDefnParams(c.ctx, defn_loc, c.cli)
-		if err != nil {
-			return nil, fmt.Errorf("locStrToDefnParams: %v", err.Error())
-		}
+		ct.CheckErr(err)
 
 		// Check CType's type definition for other types
 		enclosed_types, err := c.local_server.EnclosedTypes(c.ctx, p)
-		if err != nil {
-			return nil, fmt.Errorf("EnclosedTypes: %v", err.Error())
-		}
+		ct.CheckErr(err)
 		child_ctypes = append(child_ctypes, enclosed_types...)
 	}
 
@@ -150,31 +142,33 @@ const (
 // neigh_* is info about the neighbor we found this obj via (if any)
 // defn_locs is of the obj
 func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, neigh_name *ct.FullTypeName, neigh_age NeighAge, neigh_reason ct.NeighReason) error {
-	cur_name := ct.TypeName(obj)
-
 	// Ignore types not declared in package scope
-	pkg_scope := obj.Parent().Parent() == types.Universe
-	if !pkg_scope {
-		ct.Logf(c.log, slog.LevelInfo, "Ignoring non-package-scope type %v", cur_name)
+	if obj.Parent() == nil || obj.Parent().Parent() != types.Universe {
+		// e.g. function-local types, or `error`
+		// Can cause TypeName to segfault - don't call it here
+		ct.Logf(c.log, slog.LevelInfo, "Ignoring non-package-scope type %v", ct.TypeNameSafe(obj))
 		return nil
 	}
+	cur_name := ct.TypeName(obj)
 
 	// 1. Add the CType to the graph, combining with existing node if not via struct field.
+	fmt.Printf("\nADD CTYPE %v\n", cur_name)
+
 	existed, err := c.ctypes.AddCType(obj, neigh_name, neigh_reason)
-	if err != nil {
-		return fmt.Errorf("AddCType: %v", err.Error())
-	}
+	ct.CheckErr(err)
 
 	// 2. Add edge to neighbor we found obj via, if via struct field -
 	// even if already added the node for obj (need edge for all of obj's neighbors)
 	if neigh_name != nil && neigh_reason == ct.StructField {
 		neigh_hash, ok := c.ctypes.GetHash(*neigh_name)
 		if !ok {
-			return fmt.Errorf("neighbor %v doesn't exist", neigh_hash)
+			err := fmt.Errorf("neighbor %v doesn't exist", neigh_hash)
+			ct.CheckErr(err)
 		}
 		own_hash, ok := c.ctypes.GetHash(cur_name)
 		if !ok {
-			return fmt.Errorf("cur node %v doesn't exist", own_hash)
+			err = fmt.Errorf("cur node %v doesn't exist", own_hash)
+			ct.CheckErr(err)
 		}
 		parent_hash := neigh_hash
 		child_name := cur_name
@@ -184,7 +178,8 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 		}
 		// Need parent's type info and child's type name =>
 		// pass HASH of parent and NAME of child
-		c.ctypes.AddCTypeEdge(parent_hash, child_name)
+		err = c.ctypes.AddCTypeEdge(parent_hash, child_name)
+		ct.CheckErr(err)
 	}
 
 	// Stop recursing if had already added this node.
@@ -192,27 +187,22 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 		return nil
 	}
 
-	fmt.Printf("\nADD CTYPE %v\n", cur_name)
-
 	// 3. Find new neighbors (direct parents and children), and nodes reachable from them -
 	// i.e. find enclosing (parent) CTypes, and enclosed (child) CTypes, then recurse on them
 	parents, err := c.getParentCTypes(defn_locs)
-	if err != nil {
-		return fmt.Errorf("getParentStructCTypes: %v", err.Error())
-	}
+	ct.CheckErr(err)
+
 	children, err := c.getChildCTypes(defn_locs)
-	if err != nil {
-		return fmt.Errorf("getChildFieldCTypes: %v", err.Error())
-	}
+	ct.CheckErr(err)
+
 	fmt.Printf("PARENTS: %+v\n", parents)
 	fmt.Printf("CHILDREN: %+v\n", children)
 
 	for parent_or_child, new_neighbors := range [][]golang.Implementer{parents, children} {
 		for _, new := range new_neighbors {
 			new_defn_locs, err := locsToSpans(c.ctx, c.cli, []protocol.Location{new.Loc})
-			if err != nil {
-				return fmt.Errorf("locsToSpans: %v", err.Error())
-			}
+			ct.CheckErr(err)
+
 			// cur is now neigh => if found a parent, pass child as relation
 			neigh_age := NeighIsChild
 			if parent_or_child == 1 {
@@ -223,9 +213,7 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 				neigh_reason = ct.StructField
 			}
 			err = c.addReachableCTypes(new.TypeInfo, new_defn_locs, &cur_name, neigh_age, neigh_reason)
-			if err != nil {
-				return err
-			}
+			ct.CheckErr(err)
 		}
 	}
 
@@ -266,37 +254,26 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 
 	c.local_server = cli.server.(*server.Server)
 	unmarshalImpls, err := c.unmarshalImpls()
-	if err != nil {
-		return fmt.Errorf("unmarshalImpls: %v", err.Error())
-	}
+	ct.CheckErr(err)
 
 	// 2. Find all CTypes reachable from the unmarshaling types
 	for _, unmarshalImpl := range unmarshalImpls {
 		defn_locs, defn_obj, err := c.implementingTypeDefinition(unmarshalImpl.Loc)
-		if err != nil {
-			return fmt.Errorf("implementingTypeDefinition for %v: %v", unmarshalImpl.Loc, err.Error())
-		}
+		ct.CheckErr(err)
+
 		nice_defn_locs, err := locsToSpans(ctx, cli, defn_locs)
-		if err != nil {
-			return fmt.Errorf("locsToSpans: %v", err.Error())
-		}
+		ct.CheckErr(err)
 
 		err = c.addReachableCTypes(defn_obj, nice_defn_locs, nil, 0, 0)
-		if err != nil {
-			return fmt.Errorf("addReachableCTypes: %v", err.Error())
-		}
+		ct.CheckErr(err)
 	}
 
 	// 3. Find param keys and corresponding source code expressions
 	err = c.ctypes.GetCTypeParams()
-	if err != nil {
-		return err
-	}
+	ct.CheckErr(err)
 
 	err = c.ctypes.PrettyPrint(c.ModulePrefix)
-	if err != nil {
-		return err
-	}
+	ct.CheckErr(err)
 
 	return nil
 }

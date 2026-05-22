@@ -8,6 +8,13 @@ import (
 
 /* Utilities for interacting with info from gopls */
 
+func TypeNameSafe(type_info *types.TypeName) FullTypeName {
+	pkg := "<nil>"
+	if type_info.Pkg() != nil {
+		pkg = type_info.Pkg().Path()
+	}
+	return FullTypeName(pkg + "." + type_info.Name())
+}
 func TypeName(type_info *types.TypeName) FullTypeName {
 	return FullTypeName(type_info.Pkg().Path() + "." + type_info.Name())
 }

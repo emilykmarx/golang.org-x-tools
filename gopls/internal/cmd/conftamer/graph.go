@@ -108,15 +108,22 @@ func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (Typ
 
 	neigh_hash, ok := c.GetHash(neigh_name)
 	if !ok {
-		return existed, fmt.Errorf("combineTypes called via neighbor %v that doesn't exist", neigh_name)
+		err := fmt.Errorf("combineTypes called via neighbor %v that doesn't exist", neigh_name)
+		CheckErr(err)
 	}
 	new_node, err := c.Graph.Vertex(neigh_hash)
-	if err != nil {
-		return existed, err
-	}
+	CheckErr(err)
+
 	if existing_hash == neigh_hash {
 		// Already in the same node as neighbor
 		return existed, nil
+	}
+
+	if new_node.TypeInfo.Underlying() != obj.Type().Underlying() {
+		// Actually different types, e.g. two types with same name but different types in different scopes
+		// TODO handle this (same problem as getFieldInfo)
+		Logf(c.Log, slog.LevelWarn, "combineTypes called on different types: %v and %v",
+			new_name, new_node.Names)
 	}
 
 	// Get new names list: new name, names in neighbor node, plus names in the existing node if applicable
@@ -125,19 +132,15 @@ func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (Typ
 	if existed == TypeNameExists {
 		// Move over names and edges from existing node
 		existing_node, err := c.Graph.Vertex(existing_hash)
-		if err != nil {
-			return existed, err
-		}
+		CheckErr(err)
+
 		new_node.Names = append(new_node.Names, existing_node.Names...)
 
 		out_edges, in_edges, err := c.Graph.RemoveVertexWithEdges(existing_hash)
-		if err != nil {
-			return existed, err
-		}
+		CheckErr(err)
+
 		err = c.Graph.AddEdges(neigh_hash, out_edges, in_edges)
-		if err != nil {
-			return existed, err
-		}
+		CheckErr(err)
 	}
 
 	// Keep names sorted
@@ -146,15 +149,15 @@ func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (Typ
 	// Update neighbor node with new names
 	// (Stored* shouldn't be populated yet, and TypeInfo should stay the same - just need to update names)
 	err = c.Graph.UpdateVertex(neigh_hash, new_node, func(vp *graph.VertexProperties) {})
-	if err != nil {
-		return existed, err
-	}
+	CheckErr(err)
 
 	new_hash := CTypeNodeHash(new_node)
 
-	// 3. Update list
-	c.SetHash(TypeName(obj), new_hash)
-	c.SetHash(neigh_name, new_hash) // hash may have changed
+	// 3. Update list for all possibly moved names
+	// i.e. new obj, names in neighbor node (since its hash may have changed), and names in existing node (since they were moved)
+	for _, new_name := range new_node.Names {
+		c.SetHash(new_name, new_hash)
+	}
 	fmt.Printf("COMBINED %v + %v: %+v\n", TypeName(obj), neigh_name, new_node)
 
 	return existed, nil
@@ -184,12 +187,9 @@ func (c *CTypes) AddCType(obj *types.TypeName, neigh_name *FullTypeName, neigh_r
 	// Make new node
 	new_ctype := CTypeNode{TypeInfo: obj.Type(), Names: []FullTypeName{TypeName(obj)}}
 	err := c.Graph.AddVertex(new_ctype, func(vp *graph.VertexProperties) {})
+	// Shouldn't have existed - checked that above
+	CheckErr(err)
 	fmt.Printf("NEW NODE for %v\n", TypeName(obj))
-
-	if err != nil {
-		// Shouldn't have existed - checked that above
-		return TypeNameExists, err
-	}
 
 	// Add to list
 	c.SetHash(TypeName(obj), CTypeNodeHash(new_ctype))
@@ -209,6 +209,7 @@ func getFieldInfo(n CTypeNode) map[FullTypeName][]FieldInfo {
 	for i := range struct_info.NumFields() {
 		field_type_str := struct_info.Field(i).Type().String() // already fully-qualified
 		// Field could be a copy, pointer, slice, slice of pointers - any others?
+		// TODO support others - e.g. map[*T]struct
 		// Likely better to get this from AST (probably when finding enclosed types) - revisit when we need it (for proper param and field keys)
 		// typeToObjects might be helpful?
 		field_type := FullTypeName(strings.Trim(field_type_str, "*[]"))
@@ -226,26 +227,26 @@ func getFieldInfo(n CTypeNode) map[FullTypeName][]FieldInfo {
 // Annotate edge with info on field(s) parent type uses to access child type name.
 func (c *CTypes) AddCTypeEdge(parent_hash CTypeHash, child_name FullTypeName) error {
 	parent_node, err := c.Graph.Vertex(parent_hash)
-	if err != nil {
-		return err
-	}
+	CheckErr(err)
+
 	all_fields := getFieldInfo(parent_node)
 	child_field, ok := all_fields[child_name]
 	if !ok {
-		return fmt.Errorf("AddCTypeEdge - parent %v has no field info for child %v\n", parent_hash, child_name)
+		// warn for now, since we know we haven't supported all possibilities yet and will just result in wrong tags/keys which is ok for now
+		Logf(c.Log, slog.LevelWarn, "AddCTypeEdge - parent %v has no field info for child %v\n", parent_hash, child_name)
+		child_field = []FieldInfo{{Field: "<unknown>", Tag: "<unknown>"}}
 	}
 
 	child_hash, ok := c.GetHash(child_name)
 	if !ok {
-		return fmt.Errorf("AddCTypeEdge - child %v does not exist\n", child_name)
+		err := fmt.Errorf("AddCTypeEdge - child %v does not exist\n", child_name)
+		CheckErr(err)
 	}
 
 	err = c.Graph.AddEdge(parent_hash, child_hash, graph.EdgeData(child_field))
 	if err != nil {
 		if !errors.Is(err, graph.ErrEdgeAlreadyExists) {
-			return err
-		} else {
-			return nil
+			CheckErr(err)
 		}
 	}
 	fmt.Printf("ADDED EDGE %v => %v\n", parent_hash, child_hash)
@@ -290,9 +291,7 @@ var pushDownFunc = func(g graph.Graph[CTypeHash, CTypeNode], parent CTypeNode, c
 		}
 	} else {
 		edge, err := g.Edge(CTypeNodeHash(parent), CTypeNodeHash(child))
-		if err != nil {
-			panic(err)
-		}
+		CheckErr(err)
 
 		child_fields = edge.Properties.Data.([]FieldInfo)
 	}
@@ -444,16 +443,12 @@ func (c *CTypes) pushUp() error {
 func (c *CTypes) GetCTypeParams() error {
 	// 1. PUSH DOWN: Accumulate full param keys and field keys at leaves
 	err := c.pushDown()
-	if err != nil {
-		return err
-	}
+	CheckErr(err)
 
 	// 2. PUSH UP: Push full param keys and field keys all the way up
 	// Also clip irrelevant parts of field keys (roots need all, leaves need none)
 	err = c.pushUp()
-	if err != nil {
-		return err
-	}
+	CheckErr(err)
 	return nil
 }
 
@@ -465,4 +460,11 @@ func Logf(log *slog.Logger, lvl slog.Level, format string, args ...any) {
 	runtime.Callers(2, pcs[:])
 	r := slog.NewRecord(time.Now(), lvl, fmt.Sprintf(format, args...), pcs[0])
 	_ = log.Handler().Handle(context.Background(), r)
+}
+
+// Panic on err (if running in dlv, will stop at a breakpoint)
+func CheckErr(err error) {
+	if err != nil {
+		panic(err)
+	}
 }

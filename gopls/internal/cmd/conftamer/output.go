@@ -46,15 +46,12 @@ func (a *Stored) UnmarshalText(text []byte) error {
 // Prints depth-first starting from each root (so each CType will be printed once for every root it's reachable from)
 func (c *CTypes) PrettyPrint(cutprefix string) error {
 	all_nodes := []TestNode{}
-	var visit_err error
 	err := graph.DFSAllStartingNodes(c.Graph, func(n CTypeHash) bool {
 		// TODO (minor) if multiple names, print all
 		short_name, _ := strings.CutPrefix(string(n), cutprefix)
 		fmt.Printf("%v\n", short_name)
 		node, err := c.Graph.Vertex(n)
-		if err != nil {
-			visit_err = err
-		}
+		CheckErr(err)
 
 		all_nodes = append(all_nodes, TestNode{
 			ID:           short_name,
@@ -65,28 +62,20 @@ func (c *CTypes) PrettyPrint(cutprefix string) error {
 		return false // continue
 	}, graph.UpdatePathVertices[CTypeHash, CTypeNode]{}, true, true, graph.Forwards)
 
-	if err != nil || visit_err != nil {
-		return err
-	}
+	CheckErr(err)
 
 	marshaled, err := json.Marshal(all_nodes)
-	if err != nil {
-		return err
-	}
+	CheckErr(err)
+
 	// Need to write in this fancy way for test to be able to unmarshal it
 	var buf bytes.Buffer
 	buf.Write(marshaled)
 	outfile := "stored.log"
 	f, err := os.Create(outfile)
-	if err != nil {
-		return err
-	}
+	CheckErr(err)
 	defer f.Close()
 	_, err = io.Copy(f, &buf)
-
-	if err != nil {
-		return err
-	}
+	CheckErr(err)
 
 	return nil
 }
