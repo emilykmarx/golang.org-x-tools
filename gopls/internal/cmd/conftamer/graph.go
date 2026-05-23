@@ -93,11 +93,14 @@ const (
 	TypeNameNotExists
 )
 
+// If obj and neighbor aren't same underlying type, return.
 // If obj is already part of some node, combine that node and neighbor node.
 // Else, add obj to neighbor node.
 // Update the list accordingly.
-// Return whether obj already existed in some node.
-func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (TypeNameExistence, error) {
+// Return whether obj already existed in some node, and whether combined (or were already combined).
+func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (TypeNameExistence, error, bool) {
+	// 1. Check whether to combine
+	combined := false
 	new_name := TypeName(obj)
 
 	existing_hash, exists := c.GetHash(new_name)
@@ -116,15 +119,20 @@ func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (Typ
 
 	if existing_hash == neigh_hash {
 		// Already in the same node as neighbor
-		return existed, nil
+		return existed, nil, combined
 	}
 
 	if new_node.TypeInfo.Underlying() != obj.Type().Underlying() {
 		// Actually different types, e.g. two types with same name but different types in different scopes
-		// TODO handle this (same problem as getFieldInfo)
+		// Don't combine nodes since causes various problems
+		// TODO get edge info (same problem as getFieldInfo)
 		Logf(c.Log, slog.LevelWarn, "combineTypes called on different types: %v and %v",
 			new_name, new_node.Names)
+		return existed, nil, combined
 	}
+
+	// 2. Combine
+	combined = true
 
 	// Get new names list: new name, names in neighbor node, plus names in the existing node if applicable
 	new_node.Names = append(new_node.Names, new_name)
@@ -160,7 +168,7 @@ func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (Typ
 	}
 	fmt.Printf("COMBINED %v + %v: %+v\n", TypeName(obj), neigh_name, new_node)
 
-	return existed, nil
+	return existed, nil, combined
 }
 
 type NeighReason int
@@ -175,8 +183,12 @@ const (
 // Return whether existed
 func (c *CTypes) AddCType(obj *types.TypeName, neigh_name *FullTypeName, neigh_reason NeighReason) (TypeNameExistence, error) {
 	if neigh_reason == NotStructField {
-		// combineTypes will combine with neighbor
-		return c.combineTypes(obj, *neigh_name)
+		existed, err, combined := c.combineTypes(obj, *neigh_name)
+		CheckErr(err)
+		if combined {
+			// If combineTypes combined nodes, it already updated the list => check the value of existed it returned
+			return existed, nil
+		}
 	}
 
 	_, exists := c.GetHash(TypeName(obj))

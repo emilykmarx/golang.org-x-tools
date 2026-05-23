@@ -157,9 +157,9 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 	existed, err := c.ctypes.AddCType(obj, neigh_name, neigh_reason)
 	ct.CheckErr(err)
 
-	// 2. Add edge to neighbor we found obj via, if via struct field -
-	// even if already added the node for obj (need edge for all of obj's neighbors)
-	if neigh_name != nil && neigh_reason == ct.StructField {
+	// 2. Add edge to neighbor we found obj via, if we didn't combine it with the neighbor -
+	// even if we had already added the node for obj (need edge for all of obj's neighbors)
+	if neigh_name != nil {
 		neigh_hash, ok := c.ctypes.GetHash(*neigh_name)
 		if !ok {
 			err := fmt.Errorf("neighbor %v doesn't exist", neigh_hash)
@@ -170,16 +170,19 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 			err = fmt.Errorf("cur node %v doesn't exist", own_hash)
 			ct.CheckErr(err)
 		}
-		parent_hash := neigh_hash
-		child_name := cur_name
-		if neigh_age == NeighIsChild {
-			parent_hash = own_hash
-			child_name = *neigh_name
+		if neigh_hash != own_hash {
+			// didn't combine
+			parent_hash := neigh_hash
+			child_name := cur_name
+			if neigh_age == NeighIsChild {
+				parent_hash = own_hash
+				child_name = *neigh_name
+			}
+			// Need parent's type info and child's type name =>
+			// pass HASH of parent and NAME of child
+			err = c.ctypes.AddCTypeEdge(parent_hash, child_name)
+			ct.CheckErr(err)
 		}
-		// Need parent's type info and child's type name =>
-		// pass HASH of parent and NAME of child
-		err = c.ctypes.AddCTypeEdge(parent_hash, child_name)
-		ct.CheckErr(err)
 	}
 
 	// Stop recursing if had already added this node.
@@ -253,11 +256,13 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	// TODO also find all types passed as 2nd arg to yaml.Unmarshal - for any that don't impl Unmarshal, record their params
 
 	c.local_server = cli.server.(*server.Server)
+	ct.Logf(c.log, slog.LevelInfo, "Finding types implementing UnmarshalYAML")
 	unmarshalImpls, err := c.unmarshalImpls()
 	ct.CheckErr(err)
 
 	// 2. Find all CTypes reachable from the unmarshaling types
 	for _, unmarshalImpl := range unmarshalImpls {
+		ct.Logf(c.log, slog.LevelInfo, "Finding types reachable from %v.%v", unmarshalImpl.PkgPath, unmarshalImpl.TypeName)
 		defn_locs, defn_obj, err := c.implementingTypeDefinition(unmarshalImpl.Loc)
 		ct.CheckErr(err)
 
@@ -268,10 +273,17 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		ct.CheckErr(err)
 	}
 
+	n_edges, err := c.ctypes.Graph.Size()
+	ct.CheckErr(err)
+	n_nodes, err := c.ctypes.Graph.Order()
+	ct.CheckErr(err)
+
 	// 3. Find param keys and corresponding source code expressions
+	ct.Logf(c.log, slog.LevelInfo, "Getting param keys and corresponding expressions")
 	err = c.ctypes.GetCTypeParams()
 	ct.CheckErr(err)
 
+	ct.Logf(c.log, slog.LevelInfo, "Outputting CTypes - graph has %v nodes and %v edges", n_nodes, n_edges)
 	err = c.ctypes.PrettyPrint(c.ModulePrefix)
 	ct.CheckErr(err)
 

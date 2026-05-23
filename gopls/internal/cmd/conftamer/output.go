@@ -47,14 +47,21 @@ func (a *Stored) UnmarshalText(text []byte) error {
 func (c *CTypes) PrettyPrint(cutprefix string) error {
 	all_nodes := []TestNode{}
 	err := graph.DFSAllStartingNodes(c.Graph, func(n CTypeHash) bool {
-		// TODO (minor) if multiple names, print all
-		short_name, _ := strings.CutPrefix(string(n), cutprefix)
-		fmt.Printf("%v\n", short_name)
 		node, err := c.Graph.Vertex(n)
+		names := ""
+		short_hash, _ := strings.CutPrefix(string(n), cutprefix)
+		for i, name := range node.Names {
+			short_name, _ := strings.CutPrefix(string(name), cutprefix)
+			if i > 0 {
+				names += ", "
+			}
+			names += short_name
+		}
+		fmt.Printf("%v\n", names)
 		CheckErr(err)
 
 		all_nodes = append(all_nodes, TestNode{
-			ID:           short_name,
+			ID:           short_hash,
 			Stored_down:  node.Stored_down,
 			Stored_up:    node.Stored_up,
 			Stored_final: node.Stored_final,
