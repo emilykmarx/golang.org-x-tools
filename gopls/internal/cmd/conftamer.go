@@ -152,7 +152,7 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 	cur_name := ct.TypeName(obj)
 
 	// 1. Add the CType to the graph, combining with existing node if not via struct field.
-	fmt.Printf("\nADD CTYPE %v\n", cur_name)
+	ct.Logf(c.log, slog.LevelDebug, "\nADD CTYPE %v\n", cur_name)
 
 	existed, err := c.ctypes.AddCType(obj, neigh_name, neigh_reason)
 	ct.CheckErr(err)
@@ -198,8 +198,8 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 	children, err := c.getChildCTypes(defn_locs)
 	ct.CheckErr(err)
 
-	fmt.Printf("PARENTS: %+v\n", parents)
-	fmt.Printf("CHILDREN: %+v\n", children)
+	ct.Logf(c.log, slog.LevelDebug, "PARENTS: %+v\n", parents)
+	ct.Logf(c.log, slog.LevelDebug, "CHILDREN: %+v\n", children)
 
 	for parent_or_child, new_neighbors := range [][]golang.Implementer{parents, children} {
 		for _, new := range new_neighbors {

@@ -166,7 +166,7 @@ func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (Typ
 	for _, new_name := range new_node.Names {
 		c.SetHash(new_name, new_hash)
 	}
-	fmt.Printf("COMBINED %v + %v: %+v\n", TypeName(obj), neigh_name, new_node)
+	Logf(c.Log, slog.LevelDebug, "COMBINED %v + %v: %+v\n", TypeName(obj), neigh_name, new_node)
 
 	return existed, nil, combined
 }
@@ -201,7 +201,7 @@ func (c *CTypes) AddCType(obj *types.TypeName, neigh_name *FullTypeName, neigh_r
 	err := c.Graph.AddVertex(new_ctype, func(vp *graph.VertexProperties) {})
 	// Shouldn't have existed - checked that above
 	CheckErr(err)
-	fmt.Printf("NEW NODE for %v\n", TypeName(obj))
+	Logf(c.Log, slog.LevelDebug, "NEW NODE for %v\n", TypeName(obj))
 
 	// Add to list
 	c.SetHash(TypeName(obj), CTypeNodeHash(new_ctype))
@@ -261,7 +261,7 @@ func (c *CTypes) AddCTypeEdge(parent_hash CTypeHash, child_name FullTypeName) er
 			CheckErr(err)
 		}
 	}
-	fmt.Printf("ADDED EDGE %v => %v\n", parent_hash, child_hash)
+	Logf(c.Log, slog.LevelDebug, "ADDED EDGE %v => %v\n", parent_hash, child_hash)
 
 	return nil
 }
@@ -313,6 +313,7 @@ var pushDownFunc = func(g graph.Graph[CTypeHash, CTypeNode], parent CTypeNode, c
 	}
 
 	// PARENT: Append child field info and child type to all own stored, add to child's stored
+	// XXX make push* prints into debug logs
 	fmt.Printf("\nstored_down %v => %v:\n", parent.Names, child.Names)
 	// If from leaf: replace the old values
 	leaf_stored_down := make(map[Stored]struct{})
