@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/dominikbraun/graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
 	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/protocol"
@@ -146,13 +147,13 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 	if obj.Parent() == nil || obj.Parent().Parent() != types.Universe {
 		// e.g. function-local types, or `error`
 		// Can cause TypeName to segfault - don't call it here
-		ct.Logf(c.log, slog.LevelInfo, "Ignoring non-package-scope type %v", ct.TypeNameSafe(obj))
+		graph.Logf(c.log, slog.LevelInfo, "Ignoring non-package-scope type %v", ct.TypeNameSafe(obj))
 		return nil
 	}
 	cur_name := ct.TypeName(obj)
 
 	// 1. Add the CType to the graph, combining with existing node if not via struct field.
-	ct.Logf(c.log, slog.LevelDebug, "\nADD CTYPE %v\n", cur_name)
+	graph.Logf(c.log, slog.LevelDebug, "ADD CTYPE %v", cur_name)
 
 	existed, err := c.ctypes.AddCType(obj, neigh_name, neigh_reason)
 	ct.CheckErr(err)
@@ -185,7 +186,8 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 		}
 	}
 
-	// Stop recursing if had already added this node.
+	// Stop recursing if had already added this node,
+	// now that we've handled what we needed to (combining and adding edges)
 	if existed == ct.TypeNameExists {
 		return nil
 	}
@@ -198,8 +200,8 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 	children, err := c.getChildCTypes(defn_locs)
 	ct.CheckErr(err)
 
-	ct.Logf(c.log, slog.LevelDebug, "PARENTS: %+v\n", parents)
-	ct.Logf(c.log, slog.LevelDebug, "CHILDREN: %+v\n", children)
+	graph.Logf(c.log, slog.LevelDebug, "PARENTS: %+v", parents)
+	graph.Logf(c.log, slog.LevelDebug, "CHILDREN: %+v", children)
 
 	for parent_or_child, new_neighbors := range [][]golang.Implementer{parents, children} {
 		for _, new := range new_neighbors {
@@ -251,18 +253,20 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		}}))
 	c.ctypes = ct.New(c.log)
 
+	graph.Logf(c.log, slog.LevelInfo, "Start CTypes finder")
+
 	// 1. Find types that contain config file contents,
 	// i.e. those that implement UnmarshalYAML
 	// TODO also find all types passed as 2nd arg to yaml.Unmarshal - for any that don't impl Unmarshal, record their params
 
 	c.local_server = cli.server.(*server.Server)
-	ct.Logf(c.log, slog.LevelInfo, "Finding types implementing UnmarshalYAML")
+	graph.Logf(c.log, slog.LevelInfo, "Finding types implementing UnmarshalYAML")
 	unmarshalImpls, err := c.unmarshalImpls()
 	ct.CheckErr(err)
 
 	// 2. Find all CTypes reachable from the unmarshaling types
 	for _, unmarshalImpl := range unmarshalImpls {
-		ct.Logf(c.log, slog.LevelInfo, "Finding types reachable from %v.%v", unmarshalImpl.PkgPath, unmarshalImpl.TypeName)
+		graph.Logf(c.log, slog.LevelInfo, "Finding types reachable from %v.%v", unmarshalImpl.PkgPath, unmarshalImpl.TypeName)
 		defn_locs, defn_obj, err := c.implementingTypeDefinition(unmarshalImpl.Loc)
 		ct.CheckErr(err)
 
@@ -279,13 +283,15 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	ct.CheckErr(err)
 
 	// 3. Find param keys and corresponding source code expressions
-	ct.Logf(c.log, slog.LevelInfo, "Getting param keys and corresponding expressions")
+	graph.Logf(c.log, slog.LevelInfo, "Getting param keys and corresponding expressions")
 	err = c.ctypes.GetCTypeParams()
 	ct.CheckErr(err)
 
-	ct.Logf(c.log, slog.LevelInfo, "Outputting CTypes - graph has %v nodes and %v edges", n_nodes, n_edges)
+	graph.Logf(c.log, slog.LevelInfo, "Outputting CTypes - graph has %v nodes and %v edges", n_nodes, n_edges)
 	err = c.ctypes.PrettyPrint(c.ModulePrefix)
 	ct.CheckErr(err)
+
+	graph.Logf(c.log, slog.LevelInfo, "Exit CTypes finder")
 
 	return nil
 }
