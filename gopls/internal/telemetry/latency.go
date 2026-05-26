@@ -21,6 +21,11 @@ type latencyKey struct {
 	isError           bool
 }
 
+type LatencyTotal struct {
+	NCalls    int
+	TotalTime time.Duration
+}
+
 var (
 	latencyBuckets = []struct {
 		end  time.Duration
@@ -38,6 +43,7 @@ var (
 
 	latencyCounterMu sync.Mutex
 	latencyCounters  = make(map[latencyKey]*counter.Counter) // lazily populated
+	latencyTotals    = make(map[string]LatencyTotal)
 )
 
 // ForEachLatencyCounter runs the provided function for each current latency
@@ -55,9 +61,21 @@ func ForEachLatencyCounter(operation string, isError bool, f func(*counter.Count
 	}
 }
 
+// not thread-safe
+func GetLatencyTotals() map[string]LatencyTotal {
+	return latencyTotals
+}
+
+func RecordLatency(m map[string]LatencyTotal, operation string, latency time.Duration) {
+	cur_tot := m[operation]
+	cur_tot.NCalls += 1
+	cur_tot.TotalTime += latency
+	m[operation] = cur_tot
+}
+
 // getLatencyCounter returns the counter used to record latency of the given
 // operation in the given bucket.
-func getLatencyCounter(operation, bucket string, isError bool) *counter.Counter {
+func getLatencyCounter(operation, bucket string, isError bool, latency time.Duration) *counter.Counter {
 	latencyCounterMu.Lock()
 	defer latencyCounterMu.Unlock()
 
@@ -73,6 +91,8 @@ func getLatencyCounter(operation, bucket string, isError bool) *counter.Counter 
 		c = counter.New(name)
 		latencyCounters[key] = c
 	}
+
+	RecordLatency(latencyTotals, operation, latency)
 	return c
 }
 
@@ -96,7 +116,7 @@ func StartLatencyTimer(operation string) func(context.Context, error) {
 		})
 		if bucketIdx < len(latencyBuckets) { // ignore latency longer than a day :)
 			bucketName := latencyBuckets[bucketIdx].name
-			getLatencyCounter(operation, bucketName, err != nil).Inc()
+			getLatencyCounter(operation, bucketName, err != nil, latency).Inc()
 		}
 	}
 }

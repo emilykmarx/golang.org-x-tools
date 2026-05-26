@@ -9,12 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"github.com/dominikbraun/graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
 	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/server"
+	"golang.org/x/tools/gopls/internal/telemetry"
 	"golang.org/x/tools/internal/tool"
 )
 
@@ -147,7 +149,7 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 	if obj.Parent() == nil || obj.Parent().Parent() != types.Universe {
 		// e.g. function-local types, or `error`
 		// Can cause TypeName to segfault - don't call it here
-		graph.Logf(c.log, slog.LevelInfo, "Ignoring non-package-scope type %v", ct.TypeNameSafe(obj))
+		graph.Logf(c.log, slog.LevelDebug, "Ignoring non-package-scope type %v", ct.TypeNameSafe(obj))
 		return nil
 	}
 	cur_name := ct.TypeName(obj)
@@ -224,6 +226,41 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 
 	return nil
 }
+func (c *conftamer) LogGraphStats(start time.Time) {
+	graph.Logf(c.log, slog.LevelInfo, "Begin graph stats")
+	defer func() {
+		graph.Logf(c.log, slog.LevelInfo, "End graph stats")
+	}()
+
+	// Time
+	graph.Logf(c.log, slog.LevelInfo, "Total time: %v", time.Since(start))
+
+	var gopls_time time.Duration
+	for operation, time := range telemetry.GetLatencyTotals() {
+		graph.Logf(c.log, slog.LevelInfo, "gopls %v: %v calls, %v", operation, time.NCalls, time.TotalTime)
+		gopls_time += time.TotalTime
+	}
+	graph.Logf(c.log, slog.LevelInfo, "gopls total: %v", gopls_time)
+
+	var graph_time time.Duration
+	for operation, time := range c.ctypes.Latency {
+		graph.Logf(c.log, slog.LevelInfo, "graph %v: %v calls, %v", operation, time.NCalls, time.TotalTime)
+		graph_time += time.TotalTime
+	}
+	graph.Logf(c.log, slog.LevelInfo, "graph total: %v", graph_time)
+
+	// Size
+	n_edges, err := c.ctypes.Graph.Size()
+	ct.CheckErr(err)
+	n_nodes, err := c.ctypes.Graph.Order()
+	ct.CheckErr(err)
+	graph.Logf(c.log, slog.LevelInfo, "%v nodes, %v edges", n_nodes, n_edges)
+	roots, leaves, err := graph.RootsLeaves(c.ctypes.Graph)
+	ct.CheckErr(err)
+
+	graph.Logf(c.log, slog.LevelInfo, "%v roots: %+v", len(roots), roots)
+	graph.Logf(c.log, slog.LevelInfo, "%v leaves: %+v", len(leaves), leaves)
+}
 
 func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	if len(args) != 0 {
@@ -253,6 +290,7 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		}}))
 	c.ctypes = ct.New(c.log)
 
+	start := time.Now()
 	graph.Logf(c.log, slog.LevelInfo, "Start CTypes finder")
 
 	// 1. Find types that contain config file contents,
@@ -277,17 +315,14 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		ct.CheckErr(err)
 	}
 
-	n_edges, err := c.ctypes.Graph.Size()
-	ct.CheckErr(err)
-	n_nodes, err := c.ctypes.Graph.Order()
-	ct.CheckErr(err)
+	c.LogGraphStats(start)
 
 	// 3. Find param keys and corresponding source code expressions
 	graph.Logf(c.log, slog.LevelInfo, "Getting param keys and corresponding expressions")
 	err = c.ctypes.GetCTypeParams()
 	ct.CheckErr(err)
 
-	graph.Logf(c.log, slog.LevelInfo, "Outputting CTypes - graph has %v nodes and %v edges", n_nodes, n_edges)
+	graph.Logf(c.log, slog.LevelInfo, "Outputting CTypes")
 	err = c.ctypes.PrettyPrint(c.ModulePrefix)
 	ct.CheckErr(err)
 

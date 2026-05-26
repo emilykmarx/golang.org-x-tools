@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/dominikbraun/graph"
+	"golang.org/x/tools/gopls/internal/telemetry"
 )
 
 /*
@@ -16,8 +18,9 @@ import (
  */
 
 type CTypes struct {
-	Graph CTypeGraph
-	List  CTypeList
+	Graph   CTypeGraph
+	List    CTypeList
+	Latency map[string]telemetry.LatencyTotal // operation => timing
 }
 
 type CTypeGraph graph.Graph[CTypeHash, CTypeNode]
@@ -78,8 +81,7 @@ func CTypeNodeHash(n CTypeNode) CTypeHash {
 
 func New(log *slog.Logger) *CTypes {
 	g := graph.New(CTypeNodeHash, log, graph.Directed())
-	l := make(CTypeList)
-	return &CTypes{Graph: g, List: l}
+	return &CTypes{Graph: g, List: make(CTypeList), Latency: make(map[string]telemetry.LatencyTotal)}
 }
 
 type TypeNameExistence int
@@ -122,24 +124,23 @@ func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (Typ
 		// Actually different types, e.g. two types with same name but different types in different scopes
 		// Don't combine nodes since causes various problems
 		// TODO get edge info (same problem as getFieldInfo)
-		graph.Logf(c.Graph.Log(), slog.LevelWarn, "combineTypes called on different types: %v and %v",
+		graph.Logf(c.Graph.Log(), slog.LevelDebug, "combineTypes called on different types: %v and %v",
 			new_name, new_node.Names)
 		return existed, nil, combined
 	}
 
 	// 2. Combine
 
-	// Log at info here since this is a troublesome process - edge logging in graph lib
 	combined = true
-	graph.Logf(c.Graph.Log(), slog.LevelInfo, "COMBINING new %v (hash if any: %v) + neigh %v (hash: %v)", new_name, existing_hash, neigh_name, neigh_hash)
-	graph.Logf(c.Graph.Log(), slog.LevelInfo, "%v node BEFORE combine: %+v", neigh_hash, new_node)
+	graph.Logf(c.Graph.Log(), slog.LevelDebug, "COMBINING new %v (hash if any: %v) + neigh %v (hash: %v)", new_name, existing_hash, neigh_name, neigh_hash)
+	graph.Logf(c.Graph.Log(), slog.LevelDebug, "%v node BEFORE combine: %+v", neigh_hash, new_node)
 
 	if existed == TypeNameExists {
 		// Move over names from existing node (including new name)
 		existing_node, err := c.Graph.Vertex(existing_hash)
 		CheckErr(err)
 
-		graph.Logf(c.Graph.Log(), slog.LevelInfo, "%v node BEFORE combine: %+v", existing_hash, existing_node)
+		graph.Logf(c.Graph.Log(), slog.LevelDebug, "%v node BEFORE combine: %+v", existing_hash, existing_node)
 
 		new_node.Names = append(new_node.Names, existing_node.Names...)
 	} else {
@@ -150,16 +151,18 @@ func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (Typ
 	slices.Sort(new_node.Names)
 	new_hash := CTypeNodeHash(new_node) // may still be neigh_hash, or not
 
-	graph.Logf(c.Graph.Log(), slog.LevelInfo, "%v node AFTER combine: %+v", new_hash, new_node)
+	graph.Logf(c.Graph.Log(), slog.LevelDebug, "%v node AFTER combine: %+v", new_hash, new_node)
 
 	// Update neighbor node with new names, and existing edges if any
 	// (Stored* shouldn't be populated yet, and TypeInfo should stay the same - just need to update names)
+	start := time.Now()
 	if existed == TypeNameExists {
 		// Combine with existing
 		c.Graph.UpdateVertex(neigh_hash, new_node, &existing_hash, func(vp *graph.VertexProperties) {})
 	} else {
 		c.Graph.UpdateVertex(neigh_hash, new_node, nil, func(vp *graph.VertexProperties) {})
 	}
+	telemetry.RecordLatency(c.Latency, "UpdateVertex", time.Since(start))
 
 	// 3. Update list for all possibly moved names
 	// i.e. new obj, names in neighbor node (since its hash may have changed), and names in existing node (since they were moved)
@@ -243,8 +246,8 @@ func (c *CTypes) AddCTypeEdge(parent_hash CTypeHash, child_name FullTypeName) er
 	all_fields := getFieldInfo(parent_node)
 	child_field, ok := all_fields[child_name]
 	if !ok {
-		// warn for now, since we know we haven't supported all possibilities yet and will just result in wrong tags/keys which is ok for now
-		graph.Logf(c.Graph.Log(), slog.LevelWarn, "AddCTypeEdge - parent %v has no field info for child %v\n", parent_hash, child_name)
+		// We know we haven't supported all possibilities yet and will just result in wrong tags/keys which is ok for now
+		graph.Logf(c.Graph.Log(), slog.LevelDebug, "AddCTypeEdge - parent %v has no field info for child %v\n", parent_hash, child_name)
 		child_field = []FieldInfo{{Field: "<unknown>", Tag: "<unknown>"}}
 	}
 
