@@ -115,7 +115,7 @@ func TestConftamerAlias(t *testing.T) {
 
 	expected_stored := []ct.TestNode{aliasroot, realroot, alias}
 
-	runTestConftamer(t, "alias.go", expected_stored)
+	runTestConftamer(t, []string{"alias.go"}, expected_stored)
 }
 
 func TestConftamerFields(t *testing.T) {
@@ -253,33 +253,48 @@ func TestConftamerFields(t *testing.T) {
 	expected_stored := []ct.TestNode{root}
 	expected_stored = append(expected_stored, rest...)
 
-	runTestConftamer(t, "main.go", expected_stored)
+	runTestConftamer(t, []string{"main.go"}, expected_stored)
 }
 
-func runTestConftamer(t *testing.T, module_file string, expected_stored []ct.TestNode) {
+// Each module_file will be in its own package
+func runTestConftamer(t *testing.T, module_files []string, expected_stored []ct.TestNode) {
 	t.Parallel()
-	module_path := "./testdata/conftamer/" + module_file
-	fd, err := os.Open(module_path)
-	require.NoError(t, err)
-	defer fd.Close()
-	module_path, err = filepath.Abs(module_path)
-	require.NoError(t, err)
+	module_srcs := []string{}
+	for _, module_file := range module_files {
 
-	module_src, err := io.ReadAll(fd)
-	require.NoError(t, err)
+		module_path := "./testdata/conftamer/" + module_file
+		fd, err := os.Open(module_path)
+		require.NoError(t, err)
+		defer fd.Close()
+		module_path, err = filepath.Abs(module_path)
+		require.NoError(t, err)
 
-	module_src_prefix := `
+		module_src, err := io.ReadAll(fd)
+		require.NoError(t, err)
+		module_srcs = append(module_srcs, string(module_src))
+	}
+
+	module_src_all := `
 -- go.mod --
 module example.com
 go 1.18
-
--- a/a.go --
 	`
-	// Full name of package of stuff in a/a.go is example.com/a (despite the package directive in the testdata)
-	tree := writeTree(t, module_src_prefix+string(module_src))
-	// Need to print res.stderr/out to see it, unless checkExit fails
-	res := gopls(t, tree, "conftamer", "-m", "example.com/a.")
+
+	var pkg rune = 'a'
+	for _, module_src := range module_srcs {
+		module_src_all += fmt.Sprintf("\n-- pkg_%s/file.go --\n%v", string(pkg), module_src)
+		pkg += 1
+	}
+	// Full name of package of stuff in pkg_a/*.go is example.com/pkg_a (despite the package directive in the testdata)
+	tree := writeTree(t, module_src_all)
+	// If only one module_file passed, also cut the package prefix
+	module_prefix := "example.com/pkg_"
+	if len(module_files) == 1 {
+		module_prefix += "a."
+	}
+	res := gopls(t, tree, "conftamer", "-m", module_prefix)
 	res.checkExit(true)
+	// Need to print res.stderr/out to see it, unless checkExit fails
 	fmt.Println(res.stderr)
 	fmt.Println(res.stdout)
 
