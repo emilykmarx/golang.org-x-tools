@@ -56,6 +56,13 @@ import (
 
 // TestConftamer* tests the 'conftamer' subcommand (conftamer.go).
 
+// Tests local and global interface implementations
+// (i.e. find an interface CType T, then find CTypes that implement it in both T's package and another package),
+// and global references (i.e. find a concrete CType T, then find CTypes enclosing it outside T's package)
+func TestConftamerInterface(t *testing.T) {
+	runTestConftamer(t, []string{"interface.go", "interface_global.go"}, nil)
+}
+
 func TestConftamerAlias(t *testing.T) {
 	// Param could be either depending on which type passed to marshal
 	alias_param := "alias_field.a_field"
