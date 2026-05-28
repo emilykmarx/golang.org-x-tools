@@ -142,25 +142,31 @@ func Unmarshal(marshaled []byte) (CTypeGraph, Marshalable) {
 	return g, all
 }
 
-// If !all, just print <package.type>
-// Remove cutprefix from type when printing and storing test logs
-// Prints depth-first starting from each root (so each CType will be printed once for every root it's reachable from)
-func (c *CTypes) PrettyPrint(cutprefix string) error {
+// Write stored up/down/final for testing.
+// Prints depth-first starting from each root (so each CType will be printed once for every root it's reachable from).
+// If only_prefix: Only print nodes where any of the names start with prefix.
+func (c *CTypes) PrettyPrint(cutprefix string, only_prefix bool) error {
 	all_nodes := []TestNode{}
 	err := graph.DFSAllStartingNodes(c.Graph, func(n CTypeHash) bool {
 		node, err := c.Graph.Vertex(n)
+		CheckErr(err)
 		names := ""
-		short_hash, _ := strings.CutPrefix(string(n), cutprefix)
+		contains_prefix := false
 		for i, name := range node.Names {
-			short_name, _ := strings.CutPrefix(string(name), cutprefix)
+			short_name, contains := strings.CutPrefix(string(name), cutprefix)
+			if contains {
+				contains_prefix = true
+			}
 			if i > 0 {
 				names += ", "
 			}
 			names += short_name
 		}
-		fmt.Printf("%v\n", names)
-		CheckErr(err)
+		if !only_prefix || contains_prefix {
+			fmt.Printf("%v\n", names)
+		}
 
+		short_hash, _ := strings.CutPrefix(string(n), cutprefix)
 		all_nodes = append(all_nodes, TestNode{
 			ID:           short_hash,
 			Stored_down:  node.Stored_down,

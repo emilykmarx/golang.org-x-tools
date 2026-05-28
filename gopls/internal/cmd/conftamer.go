@@ -298,7 +298,7 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	ct.CheckErr(err)
 
 	graph.Logf(c.log, slog.LevelInfo, "Outputting CTypes")
-	err = c.ctypes.PrettyPrint(c.ModulePrefix)
+	err = c.ctypes.PrettyPrint(c.ModulePrefix, true)
 	ct.CheckErr(err)
 
 	graph.Logf(c.log, slog.LevelInfo, "Exit CTypes finder")
