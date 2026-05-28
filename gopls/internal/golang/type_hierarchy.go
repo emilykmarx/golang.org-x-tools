@@ -104,7 +104,7 @@ func relatedTypes(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle,
 		itemsMu sync.Mutex
 		items   []protocol.TypeHierarchyItem
 	)
-	err = implementationsMsets(ctx, snapshot, pkg, cur, rel, func(pkgpath metadata.PackagePath, name string, abstract bool, loc protocol.Location) {
+	err = implementationsMsets(ctx, snapshot, pkg, cur, rel, func(pkgpath metadata.PackagePath, name string, abstract bool, loc protocol.Location, _ *types.TypeName) {
 		if pkgpath == "" {
 			pkgpath = "builtin"
 		}

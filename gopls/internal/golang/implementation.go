@@ -72,8 +72,7 @@ func Implementation(ctx context.Context, snapshot *cache.Snapshot, f file.Handle
 	return locs, nil
 }
 
-// Include the extra info returned for interface implementers, not just their locations
-func ImplementationMoreInfo(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rng protocol.Range) ([]Implementer, error) {
+func ImplementationMoreInfo(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rng protocol.Range) ([]TypeInfo, error) {
 	ctx, done := event.Start(ctx, "golang.Implementation")
 	defer done()
 
@@ -81,7 +80,7 @@ func ImplementationMoreInfo(ctx context.Context, snapshot *cache.Snapshot, f fil
 	if err != nil {
 		return nil, err
 	}
-	slices.SortFunc(impls, func(a Implementer, b Implementer) int { return protocol.CompareLocation(a.Loc, b.Loc) })
+	slices.SortFunc(impls, func(a TypeInfo, b TypeInfo) int { return protocol.CompareLocation(a.Loc, b.Loc) })
 	// de-duplicate considering all fields, not just location: if type U implements it,
 	// type T that embeds U will be returned with the same location but different pkgPath:typeName.
 	// Which is correct, since T inherits U's implementation
@@ -89,23 +88,16 @@ func ImplementationMoreInfo(ctx context.Context, snapshot *cache.Snapshot, f fil
 	return impls, nil
 }
 
-// TODO (Conftamer) (minor) rename this since it's used in other files
-type Implementer struct {
+type TypeInfo struct {
 	Loc protocol.Location
 
-	/* Populated if this is an enclosing/enclosed type, found via the enclosed/enclosing type */
 	// Info about the type
 	TypeInfo *types.TypeName
 	// Whether the enclosing-enclosed relationship is via struct field
 	IsStructField bool
-
-	/* Populated if interface implementer */
-	PkgPath     metadata.PackagePath
-	TypeName    string
-	IsInterface bool
 }
 
-func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]Implementer, error) {
+func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]TypeInfo, error) {
 	// Type check the current package.
 	pkg, pgf, err := NarrowestPackageForFile(ctx, snapshot, fh.URI())
 	if err != nil {
@@ -119,9 +111,9 @@ func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Hand
 
 	// Find implementations based on func signatures.
 	if locs, err := implFuncs(pkg, cur, start, end); err != errNotHandled {
-		impls := []Implementer{}
+		impls := []TypeInfo{}
 		for _, loc := range locs {
-			impls = append(impls, Implementer{Loc: loc})
+			impls = append(impls, TypeInfo{Loc: loc})
 		}
 		return impls, err
 	}
@@ -129,7 +121,7 @@ func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Hand
 	// Find implementations based on method sets.
 	var (
 		locsMu       sync.Mutex
-		Implementers []Implementer
+		Implementers []TypeInfo
 	)
 	// relation=0 here means infer direction of the relation
 	// (Supertypes/Subtypes) from concreteness of query type/method.
@@ -137,9 +129,9 @@ func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Hand
 	// so that one could ask for, say, the superinterfaces of io.ReadCloser;
 	// see https://github.com/golang/go/issues/68641#issuecomment-2269293762.)
 	const relation = methodsets.TypeRelation(0)
-	err = implementationsMsets(ctx, snapshot, pkg, cur, relation, func(pkgPath metadata.PackagePath, typeName string, isInterface bool, loc protocol.Location) {
+	err = implementationsMsets(ctx, snapshot, pkg, cur, relation, func(_ metadata.PackagePath, _ string, _ bool, loc protocol.Location, typeName *types.TypeName) {
 		locsMu.Lock()
-		Implementers = append(Implementers, Implementer{Loc: loc, PkgPath: pkgPath, TypeName: typeName, IsInterface: isInterface})
+		Implementers = append(Implementers, TypeInfo{Loc: loc, TypeInfo: typeName})
 		locsMu.Unlock()
 	})
 	return Implementers, err
@@ -150,7 +142,7 @@ func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Hand
 // - abstract indicates that the result is an interface type or interface method.
 //
 // implYieldFunc implementations must be concurrency-safe.
-type implYieldFunc func(pkgpath metadata.PackagePath, name string, abstract bool, loc protocol.Location)
+type implYieldFunc func(pkgpath metadata.PackagePath, name string, abstract bool, loc protocol.Location, typeName *types.TypeName)
 
 // implementationsMsets computes implementations of the type at the
 // position specified by cur, by method sets.
@@ -346,7 +338,21 @@ func implementationsMsets(ctx context.Context, snapshot *cache.Snapshot, pkg *ca
 					if err != nil {
 						return err
 					}
-					yield(index.PkgPath, res.TypeName, res.IsInterface, ploc)
+					impl_pkg, impl_pgf, impl_cursor, err := locToCursor(ctx, snapshot, ploc)
+					if err != nil {
+						return err
+					}
+					impl, err := enclosingType(impl_pkg, impl_pgf, *impl_cursor)
+					if err != nil {
+						return err
+					}
+					var typeInfo *types.TypeName
+					if impl != nil {
+						typeInfo = impl.TypeInfo
+					} else {
+						// e.g. method, not type
+					}
+					yield(index.PkgPath, res.TypeName, res.IsInterface, ploc, typeInfo)
 					return nil
 				})
 			}
@@ -506,7 +512,7 @@ func localImplementations(ctx context.Context, snapshot *cache.Snapshot, pkg *ca
 			if queryMethod == nil {
 				// Found matching type.
 				loc := mustLocation(pgf, spec.Name)
-				yield(pkg.Metadata().PkgPath, spec.Name.Name, isInterface, loc)
+				yield(pkg.Metadata().PkgPath, spec.Name.Name, isInterface, loc, def.(*types.TypeName))
 				continue
 			}
 
@@ -527,7 +533,7 @@ func localImplementations(ctx context.Context, snapshot *cache.Snapshot, pkg *ca
 					if err != nil {
 						return err
 					}
-					yield(pkg.Metadata().PkgPath, m.Name(), isInterface, loc)
+					yield(pkg.Metadata().PkgPath, m.Name(), isInterface, loc, nil)
 					break
 				}
 			}
@@ -544,7 +550,7 @@ func localImplementations(ctx context.Context, snapshot *cache.Snapshot, pkg *ca
 		if err != nil {
 			return err
 		}
-		yield("", "error", true, loc)
+		yield("", "error", true, loc, nil)
 	}
 
 	return nil

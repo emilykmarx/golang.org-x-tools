@@ -42,6 +42,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dominikbraun/graph"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/tools/gopls/internal/cmd"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
@@ -56,11 +57,33 @@ import (
 
 // TestConftamer* tests the 'conftamer' subcommand (conftamer.go).
 
+type ExpectedGraph struct {
+	graph          ct.Marshalable
+	ignoreEdgeData bool
+}
+
 // Tests local and global interface implementations
 // (i.e. find an interface CType T, then find CTypes that implement it in both T's package and another package),
-// and global references (i.e. find a concrete CType T, then find CTypes enclosing it outside T's package)
+// and global references (i.e. find a concrete CType T, then find CTypes enclosing it outside T's package).
+// Doesn't test edge data or push up/down, just that the correct type names are found are correct edges created.
 func TestConftamerInterface(t *testing.T) {
-	runTestConftamer(t, []string{"interface.go", "interface_global.go"}, nil)
+	expected := ct.Marshalable{}
+	expected.Vertices = []ct.CTypeNode{
+		{Names: []ct.FullTypeName{"a.InterfaceRoot"}},
+		{Names: []ct.FullTypeName{"a.Interface"}},
+		{Names: []ct.FullTypeName{"a.Implementer"}},
+		{Names: []ct.FullTypeName{"b.GlobalImplementer"}},
+		{Names: []ct.FullTypeName{"b.GlobalReference"}},
+	}
+
+	expected.Edges = []graph.Edge[ct.CTypeHash]{
+		{Source: ct.CTypeNodeHash(expected.Vertices[0]), Target: ct.CTypeNodeHash(expected.Vertices[1])}, // root => iface
+		{Source: ct.CTypeNodeHash(expected.Vertices[1]), Target: ct.CTypeNodeHash(expected.Vertices[2])}, // iface => impl
+		{Source: ct.CTypeNodeHash(expected.Vertices[1]), Target: ct.CTypeNodeHash(expected.Vertices[3])}, // iface => global impl
+		{Source: ct.CTypeNodeHash(expected.Vertices[4]), Target: ct.CTypeNodeHash(expected.Vertices[2])}, // global ref => impl
+	}
+
+	runTestConftamer(t, []string{"interface.go", "interface_global.go"}, nil, &ExpectedGraph{graph: expected, ignoreEdgeData: true})
 }
 
 func TestConftamerAlias(t *testing.T) {
@@ -122,7 +145,7 @@ func TestConftamerAlias(t *testing.T) {
 
 	expected_stored := []ct.TestNode{aliasroot, realroot, alias}
 
-	runTestConftamer(t, []string{"alias.go"}, expected_stored)
+	runTestConftamer(t, []string{"alias.go"}, expected_stored, nil)
 }
 
 func TestConftamerFields(t *testing.T) {
@@ -260,52 +283,10 @@ func TestConftamerFields(t *testing.T) {
 	expected_stored := []ct.TestNode{root}
 	expected_stored = append(expected_stored, rest...)
 
-	runTestConftamer(t, []string{"main.go"}, expected_stored)
+	runTestConftamer(t, []string{"main.go"}, expected_stored, nil)
 }
 
-// Each module_file will be in its own package
-func runTestConftamer(t *testing.T, module_files []string, expected_stored []ct.TestNode) {
-	t.Parallel()
-	module_srcs := []string{}
-	for _, module_file := range module_files {
-
-		module_path := "./testdata/conftamer/" + module_file
-		fd, err := os.Open(module_path)
-		require.NoError(t, err)
-		defer fd.Close()
-		module_path, err = filepath.Abs(module_path)
-		require.NoError(t, err)
-
-		module_src, err := io.ReadAll(fd)
-		require.NoError(t, err)
-		module_srcs = append(module_srcs, string(module_src))
-	}
-
-	module_src_all := `
--- go.mod --
-module example.com
-go 1.18
-	`
-
-	var pkg rune = 'a'
-	for _, module_src := range module_srcs {
-		module_src_all += fmt.Sprintf("\n-- pkg_%s/file.go --\n%v", string(pkg), module_src)
-		pkg += 1
-	}
-	// Full name of package of stuff in pkg_a/*.go is example.com/pkg_a (despite the package directive in the testdata)
-	tree := writeTree(t, module_src_all)
-	// If only one module_file passed, also cut the package prefix
-	module_prefix := "example.com/pkg_"
-	if len(module_files) == 1 {
-		module_prefix += "a."
-	}
-	res := gopls(t, tree, "conftamer", "-m", module_prefix)
-	res.checkExit(true)
-	// Need to print res.stderr/out to see it, unless checkExit fails
-	fmt.Println(res.stderr)
-	fmt.Println(res.stdout)
-
-	// CHECK OUTPUT
+func checkExpectedStored(t *testing.T, tree string, expected_stored []ct.TestNode) {
 	actual_stored := []ct.TestNode{}
 	stored_down_file := filepath.Join(tree, "stored.log")
 	fileToJSON(t, &actual_stored, stored_down_file)
@@ -340,6 +321,94 @@ go 1.18
 			t.Logf("Unexpected node %v: %+v", n.ID, n)
 		}
 		t.Fatalf("\n\nExpected != actual\nExpected:\n %v\nActual:\n %v", expected_stored, actual_stored)
+	}
+}
+
+func checkExpectedGraph(t *testing.T, tree string, expected_graph ExpectedGraph) {
+	actual_file := filepath.Join(tree, "graph.text")
+	_, actual_graph := ct.Deserialize(actual_file)
+
+	// Sort
+	edgesort := func(a, b graph.Edge[ct.CTypeHash]) int {
+		// Sort by source, then target - ignore data (may cause flakiness when write test that checks edge data)
+		src := cmp.Compare(string(a.Source), string(b.Source))
+		if src != 0 {
+			return src
+		}
+
+		return cmp.Compare(string(a.Target), string(b.Target))
+	}
+	slices.SortFunc(expected_graph.graph.Edges, edgesort)
+	slices.SortFunc(actual_graph.Edges, edgesort)
+
+	vertexsort := func(a, b ct.CTypeNode) int {
+		return cmp.Compare(string(ct.CTypeNodeHash(a)), string(ct.CTypeNodeHash(b)))
+	}
+
+	slices.SortFunc(expected_graph.graph.Vertices, vertexsort)
+	slices.SortFunc(actual_graph.Vertices, vertexsort)
+
+	// Compare
+	if expected_graph.ignoreEdgeData {
+		if slices.CompareFunc(expected_graph.graph.Edges, actual_graph.Edges, edgesort) != 0 {
+			t.Fatalf("Edges WRONG:\nExpected %v\nActual %v", expected_graph.graph.Edges, actual_graph.Edges)
+		}
+	} else {
+		if !reflect.DeepEqual(expected_graph.graph.Edges, actual_graph.Edges) {
+			t.Fatalf("Edges WRONG:\nExpected %v\nActual %v", expected_graph.graph.Edges, actual_graph.Edges)
+		}
+	}
+
+	if !reflect.DeepEqual(expected_graph.graph.Vertices, actual_graph.Vertices) {
+		t.Fatalf("Vertices WRONG:\nExpected %v\nActual %v", expected_graph.graph.Vertices, actual_graph.Vertices)
+	}
+}
+
+// Each module_file will be in its own package
+// If expected_stored and/or expected_graph are passed, check against it
+func runTestConftamer(t *testing.T, module_files []string, expected_stored []ct.TestNode, expected_graph *ExpectedGraph) {
+	t.Parallel()
+	module_srcs := []string{}
+	for _, module_file := range module_files {
+		module_path := "./testdata/conftamer/" + module_file
+		fd, err := os.Open(module_path)
+		require.NoError(t, err)
+		defer fd.Close()
+		module_src, err := io.ReadAll(fd)
+		require.NoError(t, err)
+		module_srcs = append(module_srcs, string(module_src))
+	}
+
+	module_src_all := `
+-- go.mod --
+module example.com
+go 1.18
+	`
+
+	var pkg rune = 'a'
+	for _, module_src := range module_srcs {
+		module_src_all += fmt.Sprintf("\n-- pkg_%s/file.go --\n%v", string(pkg), module_src)
+		pkg += 1
+	}
+	// Full name of package of stuff in pkg_a/*.go is example.com/pkg_a (despite the package directive in the testdata)
+	tree := writeTree(t, module_src_all)
+	// If only one module_file passed, also cut the package prefix
+	module_prefix := "example.com/pkg_"
+	if len(module_files) == 1 {
+		module_prefix += "a."
+	}
+	res := gopls(t, tree, "conftamer", "-m", module_prefix)
+	res.checkExit(true)
+	// Need to print res.stderr/out to see it, unless checkExit fails
+	fmt.Println(res.stderr)
+	fmt.Println(res.stdout)
+
+	// CHECK OUTPUT
+	if expected_stored != nil {
+		checkExpectedStored(t, tree, expected_stored)
+	}
+	if expected_graph != nil {
+		checkExpectedGraph(t, tree, *expected_graph)
 	}
 }
 

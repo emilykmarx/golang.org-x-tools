@@ -44,7 +44,7 @@ func (s *Server) References(ctx context.Context, params *protocol.ReferenceParam
 
 // References, plus for any of them that represent a use as a struct field: Info on that struct
 // XXX rename and fix comment on implementer
-func (s *Server) ReferencesMoreInfo(ctx context.Context, params *protocol.ReferenceParams) (_ []protocol.Location, _ []golang.Implementer, rerr error) {
+func (s *Server) ReferencesMoreInfo(ctx context.Context, params *protocol.ReferenceParams) (_ []protocol.Location, _ []golang.TypeInfo, rerr error) {
 	recordLatency := telemetry.StartLatencyTimer("references")
 	defer func() {
 		recordLatency(ctx, rerr)

@@ -35,7 +35,7 @@ func (s *Server) Implementation(ctx context.Context, params *protocol.Implementa
 	return golang.Implementation(ctx, snapshot, fh, params.Range)
 }
 
-func (s *Server) ImplementationMoreInfo(ctx context.Context, params *protocol.ImplementationParams) (_ []golang.Implementer, rerr error) {
+func (s *Server) ImplementationMoreInfo(ctx context.Context, params *protocol.ImplementationParams) (_ []golang.TypeInfo, rerr error) {
 	recordLatency := telemetry.StartLatencyTimer("implementation")
 	defer func() {
 		recordLatency(ctx, rerr)

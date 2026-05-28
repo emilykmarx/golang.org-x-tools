@@ -75,7 +75,7 @@ func (s *Server) DefinitionMoreInfo(ctx context.Context, params *protocol.Defini
 	}
 }
 
-func (s *Server) EnclosedTypes(ctx context.Context, params *protocol.DefinitionParams) (_ []golang.Implementer, rerr error) {
+func (s *Server) EnclosedTypes(ctx context.Context, params *protocol.DefinitionParams) (_ []golang.TypeInfo, rerr error) {
 	recordLatency := telemetry.StartLatencyTimer("definition")
 	defer func() {
 		recordLatency(ctx, rerr)

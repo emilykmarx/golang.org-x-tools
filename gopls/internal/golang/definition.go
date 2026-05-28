@@ -221,7 +221,7 @@ func DefinitionMoreInfo(ctx context.Context, snapshot *cache.Snapshot, fh file.H
 // Find info on any types enclosed in the passed type (e.g. types of the fields enclosed in a struct).
 // (If any are nested, find all of them).
 // rng should be somewhere in the identifier of the type name.
-func EnclosedTypes(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]Implementer, error) {
+func EnclosedTypes(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]TypeInfo, error) {
 	// translate given loc to the type decl
 	struct_loc, err := TypeDefinition(ctx, snapshot, fh, rng)
 	if err != nil {
@@ -236,7 +236,7 @@ func EnclosedTypes(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle
 // For each type enclosed in the passed type:
 // get the type's object and some location of the type identifier.
 // decl_name must be identifier of type name in the enclosing type decl
-func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name protocol.Location) ([]Implementer, error) {
+func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name protocol.Location) ([]TypeInfo, error) {
 	// (obj.cur in DefinitionMoreInfo is cursor of identifier passed to Definition, not of declaration)
 	pkg, pgf, parent_cursor, err := locToCursor(ctx, snapshot, decl_name)
 	if err != nil {
@@ -255,7 +255,7 @@ func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name p
 	// parent_cursor is identifier of type name in type decl
 	// Its parent is TypeSpec
 	// All subtypes are descendants of the TypeSpec
-	child_types := []Implementer{}
+	child_types := []TypeInfo{}
 	for child_cursor := range parent_cursor.Parent().Preorder((*ast.Ident)(nil)) {
 		child_node := child_cursor.Node().(*ast.Ident)
 		if child_node.Name == parent_type_name {
@@ -278,7 +278,7 @@ func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name p
 		}
 
 		child_type_loc := mustLocation(pgf, child_node)
-		child_types = append(child_types, Implementer{Loc: child_type_loc, TypeInfo: child_typeinfo, IsStructField: is_struct_field})
+		child_types = append(child_types, TypeInfo{Loc: child_type_loc, TypeInfo: child_typeinfo, IsStructField: is_struct_field})
 	}
 
 	return child_types, nil

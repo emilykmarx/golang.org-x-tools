@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"time"
 
 	"github.com/dominikbraun/graph"
@@ -49,22 +48,25 @@ func (c *conftamer) DetailedHelp(f *flag.FlagSet) {
 `, DEFAULT_UNMARSHAL_DEFN) // unsure how to put this in the struct tag for the flag
 }
 
-// Type names that implement the UnmarshalYAML interface
-func (c *conftamer) unmarshalImpls() ([]golang.Implementer, error) {
-	// TODO find definition of UnmarshalYAML properly (and other unmarshal pkgs)
-	other_unmarshal_pkgs := []string{"gopkg.in/yaml.v3", "sigs.k8s.io/yaml/goyaml.v2"}
+// Locations of methods implementing the UnmarshalYAML interface
+func (c *conftamer) unmarshalImpls() ([]protocol.Location, error) {
+	// TODO find definition of UnmarshalYAML properly
 	p, err := locStrToImplParams(c.ctx, c.UnmarshalDefn, c.cli)
 	ct.CheckErr(err)
 
 	implementations, err := c.local_server.ImplementationMoreInfo(c.ctx, p)
 	ct.CheckErr(err)
 
-	// Also returns the other two interface definitions from the other two yaml packages in prometheus - ignore
-	implementations = slices.DeleteFunc(implementations, func(impl golang.Implementer) bool {
-		return slices.Contains(other_unmarshal_pkgs, string(impl.PkgPath))
-	})
+	// Just return the locs, to make it clear these are methods not types
+	locs := []protocol.Location{}
+	for _, impl := range implementations {
+		// Also returns the other two interface definitions from the other two yaml packages in prometheus - ignore
+		if impl.TypeInfo == nil { // method
+			locs = append(locs, impl.Loc)
+		}
+	}
 
-	return implementations, nil
+	return locs, nil
 }
 
 // Type definition of type that implements method at location `method_name_loc`
@@ -100,8 +102,8 @@ func (c *conftamer) implementingTypeDefinition(method_name_loc protocol.Location
 }
 
 // Get types that enclose this CType (which is defined at defn_locs)
-func (c *conftamer) getParentCTypes(defn_locs []string) ([]golang.Implementer, error) {
-	parent_ctypes := []golang.Implementer{}
+func (c *conftamer) getParentCTypes(defn_locs []string) ([]golang.TypeInfo, error) {
+	parent_ctypes := []golang.TypeInfo{}
 
 	for _, defn_loc := range defn_locs {
 		p, err := locStrToRefParams(c.ctx, defn_loc, c.cli, false)
@@ -118,8 +120,8 @@ func (c *conftamer) getParentCTypes(defn_locs []string) ([]golang.Implementer, e
 }
 
 // Get types enclosed in this CType (which is defined at defn_locs)
-func (c *conftamer) getChildCTypes(defn_locs []string) ([]golang.Implementer, error) {
-	child_ctypes := []golang.Implementer{}
+func (c *conftamer) getChildCTypes(defn_locs []string) ([]golang.TypeInfo, error) {
+	child_ctypes := []golang.TypeInfo{}
 
 	for _, defn_loc := range defn_locs {
 		p, _, err := locStrToDefnParams(c.ctx, defn_loc, c.cli)
@@ -132,6 +134,22 @@ func (c *conftamer) getChildCTypes(defn_locs []string) ([]golang.Implementer, er
 	}
 
 	return child_ctypes, nil
+}
+
+func (c *conftamer) getInterfaceImpls(defn_locs []string) ([]golang.TypeInfo, error) {
+	impl_ctypes := []golang.TypeInfo{}
+
+	for _, defn_loc := range defn_locs {
+		p, err := locStrToImplParams(c.ctx, defn_loc, c.cli)
+		ct.CheckErr(err)
+
+		implementations, err := c.local_server.ImplementationMoreInfo(c.ctx, p)
+		ct.CheckErr(err)
+
+		impl_ctypes = append(impl_ctypes, implementations...)
+	}
+
+	return impl_ctypes, nil
 }
 
 type NeighAge int
@@ -202,10 +220,16 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 	children, err := c.getChildCTypes(defn_locs)
 	ct.CheckErr(err)
 
+	if _, is_iface := obj.Type().Underlying().(*types.Interface); is_iface {
+		iface_impls, err := c.getInterfaceImpls(defn_locs)
+		ct.CheckErr(err)
+		children = append(children, iface_impls...)
+	}
+
 	graph.Logf(c.log, slog.LevelDebug, "PARENTS: %+v", parents)
 	graph.Logf(c.log, slog.LevelDebug, "CHILDREN: %+v", children)
 
-	for parent_or_child, new_neighbors := range [][]golang.Implementer{parents, children} {
+	for parent_or_child, new_neighbors := range [][]golang.TypeInfo{parents, children} {
 		for _, new := range new_neighbors {
 			new_defn_locs, err := locsToSpans(c.ctx, c.cli, []protocol.Location{new.Loc})
 			ct.CheckErr(err)
@@ -304,8 +328,8 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 
 	// 2. Find all CTypes reachable from the unmarshaling types
 	for _, unmarshalImpl := range unmarshalImpls {
-		graph.Logf(c.log, slog.LevelInfo, "Finding types reachable from %v.%v", unmarshalImpl.PkgPath, unmarshalImpl.TypeName)
-		defn_locs, defn_obj, err := c.implementingTypeDefinition(unmarshalImpl.Loc)
+		defn_locs, defn_obj, err := c.implementingTypeDefinition(unmarshalImpl)
+		graph.Logf(c.log, slog.LevelInfo, "Finding types reachable from %v", ct.TypeName(defn_obj))
 		ct.CheckErr(err)
 
 		nice_defn_locs, err := locsToSpans(ctx, cli, defn_locs)
@@ -316,6 +340,10 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	}
 
 	c.LogGraphStats(start)
+	// Persist graph before proceeding - rest is slow and may crash
+	start = time.Now()
+	c.ctypes.Serialize("graph.text", c.ModulePrefix)
+	graph.Logf(c.log, slog.LevelInfo, "serialize graph: %v", time.Since(start))
 
 	// 3. Find param keys and corresponding source code expressions
 	graph.Logf(c.log, slog.LevelInfo, "Getting param keys and corresponding expressions")

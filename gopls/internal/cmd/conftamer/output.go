@@ -3,9 +3,11 @@ package conftamer
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/dominikbraun/graph"
@@ -41,6 +43,105 @@ func (a *Stored) UnmarshalText(text []byte) error {
 	return nil
 }
 
+// Make CTypeNodes unmarshalable: types.Type isn't, elide the rest too for now
+func (n *CTypeNode) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&n.Names)
+}
+func (n *CTypeNode) UnmarshalJSON(b []byte) error {
+	return json.Unmarshal(b, &n.Names)
+}
+
+// Marshalable representation of CTypeGraph - also more easily comparable
+type Marshalable struct {
+	Edges    []graph.Edge[CTypeHash]
+	Vertices []CTypeNode
+}
+
+// Cut prefix from both vertex names and edge hashes.
+// Vertices are marshaled as in MarshalJSON() override above.
+// Edges are marshaled with default MarshalJSON, which includes src/target and edge data.
+func Marshal(g CTypeGraph, cutprefix string) ([]byte, Marshalable) {
+	// Edges
+	all := Marshalable{}
+	edges, err := g.Edges()
+	CheckErr(err)
+	short_edges := []graph.Edge[CTypeHash]{}
+	for _, edge := range edges {
+		short_src, _ := strings.CutPrefix(string(edge.Source), cutprefix)
+		short_target, _ := strings.CutPrefix(string(edge.Target), cutprefix)
+		edge.Source = CTypeHash(short_src)
+		edge.Target = CTypeHash(short_target)
+		short_edges = append(short_edges, edge)
+	}
+	marshaled, err := json.Marshal(short_edges)
+	CheckErr(err)
+	all.Edges = short_edges
+
+	// Vertices
+	err = graph.DFSAllStartingNodes(g, func(n CTypeHash) bool {
+		node, err := g.Vertex(n)
+		short_names := []FullTypeName{}
+		for _, name := range node.Names {
+			short_name, _ := strings.CutPrefix(string(name), cutprefix)
+			short_names = append(short_names, FullTypeName(short_name))
+		}
+		node.Names = short_names
+		CheckErr(err)
+		marshaled, err = json.Marshal(node)
+		CheckErr(err)
+
+		// ignore dups
+		short_hash, _ := strings.CutPrefix(string(n), cutprefix)
+		if !slices.ContainsFunc(all.Vertices, func(existing_n CTypeNode) bool { return CTypeHash(short_hash) == CTypeNodeHash(existing_n) }) {
+			all.Vertices = append(all.Vertices, node)
+		}
+		return false // continue
+	}, graph.UpdatePathVertices[CTypeHash, CTypeNode]{}, false, false, graph.Forwards) // no need for all paths
+
+	marshaled, err = json.Marshal(all)
+	CheckErr(err)
+	return marshaled, all
+}
+
+func (c *CTypes) Serialize(filename string, cutprefix string) {
+	marshaled, _ := Marshal(c.Graph, cutprefix)
+	WriteTestFile(marshaled, filename)
+}
+
+func Deserialize(filename string) (CTypeGraph, Marshalable) {
+	fd, err := os.Open(filename)
+	CheckErr(err)
+	defer fd.Close()
+	marshaled, err := io.ReadAll(fd)
+	CheckErr(err)
+	return Unmarshal(marshaled)
+}
+
+func Unmarshal(marshaled []byte) (CTypeGraph, Marshalable) {
+	all := Marshalable{}
+	err := json.Unmarshal(marshaled, &all)
+	CheckErr(err)
+
+	g := graph.New(CTypeNodeHash, nil, graph.Directed())
+
+	// Vertices
+	for _, n := range all.Vertices {
+		err = g.AddVertex(n, func(vp *graph.VertexProperties) {})
+		if !errors.Is(graph.ErrVertexAlreadyExists, err) {
+			CheckErr(err)
+		}
+	}
+	// Edges
+	for _, e := range all.Edges {
+		err = g.AddEdge(graph.CopyEdge(e)) // preserve properties
+		if !errors.Is(graph.ErrEdgeAlreadyExists, err) {
+			CheckErr(err)
+		}
+	}
+
+	return g, all
+}
+
 // If !all, just print <package.type>
 // Remove cutprefix from type when printing and storing test logs
 // Prints depth-first starting from each root (so each CType will be printed once for every root it's reachable from)
@@ -73,24 +174,20 @@ func (c *CTypes) PrettyPrint(cutprefix string) error {
 
 	marshaled, err := json.Marshal(all_nodes)
 	CheckErr(err)
-
-	// Need to write in this fancy way for test to be able to unmarshal it
-	var buf bytes.Buffer
-	buf.Write(marshaled)
-	outfile := "stored.log"
-	f, err := os.Create(outfile)
-	CheckErr(err)
-	defer f.Close()
-	_, err = io.Copy(f, &buf)
-	CheckErr(err)
+	WriteTestFile(marshaled, "stored.log")
 
 	return nil
 }
 
-// For convenience, remove the package name
-func shortHash(full FullTypeName) string {
-	hash_parts := strings.Split(string(full), ".")
-	return hash_parts[len(hash_parts)-1]
+// Need to write in this fancy way for test to be able to unmarshal it
+func WriteTestFile(marshaled []byte, filename string) {
+	var buf bytes.Buffer
+	buf.Write(marshaled)
+	f, err := os.Create(filename)
+	CheckErr(err)
+	defer f.Close()
+	_, err = io.Copy(f, &buf)
+	CheckErr(err)
 }
 
 func PrintStored(k Stored) {

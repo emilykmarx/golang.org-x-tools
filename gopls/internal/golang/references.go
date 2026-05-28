@@ -54,7 +54,7 @@ func References(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, r
 	return locations, nil
 }
 
-func ReferencesMoreInfo(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range, includeDeclaration bool) ([]protocol.Location, []Implementer, error) {
+func ReferencesMoreInfo(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range, includeDeclaration bool) ([]protocol.Location, []TypeInfo, error) {
 	references, structs, err := references(ctx, snapshot, fh, rng, includeDeclaration)
 	if err != nil {
 		return nil, nil, err
@@ -77,7 +77,7 @@ type reference struct {
 // references returns a list of all references (sorted with
 // definitions before uses) to the object denoted by the identifier at
 // the given file/position, searching the entire workspace.
-func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rng protocol.Range, includeDeclaration bool) ([]reference, []Implementer, error) {
+func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rng protocol.Range, includeDeclaration bool) ([]reference, []TypeInfo, error) {
 	ctx, done := event.Start(ctx, "golang.references")
 	defer done()
 
@@ -88,7 +88,7 @@ func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rn
 	}
 
 	var refs []reference
-	var structs []Implementer
+	var structs []TypeInfo
 	if inPackageName {
 		refs, err = packageReferences(ctx, snapshot, f.URI())
 	} else {
@@ -228,7 +228,7 @@ func packageReferences(ctx context.Context, snapshot *cache.Snapshot, uri protoc
 }
 
 // ordinaryReferences computes references for all ordinary objects (not package declarations).
-func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, rng protocol.Range) ([]reference, []Implementer, error) {
+func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, rng protocol.Range) ([]reference, []TypeInfo, error) {
 	// Strategy: use the reference information computed by the
 	// type checker to find the declaration. First type-check this
 	// package to find the declaration, then type check the
@@ -370,9 +370,9 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 	var (
 		refsMu         sync.Mutex
 		refs           []reference
-		parent_structs []Implementer
+		parent_structs []TypeInfo
 	)
-	report := func(loc protocol.Location, parent_struct *Implementer, isDecl bool) {
+	report := func(loc protocol.Location, parent_struct *TypeInfo, isDecl bool) {
 		ref := reference{
 			isDeclaration: isDecl,
 			location:      loc,
@@ -603,7 +603,7 @@ func expandMethodSearch(ctx context.Context, snapshot *cache.Snapshot, workspace
 // localReferences traverses syntax and reports each reference to one
 // of the target objects, or (if correspond is set) an object that
 // corresponds to one of them via interface satisfaction.
-func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspond bool, report func(loc protocol.Location, parent_type *Implementer, isDecl bool)) error {
+func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspond bool, report func(loc protocol.Location, parent_type *TypeInfo, isDecl bool)) error {
 	// If we're searching for references to a method optionally
 	// broaden the search to include references to corresponding
 	// methods of mutually assignable receiver types.
@@ -671,7 +671,7 @@ func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspo
 // If reference is part of a type declaration, find the type being declared
 // (If part of a nested type decl, find the innermost one)
 // (e.g. a struct containing a field of child_cursor's type)
-func enclosingType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector.Cursor) (*Implementer, error) {
+func enclosingType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector.Cursor) (*TypeInfo, error) {
 	for parent_cursor := range child_cursor.Enclosing((*ast.TypeSpec)(nil)) {
 		// Found parent type => get its info
 		parent_node := parent_cursor.Node().(*ast.TypeSpec)
@@ -686,7 +686,7 @@ func enclosingType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector
 		// TypeSpec location start is struct name and end is the closing brace => move end back to start so it's within the name
 		parent_type_loc.Range.End = parent_type_loc.Range.Start
 
-		return &Implementer{Loc: parent_type_loc, TypeInfo: parent_typeinfo, IsStructField: is_struct_field}, nil
+		return &TypeInfo{Loc: parent_type_loc, TypeInfo: parent_typeinfo, IsStructField: is_struct_field}, nil
 	}
 
 	return nil, nil // no enclosing type
@@ -705,7 +705,7 @@ func isStructDecl(typeSpec *ast.TypeSpec) bool {
 }
 
 // Assuming target is in subtree and is the identifier of a type, find its type info.
-// (If we run into edge cases where this doesn't work, look more closely at TypeDefinition))
+// (If we run into edge cases where this doesn't work, look more closely at TypeDefinition())
 func cursorToTypeInfo(target_node ast.Node, subtree inspector.Cursor, pkg *cache.Package) (*types.TypeName, error) {
 	target_cursor, ok := subtree.FindNode(target_node) // convert to cursor
 	if !ok {

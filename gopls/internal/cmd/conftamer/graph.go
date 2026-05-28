@@ -45,6 +45,8 @@ type FieldInfo struct {
 	Tag string
 }
 
+var UNKNOWNFIELD = FieldInfo{Field: "<unknown>", Tag: "<unknown>"}
+
 // NOTE to look up a type name in the CTypeGraph, first find its hash in the CTypeList
 func (c *CTypes) GetHash(type_name FullTypeName) (CTypeHash, bool) {
 	hash, ok := c.List[type_name]
@@ -248,7 +250,7 @@ func (c *CTypes) AddCTypeEdge(parent_hash CTypeHash, child_name FullTypeName) er
 	if !ok {
 		// We know we haven't supported all possibilities yet and will just result in wrong tags/keys which is ok for now
 		graph.Logf(c.Graph.Log(), slog.LevelDebug, "AddCTypeEdge - parent %v has no field info for child %v\n", parent_hash, child_name)
-		child_field = []FieldInfo{{Field: "<unknown>", Tag: "<unknown>"}}
+		child_field = []FieldInfo{UNKNOWNFIELD}
 	}
 
 	child_hash, ok := c.GetHash(child_name)
