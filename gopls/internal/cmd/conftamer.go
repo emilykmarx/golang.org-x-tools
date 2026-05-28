@@ -32,7 +32,8 @@ type conftamer struct {
 }
 
 const (
-	DEFAULT_UNMARSHAL_DEFN = "/home/emily/go/pkg/mod/gopkg.in/yaml.v2@v2.4.0/yaml.go:33:3"
+	// TODO find definition of UnmarshalYAML properly
+	DEFAULT_UNMARSHAL_DEFN = "/home/emily/go/pkg/mod/gopkg.in/yaml.v2@v2.4.0/yaml.go:32:6"
 )
 
 func (c *conftamer) Name() string      { return "conftamer" }
@@ -46,59 +47,6 @@ func (c *conftamer) DetailedHelp(f *flag.FlagSet) {
 	fmt.Fprintf(f.Output(), `
 	Default: %[1]v
 `, DEFAULT_UNMARSHAL_DEFN) // unsure how to put this in the struct tag for the flag
-}
-
-// Locations of methods implementing the UnmarshalYAML interface
-func (c *conftamer) unmarshalImpls() ([]protocol.Location, error) {
-	// TODO find definition of UnmarshalYAML properly
-	p, err := locStrToImplParams(c.ctx, c.UnmarshalDefn, c.cli)
-	ct.CheckErr(err)
-
-	implementations, err := c.local_server.ImplementationMoreInfo(c.ctx, p)
-	ct.CheckErr(err)
-
-	// Just return the locs, to make it clear these are methods not types
-	locs := []protocol.Location{}
-	for _, impl := range implementations {
-		// Also returns the other two interface definitions from the other two yaml packages in prometheus - ignore
-		if impl.TypeInfo == nil { // method
-			locs = append(locs, impl.Loc)
-		}
-	}
-
-	return locs, nil
-}
-
-// Type definition of type that implements method at location `method_name_loc`
-func (c *conftamer) implementingTypeDefinition(method_name_loc protocol.Location) ([]protocol.Location, *types.TypeName, error) {
-	// 1. method name location => type name location
-	// TODO proper way of doing this with AST (this assumes single space between type name and method name) - effectiveReceiver?
-	type_name_loc := method_name_loc
-	type_name_loc.Range.Start.Character = method_name_loc.Range.Start.Character - 2
-	type_name_loc.Range.End.Character = type_name_loc.Range.Start.Character
-
-	// 2. type name location => type definition
-	p := protocol.DefinitionParams{
-		TextDocumentPositionParams: protocol.LocationTextDocumentPositionParams(type_name_loc),
-	}
-	defn_locs, defn_obj, err := c.local_server.DefinitionMoreInfo(c.ctx, &p)
-	ct.CheckErr(err)
-
-	if len(defn_locs) == 0 {
-		err := fmt.Errorf("%v: no definition location (not an identifier?)", type_name_loc)
-		ct.CheckErr(err)
-	}
-	if defn_obj == nil {
-		err := fmt.Errorf("%v: no object at locs %v", type_name_loc, defn_locs)
-		ct.CheckErr(err)
-	}
-	type_info, ok := (*defn_obj).(*types.TypeName)
-	if !ok {
-		err := fmt.Errorf("obj %+v is not a type", *defn_obj)
-		ct.CheckErr(err)
-	}
-
-	return defn_locs, type_info, nil
 }
 
 // Get types that enclose this CType (which is defined at defn_locs)
@@ -161,7 +109,7 @@ const (
 
 // Add all CTypes reachable from this one, stopping on reaching one we've already found
 // neigh_* is info about the neighbor we found this obj via (if any)
-// defn_locs is of the obj
+// defn_locs is of the obj (the 1-indexed format, which is what the gopls functions take but not what they return)
 func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, neigh_name *ct.FullTypeName, neigh_age NeighAge, neigh_reason ct.NeighReason) error {
 	// Ignore types not declared in package scope
 	if obj.Parent() == nil || obj.Parent().Parent() != types.Universe {
@@ -323,19 +271,18 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 
 	c.local_server = cli.server.(*server.Server)
 	graph.Logf(c.log, slog.LevelInfo, "Finding types implementing UnmarshalYAML")
-	unmarshalImpls, err := c.unmarshalImpls()
+	unmarshalImpls, err := c.getInterfaceImpls([]string{c.UnmarshalDefn})
 	ct.CheckErr(err)
 
 	// 2. Find all CTypes reachable from the unmarshaling types
 	for _, unmarshalImpl := range unmarshalImpls {
-		defn_locs, defn_obj, err := c.implementingTypeDefinition(unmarshalImpl)
-		graph.Logf(c.log, slog.LevelInfo, "Finding types reachable from %v", ct.TypeName(defn_obj))
+		graph.Logf(c.log, slog.LevelInfo, "Finding types reachable from %v", ct.TypeName(unmarshalImpl.TypeInfo))
 		ct.CheckErr(err)
 
-		nice_defn_locs, err := locsToSpans(ctx, cli, defn_locs)
+		nice_defn_locs, err := locsToSpans(ctx, cli, []protocol.Location{unmarshalImpl.Loc})
 		ct.CheckErr(err)
 
-		err = c.addReachableCTypes(defn_obj, nice_defn_locs, nil, 0, 0)
+		err = c.addReachableCTypes(unmarshalImpl.TypeInfo, nice_defn_locs, nil, 0, 0)
 		ct.CheckErr(err)
 	}
 
