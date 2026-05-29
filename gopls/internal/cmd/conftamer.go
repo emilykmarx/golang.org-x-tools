@@ -241,6 +241,9 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	if c.UnmarshalDefn == "" {
 		c.UnmarshalDefn = DEFAULT_UNMARSHAL_DEFN
 	}
+	if c.ModulePrefix == "" {
+		graph.Logf(c.log, slog.LevelWarn, "Module prefix not set")
+	}
 
 	cli, _, err := c.app.connect(ctx)
 	if err != nil {
@@ -289,17 +292,20 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	c.LogGraphStats(start)
 	// Persist graph before proceeding - rest is slow and may crash
 	start = time.Now()
+	graph.Logf(c.log, slog.LevelInfo, "Serializing")
 	c.ctypes.Serialize("graph.text", c.ModulePrefix)
-	graph.Logf(c.log, slog.LevelInfo, "serialize graph: %v", time.Since(start))
+	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
 
 	// 3. Find param keys and corresponding source code expressions
 	graph.Logf(c.log, slog.LevelInfo, "Getting param keys and corresponding expressions")
 	err = c.ctypes.GetCTypeParams()
 	ct.CheckErr(err)
 
-	graph.Logf(c.log, slog.LevelInfo, "Outputting CTypes")
-	err = c.ctypes.PrettyPrint(c.ModulePrefix, true)
+	start = time.Now()
+	graph.Logf(c.log, slog.LevelInfo, "Pretty-printing")
+	err = c.ctypes.PrettyPrint(c.ModulePrefix, true, false)
 	ct.CheckErr(err)
+	graph.Logf(c.log, slog.LevelInfo, "Pretty-print: %v", time.Since(start))
 
 	graph.Logf(c.log, slog.LevelInfo, "Exit CTypes finder")
 

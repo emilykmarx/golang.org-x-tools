@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/dominikbraun/graph"
@@ -73,32 +72,25 @@ func Marshal(g CTypeGraph, cutprefix string) ([]byte, Marshalable) {
 		edge.Target = CTypeHash(short_target)
 		short_edges = append(short_edges, edge)
 	}
-	marshaled, err := json.Marshal(short_edges)
-	CheckErr(err)
 	all.Edges = short_edges
 
 	// Vertices
-	err = graph.DFSAllStartingNodes(g, func(n CTypeHash) bool {
-		node, err := g.Vertex(n)
+	vertices, err := g.Vertices()
+	CheckErr(err)
+	short_vertices := []CTypeNode{}
+	for _, node := range vertices {
 		short_names := []FullTypeName{}
 		for _, name := range node.Names {
 			short_name, _ := strings.CutPrefix(string(name), cutprefix)
 			short_names = append(short_names, FullTypeName(short_name))
 		}
 		node.Names = short_names
-		CheckErr(err)
-		marshaled, err = json.Marshal(node)
-		CheckErr(err)
+		short_vertices = append(short_vertices, node)
+	}
+	all.Vertices = short_vertices
 
-		// ignore dups
-		short_hash, _ := strings.CutPrefix(string(n), cutprefix)
-		if !slices.ContainsFunc(all.Vertices, func(existing_n CTypeNode) bool { return CTypeHash(short_hash) == CTypeNodeHash(existing_n) }) {
-			all.Vertices = append(all.Vertices, node)
-		}
-		return false // continue
-	}, graph.UpdatePathVertices[CTypeHash, CTypeNode]{}, false, false, graph.Forwards) // no need for all paths
-
-	marshaled, err = json.Marshal(all)
+	CheckErr(err)
+	marshaled, err := json.Marshal(all)
 	CheckErr(err)
 	return marshaled, all
 }
@@ -143,9 +135,11 @@ func Unmarshal(marshaled []byte) (CTypeGraph, Marshalable) {
 }
 
 // Write stored up/down/final for testing.
-// Prints depth-first starting from each root (so each CType will be printed once for every root it's reachable from).
+// Prints depth-first starting from each root.
 // If only_prefix: Only print nodes where any of the names start with prefix.
-func (c *CTypes) PrettyPrint(cutprefix string, only_prefix bool) error {
+// If all_paths: Print each node every time it's reachable on any path.
+// Else: Print each node once per root it's reachable from.
+func (c *CTypes) PrettyPrint(cutprefix string, only_prefix bool, all_paths bool) error {
 	all_nodes := []TestNode{}
 	err := graph.DFSAllStartingNodes(c.Graph, func(n CTypeHash) bool {
 		node, err := c.Graph.Vertex(n)
@@ -174,7 +168,7 @@ func (c *CTypes) PrettyPrint(cutprefix string, only_prefix bool) error {
 			Stored_final: node.Stored_final,
 		})
 		return false // continue
-	}, graph.UpdatePathVertices[CTypeHash, CTypeNode]{}, true, true, graph.Forwards)
+	}, graph.UpdatePathVertices[CTypeHash, CTypeNode]{}, all_paths, true, graph.Forwards)
 
 	CheckErr(err)
 
