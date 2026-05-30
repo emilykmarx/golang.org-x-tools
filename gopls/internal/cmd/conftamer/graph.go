@@ -68,6 +68,8 @@ type CTypeNode struct {
 	Stored_down  map[Stored]struct{} // becomes irrelevant once entire push down pass is done
 	Stored_up    map[Stored]struct{}
 	Stored_final map[Stored]struct{}
+
+	Indent int
 }
 
 // Accumulating info about a param a node has access to
@@ -370,7 +372,7 @@ func (c *CTypes) pushDown() error {
 		UpdateFirst:  graph.Parent,
 	}
 
-	return graph.DFSAllStartingNodes(c.Graph, func(CTypeHash) bool { return false }, update_vertices, true, false, graph.Forwards)
+	return graph.DFSAllStartingNodes(c.Graph, func(CTypeHash) bool { return false }, update_vertices, true, graph.Forwards)
 }
 
 // Remove keys corresponding to nodes before n in path (if any).
@@ -451,7 +453,7 @@ func (c *CTypes) pushUp() error {
 		UpdateFirst:  graph.Child,
 	}
 
-	return graph.DFSAllStartingNodes(c.Graph, func(CTypeHash) bool { return false }, update_vertices, true, false, graph.Backwards)
+	return graph.DFSAllStartingNodes(c.Graph, func(CTypeHash) bool { return false }, update_vertices, true, graph.Backwards)
 }
 
 // For each CType:

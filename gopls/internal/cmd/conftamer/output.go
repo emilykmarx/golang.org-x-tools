@@ -134,6 +134,28 @@ func Unmarshal(marshaled []byte) (CTypeGraph, Marshalable) {
 	return g, all
 }
 
+// Whether any of the names start with prefix.
+// Return all its shortened names concatenated.
+func IsModuleNode(hash CTypeHash, cutprefix string, g CTypeGraph) (string, bool) {
+	node, err := g.Vertex(hash)
+	CheckErr(err)
+
+	contains_prefix := false
+	names := ""
+	for i, name := range node.Names {
+		short_name, contains := strings.CutPrefix(string(name), cutprefix)
+		if contains {
+			contains_prefix = true
+		}
+		if i > 0 {
+			names += ", "
+		}
+		names += short_name
+	}
+
+	return names, contains_prefix
+}
+
 // Write stored up/down/final for testing.
 // Prints depth-first starting from each root.
 // If only_prefix: Only print nodes where any of the names start with prefix.
@@ -141,26 +163,25 @@ func Unmarshal(marshaled []byte) (CTypeGraph, Marshalable) {
 // Else: Print each node once per root it's reachable from.
 func (c *CTypes) PrettyPrint(cutprefix string, only_prefix bool, all_paths bool) error {
 	all_nodes := []TestNode{}
-	err := graph.DFSAllStartingNodes(c.Graph, func(n CTypeHash) bool {
-		node, err := c.Graph.Vertex(n)
+	recordIndent := func(g graph.Graph[CTypeHash, CTypeNode], parent CTypeNode, child CTypeNode) CTypeNode {
+		// Record child's indent as parent + 1
+		child.Indent = parent.Indent + 1
+		return child
+	}
+	err := graph.DFSAllStartingNodes(c.Graph, func(hash CTypeHash) bool {
+		names, contains_prefix := IsModuleNode(hash, cutprefix, c.Graph)
+
+		node, err := c.Graph.Vertex(hash)
 		CheckErr(err)
-		names := ""
-		contains_prefix := false
-		for i, name := range node.Names {
-			short_name, contains := strings.CutPrefix(string(name), cutprefix)
-			if contains {
-				contains_prefix = true
-			}
-			if i > 0 {
-				names += ", "
-			}
-			names += short_name
+
+		for range node.Indent {
+			fmt.Printf(" ")
 		}
 		if !only_prefix || contains_prefix {
 			fmt.Printf("%v\n", names)
 		}
 
-		short_hash, _ := strings.CutPrefix(string(n), cutprefix)
+		short_hash, _ := strings.CutPrefix(string(hash), cutprefix)
 		all_nodes = append(all_nodes, TestNode{
 			ID:           short_hash,
 			Stored_down:  node.Stored_down,
@@ -168,7 +189,7 @@ func (c *CTypes) PrettyPrint(cutprefix string, only_prefix bool, all_paths bool)
 			Stored_final: node.Stored_final,
 		})
 		return false // continue
-	}, graph.UpdatePathVertices[CTypeHash, CTypeNode]{}, all_paths, true, graph.Forwards)
+	}, graph.UpdatePathVertices[CTypeHash, CTypeNode]{UpdateChild: &recordIndent}, all_paths, graph.Forwards)
 
 	CheckErr(err)
 

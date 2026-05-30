@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dominikbraun/graph"
@@ -28,7 +29,7 @@ type conftamer struct {
 	ctypes        *ct.CTypes
 	log           *slog.Logger
 	UnmarshalDefn string `flag:"u,unmarshal_defn" help:"Location of the unmarshal interface definition"`
-	ModulePrefix  string `flag:"m,module_prefix" help:"Prefix of module path (used to pretty-print)"`
+	ModulePrefix  string `flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print)"`
 }
 
 const (
@@ -242,6 +243,11 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		c.UnmarshalDefn = DEFAULT_UNMARSHAL_DEFN
 	}
 	if c.ModulePrefix == "" {
+		if _, trailing_slash := strings.CutSuffix(c.ModulePrefix, "/"); trailing_slash {
+			// Quick validation - shouldn't have trailing slash
+			// (leave it in, so we can tell which nodes had the module prefix after we cut it)
+			return tool.CommandLineErrorf("module prefix should be from go.mod")
+		}
 		graph.Logf(c.log, slog.LevelWarn, "Module prefix not set")
 	}
 
