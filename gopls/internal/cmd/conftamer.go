@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -108,6 +109,18 @@ const (
 	NeighIsChild
 )
 
+// Interfaces that are just `String()`
+var (
+	STRING_INTERFACES = []ct.FullTypeName{
+		"fmt.Stringer",
+		"expvar.Var",
+		"runtime.stringer",
+		"context.stringer",
+		"os/signal.stringer",
+		"github.com/distribution/reference.Reference",
+	}
+)
+
 // Add all CTypes reachable from this one, stopping on reaching one we've already found
 // neigh_* is info about the neighbor we found this obj via (if any)
 // defn_locs is of the obj (the 1-indexed format, which is what the gopls functions take but not what they return)
@@ -170,9 +183,12 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 	ct.CheckErr(err)
 
 	if _, is_iface := obj.Type().Underlying().(*types.Interface); is_iface {
-		iface_impls, err := c.getInterfaceImpls(defn_locs)
-		ct.CheckErr(err)
-		children = append(children, iface_impls...)
+		// Implementing string interface doesn't indicate anything interesting
+		if !slices.Contains(STRING_INTERFACES, cur_name) {
+			iface_impls, err := c.getInterfaceImpls(defn_locs)
+			ct.CheckErr(err)
+			children = append(children, iface_impls...)
+		}
 	}
 
 	graph.Logf(c.log, slog.LevelDebug, "PARENTS: %+v", parents)
