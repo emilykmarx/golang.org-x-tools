@@ -168,7 +168,8 @@ func (c *CTypes) PrettyPrint(cutprefix string, only_prefix bool, all_paths bool)
 		child.Indent = parent.Indent + 1
 		return child
 	}
-	err := graph.DFSAllStartingNodes(c.Graph, func(hash CTypeHash) bool {
+
+	visit := func(hash CTypeHash) bool {
 		names, contains_prefix := IsModuleNode(hash, cutprefix, c.Graph)
 
 		node, err := c.Graph.Vertex(hash)
@@ -189,7 +190,11 @@ func (c *CTypes) PrettyPrint(cutprefix string, only_prefix bool, all_paths bool)
 			Stored_final: node.Stored_final,
 		})
 		return false // continue
-	}, graph.UpdatePathVertices[CTypeHash, CTypeNode]{UpdateChild: &recordIndent}, all_paths, graph.Forwards)
+	}
+
+	opts := graph.DFSOpts[CTypeHash, CTypeNode]{Visit: &visit, Update_vertices: graph.UpdatePathVertices[CTypeHash, CTypeNode]{UpdateChild: &recordIndent},
+		All_paths: all_paths, Direction: graph.Forwards}
+	err := graph.DFSAllStartingNodes(c.Graph, opts)
 
 	CheckErr(err)
 

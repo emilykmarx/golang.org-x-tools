@@ -372,7 +372,8 @@ func (c *CTypes) pushDown() error {
 		UpdateFirst:  graph.Parent,
 	}
 
-	return graph.DFSAllStartingNodes(c.Graph, func(CTypeHash) bool { return false }, update_vertices, true, graph.Forwards)
+	opts := graph.DFSOpts[CTypeHash, CTypeNode]{Update_vertices: update_vertices, All_paths: true, Direction: graph.Forwards}
+	return graph.DFSAllStartingNodes(c.Graph, opts)
 }
 
 // Remove keys corresponding to nodes before n in path (if any).
@@ -453,7 +454,8 @@ func (c *CTypes) pushUp() error {
 		UpdateFirst:  graph.Child,
 	}
 
-	return graph.DFSAllStartingNodes(c.Graph, func(CTypeHash) bool { return false }, update_vertices, true, graph.Backwards)
+	opts := graph.DFSOpts[CTypeHash, CTypeNode]{Update_vertices: update_vertices, All_paths: true, Direction: graph.Backwards}
+	return graph.DFSAllStartingNodes(c.Graph, opts)
 }
 
 // For each CType:
