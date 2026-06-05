@@ -69,11 +69,12 @@ type ExpectedGraph struct {
 func TestConftamerInterface(t *testing.T) {
 	expected := ct.Marshalable{}
 	expected.Vertices = []ct.CTypeNode{
-		{Names: []ct.FullTypeName{"a.InterfaceRoot"}},
-		{Names: []ct.FullTypeName{"a.Interface"}},
-		{Names: []ct.FullTypeName{"a.Implementer"}},
-		{Names: []ct.FullTypeName{"b.GlobalImplementer"}},
-		{Names: []ct.FullTypeName{"b.GlobalReference"}},
+		{Names: []ct.FullTypeName{"a.InterfaceRoot"}, Methods: []ct.FullTypeName{"(*example.com/pkg_a.InterfaceRoot).UnmarshalYAML"}},
+		// Need to put empty methods slices to make reflect.DeepEqual work
+		{Names: []ct.FullTypeName{"a.Interface"}, Methods: []ct.FullTypeName{}},
+		{Names: []ct.FullTypeName{"a.Implementer"}, Methods: []ct.FullTypeName{"(*example.com/pkg_a.Implementer).Method"}},
+		{Names: []ct.FullTypeName{"b.GlobalImplementer"}, Methods: []ct.FullTypeName{"(*example.com/pkg_b.GlobalImplementer).Method"}},
+		{Names: []ct.FullTypeName{"b.GlobalReference"}, Methods: []ct.FullTypeName{}},
 	}
 
 	expected.Edges = []graph.Edge[ct.CTypeHash]{
@@ -341,12 +342,8 @@ func checkExpectedGraph(t *testing.T, tree string, expected_graph ExpectedGraph)
 	slices.SortFunc(expected_graph.graph.Edges, edgesort)
 	slices.SortFunc(actual_graph.Edges, edgesort)
 
-	vertexsort := func(a, b ct.CTypeNode) int {
-		return cmp.Compare(string(ct.CTypeNodeHash(a)), string(ct.CTypeNodeHash(b)))
-	}
-
-	slices.SortFunc(expected_graph.graph.Vertices, vertexsort)
-	slices.SortFunc(actual_graph.Vertices, vertexsort)
+	slices.SortFunc(expected_graph.graph.Vertices, ct.NodeSort)
+	slices.SortFunc(actual_graph.Vertices, ct.NodeSort)
 
 	// Compare
 	if expected_graph.ignoreEdgeData {

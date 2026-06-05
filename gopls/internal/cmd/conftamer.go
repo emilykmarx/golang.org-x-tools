@@ -247,8 +247,8 @@ func (c *conftamer) LogGraphStats(start time.Time) {
 	roots, leaves, err := graph.RootsLeaves(c.ctypes.Graph)
 	ct.CheckErr(err)
 
-	graph.Logf(c.log, slog.LevelInfo, "%v roots: %+v", len(roots), roots)
-	graph.Logf(c.log, slog.LevelInfo, "%v leaves: %+v", len(leaves), leaves)
+	graph.Logf(c.log, slog.LevelInfo, "%v roots", len(roots))
+	graph.Logf(c.log, slog.LevelInfo, "%v leaves", len(leaves))
 }
 
 func (c *conftamer) Run(ctx context.Context, args ...string) error {

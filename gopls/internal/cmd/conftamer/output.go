@@ -42,12 +42,27 @@ func (a *Stored) UnmarshalText(text []byte) error {
 	return nil
 }
 
-// Make CTypeNodes unmarshalable: types.Type isn't, elide the rest too for now
+type MarshalableNode struct {
+	Names   []FullTypeName
+	Methods []FullTypeName
+}
+
 func (n *CTypeNode) MarshalJSON() ([]byte, error) {
-	return json.Marshal(&n.Names)
+	m := MarshalableNode{Names: n.Names, Methods: n.Methods}
+	return json.Marshal(m)
+
+	// marshal without error to empty string (probably bc interesting fields aren't exported): types.Type, *types.Named, types.Named
+	// marshal without error, but error on unmarshal: CTypeNode
 }
 func (n *CTypeNode) UnmarshalJSON(b []byte) error {
-	return json.Unmarshal(b, &n.Names)
+	m := MarshalableNode{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	n.Names = m.Names
+	n.Methods = m.Methods
+
+	return nil
 }
 
 // Marshalable representation of CTypeGraph - also more easily comparable
@@ -89,7 +104,6 @@ func Marshal(g CTypeGraph, cutprefix string) ([]byte, Marshalable) {
 	}
 	all.Vertices = short_vertices
 
-	CheckErr(err)
 	marshaled, err := json.Marshal(all)
 	CheckErr(err)
 	return marshaled, all

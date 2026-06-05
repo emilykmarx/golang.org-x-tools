@@ -1,6 +1,7 @@
 package conftamer
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"go/types"
@@ -64,12 +65,22 @@ type CTypeNode struct {
 	// Info about the type
 	TypeInfo types.Type
 
+	// (this is also in TypeInfo, but copied here to make [un]marshaling easier)
+	Methods []FullTypeName
+
 	// Parameters this CType can access, and via which fields
 	Stored_down  map[Stored]struct{} // becomes irrelevant once entire push down pass is done
 	Stored_up    map[Stored]struct{}
 	Stored_final map[Stored]struct{}
 
 	Indent int
+}
+
+func NodeSort(a, b CTypeNode) int {
+	return cmp.Compare(string(CTypeNodeHash(a)), string(CTypeNodeHash(b)))
+}
+func NodeEqual(a, b CTypeNode) bool {
+	return CTypeNodeHash(a) == CTypeNodeHash(b)
 }
 
 // Accumulating info about a param a node has access to
@@ -204,6 +215,7 @@ func (c *CTypes) AddCType(obj *types.TypeName, neigh_name *FullTypeName, neigh_r
 
 	// Make new node
 	new_ctype := CTypeNode{TypeInfo: obj.Type(), Names: []FullTypeName{TypeName(obj)}}
+	CopyMethods(&new_ctype)
 	err := c.Graph.AddVertex(new_ctype, func(vp *graph.VertexProperties) {})
 	// Shouldn't have existed - checked that above
 	CheckErr(err)

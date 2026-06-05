@@ -1,12 +1,38 @@
 package conftamer
 
 import (
+	"fmt"
 	"go/types"
 	"slices"
 	"strings"
 )
 
 /* Utilities for interacting with info from gopls */
+
+// Methods the type implements
+func CopyMethods(node *CTypeNode) {
+	methods := []FullTypeName{}
+	var method_typ *types.Named
+	switch typ := node.TypeInfo.(type) {
+	case *types.Named:
+		method_typ = typ
+	case *types.Alias:
+		ok := false
+		method_typ, ok = types.Unalias(typ).(*types.Named)
+		if !ok {
+			// e.g. type X = struct{} - can't define methods on it (but can on type X = Y)
+		}
+	default:
+		panic(fmt.Sprintf("Try to get methods for unsupported type %v", CTypeNodeHash(*node)))
+	}
+
+	if method_typ != nil {
+		for method := range method_typ.Methods() {
+			methods = append(methods, FullTypeName(method.FullName()))
+		}
+	}
+	node.Methods = methods
+}
 
 func TypeNameSafe(type_info *types.TypeName) FullTypeName {
 	pkg := "<nil>"
