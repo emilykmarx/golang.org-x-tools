@@ -124,20 +124,20 @@ var (
 // Add all CTypes reachable from this one, stopping on reaching one we've already found
 // neigh_* is info about the neighbor we found this obj via (if any)
 // defn_locs is of the obj (the 1-indexed format, which is what the gopls functions take but not what they return)
-func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, neigh_name *ct.FullTypeName, neigh_age NeighAge, neigh_reason ct.NeighReason) error {
+func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_name *ct.FullTypeName, neigh_age NeighAge, neigh_ast_path []string) error {
 	// Ignore types not declared in package scope
-	if obj.Parent() == nil || obj.Parent().Parent() != types.Universe {
+	if typ.TypeInfo.Parent() == nil || typ.TypeInfo.Parent().Parent() != types.Universe {
 		// e.g. function-local types, or `error`
 		// Can cause TypeName to segfault - don't call it here
-		graph.Logf(c.log, slog.LevelDebug, "Ignoring non-package-scope type %v", ct.TypeNameSafe(obj))
+		graph.Logf(c.log, slog.LevelDebug, "Ignoring non-package-scope type %v", ct.TypeNameSafe(typ.TypeInfo))
 		return nil
 	}
-	cur_name := ct.TypeName(obj)
+	cur_name := ct.TypeName(typ.TypeInfo)
 
-	// 1. Add the CType to the graph, combining with existing node if not via struct field.
+	// 1. Add the CType to the graph, combining with neighbor node if they're the same type.
 	graph.Logf(c.log, slog.LevelDebug, "ADD CTYPE %v", cur_name)
 
-	existed, err := c.ctypes.AddCType(obj, neigh_name, neigh_reason)
+	existed, err := c.ctypes.AddCType(typ, neigh_name, neigh_ast_path)
 	ct.CheckErr(err)
 
 	// 2. Add edge to neighbor we found obj via, if we didn't combine it with the neighbor -
@@ -163,7 +163,7 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 			}
 			// Need parent's type info and child's type name =>
 			// pass HASH of parent and NAME of child
-			err = c.ctypes.AddCTypeEdge(parent_hash, child_name)
+			err = c.ctypes.AddCTypeEdge(parent_hash, child_name, neigh_ast_path)
 			ct.CheckErr(err)
 		}
 	}
@@ -176,13 +176,16 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 
 	// 3. Find new neighbors (direct parents and children), and nodes reachable from them -
 	// i.e. find enclosing (parent) CTypes, and enclosed (child) CTypes, then recurse on them
+	defn_locs, err := locsToSpans(c.ctx, c.cli, []protocol.Location{typ.Loc})
+	ct.CheckErr(err)
+
 	parents, err := c.getParentCTypes(defn_locs)
 	ct.CheckErr(err)
 
 	children, err := c.getChildCTypes(defn_locs)
 	ct.CheckErr(err)
 
-	if _, is_iface := obj.Type().Underlying().(*types.Interface); is_iface {
+	if _, is_iface := typ.TypeInfo.Type().Underlying().(*types.Interface); is_iface {
 		// Implementing string interface doesn't indicate anything interesting
 		if !slices.Contains(STRING_INTERFACES, cur_name) {
 			iface_impls, err := c.getInterfaceImpls(defn_locs)
@@ -196,19 +199,12 @@ func (c *conftamer) addReachableCTypes(obj *types.TypeName, defn_locs []string, 
 
 	for parent_or_child, new_neighbors := range [][]golang.TypeInfo{parents, children} {
 		for _, new := range new_neighbors {
-			new_defn_locs, err := locsToSpans(c.ctx, c.cli, []protocol.Location{new.Loc})
-			ct.CheckErr(err)
-
 			// cur is now neigh => if found a parent, pass child as relation
 			neigh_age := NeighIsChild
 			if parent_or_child == 1 {
 				neigh_age = NeighIsParent
 			}
-			neigh_reason := ct.NotStructField
-			if new.IsStructField {
-				neigh_reason = ct.StructField
-			}
-			err = c.addReachableCTypes(new.TypeInfo, new_defn_locs, &cur_name, neigh_age, neigh_reason)
+			err = c.addReachableCTypes(new, &cur_name, neigh_age, new.ASTPath)
 			ct.CheckErr(err)
 		}
 	}
@@ -304,10 +300,7 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		graph.Logf(c.log, slog.LevelInfo, "Finding types reachable from %v", ct.TypeName(unmarshalImpl.TypeInfo))
 		ct.CheckErr(err)
 
-		nice_defn_locs, err := locsToSpans(ctx, cli, []protocol.Location{unmarshalImpl.Loc})
-		ct.CheckErr(err)
-
-		err = c.addReachableCTypes(unmarshalImpl.TypeInfo, nice_defn_locs, nil, 0, 0)
+		err = c.addReachableCTypes(unmarshalImpl, nil, 0, nil)
 		ct.CheckErr(err)
 	}
 

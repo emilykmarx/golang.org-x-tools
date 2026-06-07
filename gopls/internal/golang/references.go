@@ -675,7 +675,6 @@ func enclosingType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector
 	for parent_cursor := range child_cursor.Enclosing((*ast.TypeSpec)(nil)) {
 		// Found parent type => get its info
 		parent_node := parent_cursor.Node().(*ast.TypeSpec)
-		is_struct_field := isStructDecl(parent_node)
 
 		parent_typeinfo, err := cursorToTypeInfo(parent_node.Name, parent_cursor, pkg)
 		if err != nil {
@@ -685,23 +684,13 @@ func enclosingType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector
 		parent_type_loc := mustLocation(pgf, parent_node)
 		// TypeSpec location start is struct name and end is the closing brace => move end back to start so it's within the name
 		parent_type_loc.Range.End = parent_type_loc.Range.Start
+		edges := ASTPath(child_cursor, parent_cursor)
 
-		return &TypeInfo{Loc: parent_type_loc, TypeInfo: parent_typeinfo, IsStructField: is_struct_field}, nil
+		return &TypeInfo{Loc: parent_type_loc, TypeInfo: parent_typeinfo,
+			ASTPath: edges, TypeSource: Enclosing}, nil
 	}
 
 	return nil, nil // no enclosing type
-}
-
-// Whether the typeSpec represents a `type X struct`
-func isStructDecl(typeSpec *ast.TypeSpec) bool {
-	type_of_typedecl := typeSpec.Type
-	if _, ok := type_of_typedecl.(*ast.StructType); ok {
-		// `type X struct`
-		return true
-	} else {
-		// `type X <other type>` (type_of_typedecl is Ident), or Parent isn't a struct
-		return false
-	}
 }
 
 // Assuming target is in subtree and is the identifier of a type, find its type info.

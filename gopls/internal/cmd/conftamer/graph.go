@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dominikbraun/graph"
+	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/telemetry"
 )
 
@@ -37,8 +38,6 @@ type FullTypeName string
 // (and having multiple nodes corresponding to the same type is a hassle)
 type CTypeList map[FullTypeName]CTypeHash
 
-// Edges are annotated with []FieldInfo indicating how the parent can access the child via the parent's fields
-// slice bc can hv multiple fields of same type
 type FieldInfo struct {
 	// Field name in source code
 	Field string
@@ -136,10 +135,8 @@ func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (Typ
 	}
 
 	if new_node.TypeInfo.Underlying() != obj.Type().Underlying() {
-		// Actually different types, e.g. two types with same name but different types in different scopes
-		// Don't combine nodes since causes various problems
-		// TODO get edge info (same problem as getFieldInfo)
-		graph.Logf(c.Graph.Log(), slog.LevelDebug, "combineTypes called on different types: %v and %v",
+		// Shouldn't happen if they have no AST edges?
+		graph.Logf(c.Graph.Log(), slog.LevelError, "combineTypes called on different types: %v and %v",
 			new_name, new_node.Names)
 		return existed, nil, combined
 	}
@@ -198,9 +195,10 @@ const (
 // Given the object defined at the location, record its info.
 // If not struct field, combine with the corresponding existing node if any.
 // Return whether existed
-func (c *CTypes) AddCType(obj *types.TypeName, neigh_name *FullTypeName, neigh_reason NeighReason) (TypeNameExistence, error) {
-	if neigh_reason == NotStructField {
-		existed, err, combined := c.combineTypes(obj, *neigh_name)
+func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_name *FullTypeName, neigh_ast_path []string) (TypeNameExistence, error) {
+	if typ.TypeSource != golang.Implementer && len(neigh_ast_path) == 0 {
+		// If no AST edges (i.e. only the TypeSpec_Type one) from enclosed/enclosing, `type  X Y` => combine
+		existed, err, combined := c.combineTypes(typ.TypeInfo, *neigh_name)
 		CheckErr(err)
 		if combined {
 			// If combineTypes combined nodes, it already updated the list => check the value of existed it returned
@@ -208,72 +206,35 @@ func (c *CTypes) AddCType(obj *types.TypeName, neigh_name *FullTypeName, neigh_r
 		}
 	}
 
-	_, exists := c.GetHash(TypeName(obj))
+	_, exists := c.GetHash(TypeName(typ.TypeInfo))
 	if exists {
 		return TypeNameExists, nil
 	}
 
 	// Make new node
-	new_ctype := CTypeNode{TypeInfo: obj.Type(), Names: []FullTypeName{TypeName(obj)}}
+	new_ctype := CTypeNode{TypeInfo: typ.TypeInfo.Type(), Names: []FullTypeName{TypeName(typ.TypeInfo)}}
 	CopyMethods(&new_ctype)
 	err := c.Graph.AddVertex(new_ctype, func(vp *graph.VertexProperties) {})
 	// Shouldn't have existed - checked that above
 	CheckErr(err)
-	graph.Logf(c.Graph.Log(), slog.LevelDebug, "NEW NODE for %v", TypeName(obj))
+	graph.Logf(c.Graph.Log(), slog.LevelDebug, "NEW NODE for %v", TypeName(typ.TypeInfo))
 
 	// Add to list
-	c.SetHash(TypeName(obj), CTypeNodeHash(new_ctype))
+	c.SetHash(TypeName(typ.TypeInfo), CTypeNodeHash(new_ctype))
 	return TypeNameNotExists, nil
 }
 
-// If n is a struct, get info on all its fields (even if some aren't CTypes) -
-// indexed by field type so we can add it to the corresponding edges (if leaf, will ignore types)
-func getFieldInfo(n CTypeNode) map[FullTypeName][]FieldInfo {
-	struct_info := IsStruct(n.TypeInfo)
-	if struct_info == nil {
-		// not a struct
-		return nil
-	}
-	fields := make(map[FullTypeName][]FieldInfo)
-
-	for i := range struct_info.NumFields() {
-		field_type_str := struct_info.Field(i).Type().String() // already fully-qualified
-		// Field could be a copy, pointer, slice, slice of pointers - any others?
-		// TODO support others - e.g. map[*T]struct
-		// Likely better to get this from AST (probably when finding enclosed types) - revisit when we need it (for proper param and field keys)
-		// typeToObjects might be helpful?
-		field_type := FullTypeName(strings.Trim(field_type_str, "*[]"))
-
-		param_key := FieldToParamKey(struct_info.Field(i), struct_info.Tag(i))
-		field_key := struct_info.Field(i).Name()
-		field_info := FieldInfo{Field: field_key, Tag: param_key}
-		fields[field_type] = append(fields[field_type], field_info)
-	}
-
-	return fields
-}
-
 // Add edge from enclosing CType (parent) to enclosed CType (child).
-// Annotate edge with info on field(s) parent type uses to access child type name.
-func (c *CTypes) AddCTypeEdge(parent_hash CTypeHash, child_name FullTypeName) error {
-	parent_node, err := c.Graph.Vertex(parent_hash)
-	CheckErr(err)
-
-	all_fields := getFieldInfo(parent_node)
-	child_field, ok := all_fields[child_name]
-	if !ok {
-		// We know we haven't supported all possibilities yet and will just result in wrong tags/keys which is ok for now
-		graph.Logf(c.Graph.Log(), slog.LevelDebug, "AddCTypeEdge - parent %v has no field info for child %v\n", parent_hash, child_name)
-		child_field = []FieldInfo{UNKNOWNFIELD}
-	}
-
+// Annotate edge with info on how parent type can access child type name:
+// e.g. via fields (possibly multiple), or slice indexing.
+func (c *CTypes) AddCTypeEdge(parent_hash CTypeHash, child_name FullTypeName, neigh_ast_path []string) error {
 	child_hash, ok := c.GetHash(child_name)
 	if !ok {
 		err := fmt.Errorf("AddCTypeEdge - child %v does not exist\n", child_name)
 		CheckErr(err)
 	}
 
-	err = c.Graph.AddEdge(parent_hash, child_hash, graph.EdgeData(child_field))
+	err := c.Graph.AddEdge(parent_hash, child_hash, graph.EdgeData(neigh_ast_path))
 	if err != nil {
 		if !errors.Is(err, graph.ErrEdgeAlreadyExists) {
 			CheckErr(err)
@@ -309,16 +270,8 @@ var pushDownFunc = func(g graph.Graph[CTypeHash, CTypeNode], parent CTypeNode, c
 	from_leaf := CTypeNodeHash(parent) == CTypeNodeHash(child)
 
 	if from_leaf {
-		// Called from leaf => get field info
-		fields := getFieldInfo(child)
-		for _, info := range fields {
-			// ignore types
-			child_fields = append(child_fields, info...)
-		}
-		if len(fields) == 0 {
-			// Nothing to append
-			return child
-		}
+		// XXX update for new push up/down
+		return child
 	} else {
 		edge, err := g.Edge(CTypeNodeHash(parent), CTypeNodeHash(child))
 		CheckErr(err)

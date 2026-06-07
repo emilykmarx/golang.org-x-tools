@@ -13,8 +13,10 @@ import (
 	"go/token"
 	"go/types"
 	"regexp"
+	"slices"
 	"strings"
 
+	"golang.org/x/tools/go/ast/inspector"
 	"golang.org/x/tools/gopls/internal/cache"
 	"golang.org/x/tools/gopls/internal/cache/metadata"
 	"golang.org/x/tools/gopls/internal/cache/parsego"
@@ -218,8 +220,7 @@ func DefinitionMoreInfo(ctx context.Context, snapshot *cache.Snapshot, fh file.H
 	return []protocol.Location{loc}, &obj, nil
 }
 
-// Find info on any types enclosed in the passed type (e.g. types of the fields enclosed in a struct).
-// (If any are nested, find all of them).
+// Find info on types enclosed in the passed type (e.g. types of the fields enclosed in a struct).
 // rng should be somewhere in the identifier of the type name.
 func EnclosedTypes(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]TypeInfo, error) {
 	// translate given loc to the type decl
@@ -233,7 +234,7 @@ func EnclosedTypes(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle
 	return EnclosedTypeObjs(ctx, snapshot, struct_loc[0])
 }
 
-// For each type enclosed in the passed type:
+// For each type enclosed in the passed type (directly, not via another type):
 // get the type's object and some location of the type identifier.
 // decl_name must be identifier of type name in the enclosing type decl
 func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name protocol.Location) ([]TypeInfo, error) {
@@ -242,7 +243,6 @@ func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name p
 	if err != nil {
 		return nil, fmt.Errorf("EnclosedTypeObjs: err from locToCursor %v", err.Error())
 	}
-	parent_type_name := parent_cursor.Node().(*ast.Ident).Name
 
 	parent := parent_cursor.Parent().Node()
 	parent_typedecl, ok := parent.(*ast.TypeSpec)
@@ -250,17 +250,20 @@ func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name p
 		// will this ever happen?
 		return nil, fmt.Errorf("EnclosedTypeObjs called on identifier that is not child of TypeSpec")
 	}
-	is_struct_field := isStructDecl(parent_typedecl)
 
 	// parent_cursor is identifier of type name in type decl
 	// Its parent is TypeSpec
 	// All subtypes are descendants of the TypeSpec
 	child_types := []TypeInfo{}
-	for child_cursor := range parent_cursor.Parent().Preorder((*ast.Ident)(nil)) {
+	filter := []ast.Node{(*ast.Ident)(nil)}
+
+	parent_cursor.Parent().Inspect(filter, func(child_cursor inspector.Cursor) bool {
+
 		child_node := child_cursor.Node().(*ast.Ident)
-		if child_node.Name == parent_type_name {
-			// The parent itself
-			continue
+
+		if *child_node == *parent_typedecl.Name {
+			// ident of the passed type itself
+			return true
 		}
 
 		// identifier - check if it's of a type name
@@ -268,20 +271,43 @@ func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name p
 		if err != nil {
 			// Not a type name
 			// TODO (conftamer) (minor) Some of these errors may be actual errors
-			continue
+			return true
 		}
 
 		child_type := child_typeinfo.Type()
 		if _, ok := child_type.(*types.Basic); ok {
 			// ignore built-in types
-			continue
+			return true
 		}
 
+		edges := ASTPath(child_cursor, parent_cursor.Parent())
+
 		child_type_loc := mustLocation(pgf, child_node)
-		child_types = append(child_types, TypeInfo{Loc: child_type_loc, TypeInfo: child_typeinfo, IsStructField: is_struct_field})
-	}
+		child_types = append(child_types, TypeInfo{Loc: child_type_loc, TypeInfo: child_typeinfo,
+			ASTPath: edges, TypeSource: Enclosed})
+		// Don't find types nested within this ancestor - we don't want to add an edge from them to parent
+		// (they will be found when we recurse on this ancestor)
+		return false
+	})
 
 	return child_types, nil
+}
+
+// Get the path of edge kinds from ancestor AST node to cur
+// If a field is on the path, also add its name(s)
+func ASTPath(cur inspector.Cursor, ancestor inspector.Cursor) []string {
+	edges := []string{}
+	for ; cur != ancestor; cur = cur.Parent() {
+		edges = append(edges, cur.ParentEdgeKind().String())
+		node := cur.Node()
+		if field, ok := node.(*ast.Field); ok {
+			for _, name := range field.Names {
+				edges = append(edges, FIELD_NAME_PREFIX+name.Name)
+			}
+		}
+	}
+	slices.Reverse(edges)
+	return edges[1:] // last one is to the parent type
 }
 
 // builtinDecl returns the parsed Go file and node corresponding to a builtin

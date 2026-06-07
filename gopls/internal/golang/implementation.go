@@ -81,20 +81,41 @@ func ImplementationMoreInfo(ctx context.Context, snapshot *cache.Snapshot, f fil
 		return nil, err
 	}
 	slices.SortFunc(impls, func(a TypeInfo, b TypeInfo) int { return protocol.CompareLocation(a.Loc, b.Loc) })
-	// de-duplicate considering all fields, not just location: if type U implements it,
-	// type T that embeds U will be returned with the same location but different pkgPath:typeName.
-	// Which is correct, since T inherits U's implementation
-	impls = slices.Compact(impls)
+	// de-duplicate by type and location: if type U implements it,
+	// type T that embeds U will be returned with the same location.
+	// Which is correct, since T inherits U's implementation.
+	impls = slices.CompactFunc(impls, func(a TypeInfo, b TypeInfo) bool {
+		same_type := (a.TypeInfo == nil && b.TypeInfo == nil) ||
+			(*a.TypeInfo == *b.TypeInfo)
+
+		return (a.Loc == b.Loc) && same_type
+	})
 	return impls, nil
 }
+
+// Prefix for fields in TypeInfo.ASTPath
+const (
+	FIELD_NAME_PREFIX = "Field:"
+)
+
+type TypeSource string
+
+const (
+	Enclosed    TypeSource = "enclosed"
+	Enclosing   TypeSource = "enclosing"
+	Implementer TypeSource = "implementation"
+)
 
 type TypeInfo struct {
 	Loc protocol.Location
 
 	// Info about the type
 	TypeInfo *types.TypeName
-	// Whether the enclosing-enclosed relationship is via struct field
-	IsStructField bool
+	// Edges on AST path from enclosing to enclosed type, including field names
+	ASTPath []string
+
+	// How this type was found
+	TypeSource TypeSource
 }
 
 func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]TypeInfo, error) {
@@ -113,7 +134,7 @@ func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Hand
 	if locs, err := implFuncs(pkg, cur, start, end); err != errNotHandled {
 		impls := []TypeInfo{}
 		for _, loc := range locs {
-			impls = append(impls, TypeInfo{Loc: loc})
+			impls = append(impls, TypeInfo{Loc: loc, TypeSource: Implementer})
 		}
 		return impls, err
 	}
@@ -131,7 +152,7 @@ func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Hand
 	const relation = methodsets.TypeRelation(0)
 	err = implementationsMsets(ctx, snapshot, pkg, cur, relation, func(_ metadata.PackagePath, _ string, _ bool, loc protocol.Location, typeName *types.TypeName) {
 		locsMu.Lock()
-		Implementers = append(Implementers, TypeInfo{Loc: loc, TypeInfo: typeName})
+		Implementers = append(Implementers, TypeInfo{Loc: loc, TypeInfo: typeName, TypeSource: Implementer})
 		locsMu.Unlock()
 	})
 	return Implementers, err
