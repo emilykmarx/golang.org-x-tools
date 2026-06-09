@@ -400,6 +400,16 @@ go 1.18
 	fmt.Println(res.stderr)
 	fmt.Println(res.stdout)
 
+	graph_file := filepath.Join(tree, "graph.text")
+	graph_data, err := os.ReadFile(graph_file)
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+
+	// Write graph to non-temporary file for dlv client test
+	ct.WriteTestFile(graph_data, "conftamer/dlvtest/testdata/graph.text")
+
 	// CHECK OUTPUT
 	if expected_stored != nil {
 		checkExpectedStored(t, tree, expected_stored)
