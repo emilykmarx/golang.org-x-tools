@@ -10,15 +10,17 @@ import (
 	"github.com/go-delve/delve/service/api"
 	"github.com/go-delve/delve/service/rpc2"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
+	"golang.org/x/tools/gopls/internal/cmd/conftamer/dlv/graph"
 	"golang.org/x/tools/gopls/internal/golang"
 )
 
 func main() {
 	var dlv_port int
-	var test_pkg, test_name, graph_file string
+	var test_pkg, test_name, graph_file, module_prefix string
 	flag.IntVar(&dlv_port, "dlv-port", 4040, "Listening port for dlv")
 	flag.StringVar(&test_pkg, "test-pkg", "", "Package of test to run")
 	flag.StringVar(&test_name, "test-name", "", "Name of test to run")
+	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
 	flag.StringVar(&graph_file, "graph-file", "", "File containing CTypes graph")
 	flag.Parse()
 
@@ -28,10 +30,13 @@ func main() {
 func Run(dlv_port int, test_pkg string, test_name string, graph_file string) {
 	// 1. Load the CTypes graph
 	graph_file = "testdata/graph.text"
-	g, _ := ct.Deserialize(graph_file)
+	g, m := ct.Deserialize(graph_file)
+	ctypes := ct.CTypes{Graph: g, List: m.List}
+	recvr_hash := ct.CTypeHash("ParentFirst")
+	graph.CTypePathsToLeaves(g, recvr_hash)
 
 	// 2. Connect to dlv server and run test
-	if err := contexttrack.Run(dlv_port, test_pkg, test_name, g, RunDlvClient); err != nil {
+	if err := contexttrack.Run(dlv_port, test_pkg, test_name, ctypes, RunDlvClient); err != nil {
 		panic(err)
 	}
 }
@@ -41,18 +46,18 @@ var (
 	scope   = api.EvalScope{GoroutineID: -1}
 )
 
-func RunDlvClient(dlv_endpoint string, ctypes any) error {
+func RunDlvClient(dlv_endpoint string, ctypes_all any) error {
 	fmt.Printf("Connecting to dlv on %v\n", dlv_endpoint)
 
-	g := ctypes.(ct.CTypeGraph)
+	ctypes := ctypes_all.(ct.CTypes)
 
 	client := rpc2.NewClient(dlv_endpoint)
-	// Set breakpoints on CTypes methods
+	// Set breakpoints on methods of CTypes in module
 	// XXX also set bps on messages
 
 	// XXX get these from graph
 	// XXX get recvr hash - serialize list (need to lookup recvr CType - for now assume its node hash is its name)
-	method_name := "golang.org/x/tools/gopls/internal/cmd/conftamer/dlvtest.ParentFirst.Method"
+	method_name := "golang.org/x/tools/gopls/internal/cmd/conftamer/dlv.ParentFirst.Method"
 	recvr_name := "c"
 	bp := api.Breakpoint{FunctionName: method_name}
 
@@ -69,30 +74,22 @@ func RunDlvClient(dlv_endpoint string, ctypes any) error {
 		// TODO proper handling for incomplete loads - see ClientHowTo.md
 		recvr_var, err := client.EvalVariable(scope, recvr_name, loadcfg)
 		ct.CheckErr(err)
+		fmt.Printf("%+v\n", recvr_var)
 
 		// XXX get paths containing recvr - e.g. find all roots and leaves it's reachable from, then do AllPathsBetween for all combos
 		// XXX edge data should allow for multiple paths to same type (which current test exercises - what does CT do currently?)
 		// XXX get keys (need to start at root if recvr isn't root. Need to add tags to edge data)
 		recvr_hash := ct.CTypeHash("ParentFirst")
-		child_hash := ct.CTypeHash("ChildSecond")
 		params := []CTypeParam{}
-		ast_path := []string{}
-		edge, err := g.Edge(recvr_hash, child_hash)
-		ct.CheckErr(err)
-
-		if edge.Properties.Data != nil {
-			ast_path_raw := edge.Properties.Data.([]interface{})
-			for _, ast_edge_raw := range ast_path_raw {
-				ast_edge := ast_edge_raw.(string)
-				ast_path = append(ast_path, ast_edge)
-			}
+		ast_paths := graph.CTypePathsToLeaves(ctypes.Graph, recvr_hash)
+		for _, ast_path := range ast_paths {
+			CTypePathToParams(ast_path, 0, *recvr_var, &params)
 		}
-		CTypePathToParams(ast_path, 0, *recvr_var, &params)
 	}
 
 	fmt.Printf("Target exited with status %v\n", state.ExitStatus)
 
-	client.Detach(false) // Also kills server, despite function doc
+	client.Detach(false)
 	return nil
 }
 

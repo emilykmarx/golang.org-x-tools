@@ -408,7 +408,7 @@ go 1.18
 	}
 
 	// Write graph to non-temporary file for dlv client test
-	ct.WriteTestFile(graph_data, "conftamer/dlvtest/testdata/graph.text")
+	ct.WriteTestFile(graph_data, "conftamer/dlv/testdata/graph.text")
 
 	// CHECK OUTPUT
 	if expected_stored != nil {

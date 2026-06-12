@@ -6,7 +6,7 @@ import (
 )
 
 type ParentFirst struct {
-	ChildField1 []ChildSecond
+	ChildField1 []ChildSecond `yaml:"renamed_key"`
 	NonCType    int
 }
 type ChildSecond struct {
