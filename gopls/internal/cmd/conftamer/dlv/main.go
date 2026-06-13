@@ -32,9 +32,6 @@ func Run(dlv_port int, test_pkg string, test_name string, graph_file string) {
 	graph_file = "testdata/graph.text"
 	g, m := ct.Deserialize(graph_file)
 	ctypes := ct.CTypes{Graph: g, List: m.List}
-	recvr_hash := ct.CTypeHash("ParentFirst")
-	graph.CTypePathsToLeaves(g, recvr_hash)
-
 	// 2. Connect to dlv server and run test
 	if err := contexttrack.Run(dlv_port, test_pkg, test_name, ctypes, RunDlvClient); err != nil {
 		panic(err)
@@ -56,8 +53,10 @@ func RunDlvClient(dlv_endpoint string, ctypes_all any) error {
 	// XXX also set bps on messages
 
 	// XXX get these from graph
-	// XXX get recvr hash - serialize list (need to lookup recvr CType - for now assume its node hash is its name)
-	method_name := "golang.org/x/tools/gopls/internal/cmd/conftamer/dlv.ParentFirst.Method"
+	// XXX get recvr hash - (need to lookup recvr CType - for now assume its node hash is its name)
+	module_name := "golang.org/x/tools/gopls/internal/cmd/conftamer/dlv"
+	recvr_type := "ParentFirst"
+	method_name := module_name + "." + recvr_type + ".Method"
 	recvr_name := "c"
 	bp := api.Breakpoint{FunctionName: method_name}
 
@@ -74,16 +73,15 @@ func RunDlvClient(dlv_endpoint string, ctypes_all any) error {
 		// TODO proper handling for incomplete loads - see ClientHowTo.md
 		recvr_var, err := client.EvalVariable(scope, recvr_name, loadcfg)
 		ct.CheckErr(err)
-		fmt.Printf("%+v\n", recvr_var)
 
-		// XXX get paths containing recvr - e.g. find all roots and leaves it's reachable from, then do AllPathsBetween for all combos
-		// XXX edge data should allow for multiple paths to same type (which current test exercises - what does CT do currently?)
-		// XXX get keys (need to start at root if recvr isn't root. Need to add tags to edge data)
-		recvr_hash := ct.CTypeHash("ParentFirst")
+		// XXX get keys (need to start at root if recvr isn't root)
+		recvr_hash := ct.CTypeHash(recvr_type)
 		params := []CTypeParam{}
-		ast_paths := graph.CTypePathsToLeaves(ctypes.Graph, recvr_hash)
-		for _, ast_path := range ast_paths {
-			CTypePathToParams(ast_path, 0, *recvr_var, &params)
+		ctype_paths, ast_paths := graph.CTypePathsToLeaves(ctypes.Graph, recvr_hash)
+		for i, _ := range ctype_paths {
+			for _, ast_path := range ast_paths[i] {
+				CTypePathToParams(ast_path, 0, *recvr_var, &params)
+			}
 		}
 	}
 
@@ -102,7 +100,7 @@ type CTypeParam struct {
 
 // Given a path of AST edges from the CType graph and the variable for the CType at the beginning,
 // get the corresponding parameter value(s) from dlv.
-func CTypePathToParams(ast_path []string, ast_path_idx int, cur_var api.Variable, params *[]CTypeParam) {
+func CTypePathToParams(ast_path graph.ASTPath, ast_path_idx int, cur_var api.Variable, params *[]CTypeParam) {
 	// Don't modify ast_path, since multiple elems need to recurse on it
 	// ast_path_idx/cur_ast_path_idx is index in full ast_path
 	cur_ast_path_idx := ast_path_idx
@@ -118,6 +116,7 @@ func CTypePathToParams(ast_path []string, ast_path_idx int, cur_var api.Variable
 			if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
 				found_field := false
 				for _, child_field := range cur_var.Children {
+					// Identify named fields by their field name, not their type, since e.g. if their type is []T the CType edge is to T not []T
 					if child_field.Name == field {
 						// corresponding field
 						cur_var = child_field
@@ -155,7 +154,7 @@ func CTypePathToParams(ast_path []string, ast_path_idx int, cur_var api.Variable
 		}
 	}
 
-	if cur_ast_path_idx > len(ast_path)-1 {
+	if cur_ast_path_idx >= len(ast_path)-1 {
 		// Leaf (end of AST path)
 		if len(cur_var.Children) == 0 {
 			// no children => a param
@@ -163,7 +162,6 @@ func CTypePathToParams(ast_path []string, ast_path_idx int, cur_var api.Variable
 			fmt.Printf("APPEND PARAM %+v\n", cur_var)
 		} else {
 			// recurse on all children
-			fmt.Printf("RECURSE ON ALL\n")
 			for _, elem := range cur_var.Children {
 				CTypePathToParams(ast_path, cur_ast_path_idx, elem, params)
 			}
