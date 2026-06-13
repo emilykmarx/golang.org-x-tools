@@ -56,6 +56,7 @@ import (
 )
 
 // TestConftamer* tests the 'conftamer' subcommand (conftamer.go).
+// TODO check for warn/error logs
 
 type ExpectedGraph struct {
 	graph          ct.Marshalable
@@ -284,7 +285,7 @@ func TestConftamerFields(t *testing.T) {
 	expected_stored := []ct.TestNode{root}
 	expected_stored = append(expected_stored, rest...)
 
-	runTestConftamer(t, []string{"main.go"}, expected_stored, nil)
+	runTestConftamer(t, []string{"fields.go"}, expected_stored, nil)
 }
 
 func checkExpectedStored(t *testing.T, tree string, expected_stored []ct.TestNode) {
