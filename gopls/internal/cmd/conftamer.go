@@ -311,17 +311,6 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	c.ctypes.Serialize("graph.text", c.ModulePrefix)
 	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
 
-	// 3. Find param keys and corresponding source code expressions
-	graph.Logf(c.log, slog.LevelInfo, "Getting param keys and corresponding expressions")
-	err = c.ctypes.GetCTypeParams()
-	ct.CheckErr(err)
-
-	start = time.Now()
-	graph.Logf(c.log, slog.LevelInfo, "Pretty-printing")
-	err = c.ctypes.PrettyPrint(c.ModulePrefix, true, false)
-	ct.CheckErr(err)
-	graph.Logf(c.log, slog.LevelInfo, "Pretty-print: %v", time.Since(start))
-
 	graph.Logf(c.log, slog.LevelInfo, "Exit CTypes finder")
 
 	return nil

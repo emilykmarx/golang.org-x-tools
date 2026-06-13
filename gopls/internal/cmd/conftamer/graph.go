@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go/types"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -64,8 +65,9 @@ type CTypeNode struct {
 	// Info about the type
 	TypeInfo types.Type
 
-	// (this is also in TypeInfo, but copied here to make [un]marshaling easier)
+	// (these are also in TypeInfo, but copied here to make [un]marshaling easier)
 	Methods []FullTypeName
+	Tags    map[string]string // Field name => tag (populated if struct)
 
 	// Parameters this CType can access, and via which fields
 	Stored_down  map[Stored]struct{} // becomes irrelevant once entire push down pass is done
@@ -136,8 +138,10 @@ func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (Typ
 
 	if new_node.TypeInfo.Underlying() != obj.Type().Underlying() {
 		// Shouldn't happen if they have no AST edges?
-		graph.Logf(c.Graph.Log(), slog.LevelError, "combineTypes called on different types: %v and %v",
-			new_name, new_node.Names)
+		// TODO happens occasionally in Prometheus even when types look the same at a glance - e.g.
+		// promql.Vector and promql.vectorByReverseValueHeap
+		graph.Logf(c.Graph.Log(), slog.LevelError, "combineTypes called on different types: %v and %v (types %+v and %+v)",
+			new_name, new_node.Names, new_node.TypeInfo.Underlying(), obj.Type().Underlying())
 		return existed, nil, combined
 	}
 
@@ -234,10 +238,25 @@ func (c *CTypes) AddCTypeEdge(parent_hash CTypeHash, child_name FullTypeName, ne
 		CheckErr(err)
 	}
 
-	err := c.Graph.AddEdge(parent_hash, child_hash, graph.EdgeData(neigh_ast_path))
+	edge_data := [][]string{neigh_ast_path}
+	err := c.Graph.AddEdge(parent_hash, child_hash, graph.EdgeData(edge_data))
 	if err != nil {
 		if !errors.Is(err, graph.ErrEdgeAlreadyExists) {
 			CheckErr(err)
+		} else {
+			// existed => add path
+			edge, err := c.Graph.Edge(parent_hash, child_hash)
+			CheckErr(err)
+			if edge.Properties.Data != nil {
+				existing_edge_data := edge.Properties.Data.([][]string)
+				dup := slices.ContainsFunc(existing_edge_data, func(existing_path []string) bool {
+					return reflect.DeepEqual(existing_path, neigh_ast_path)
+				})
+				if !dup {
+					edge_data = append(existing_edge_data, edge_data...)
+					c.Graph.UpdateEdge(parent_hash, child_hash, graph.EdgeData(edge_data))
+				}
+			}
 		}
 	}
 	graph.Logf(c.Graph.Log(), slog.LevelDebug, "ADDED EDGE %v => %v", parent_hash, child_hash)
@@ -262,180 +281,6 @@ func pathParent(path string, child CTypeHash) CTypeHash {
 	child_i := pathIdx(path, child)
 	path_parts := strings.Split(path, ",")
 	return CTypeHash(path_parts[child_i-1])
-}
-
-// parent and child are copies - return the new CHILD
-var pushDownFunc = func(g graph.Graph[CTypeHash, CTypeNode], parent CTypeNode, child CTypeNode) CTypeNode {
-	child_fields := []FieldInfo{}
-	from_leaf := CTypeNodeHash(parent) == CTypeNodeHash(child)
-
-	if from_leaf {
-		// XXX update for new push up/down
-		return child
-	} else {
-		edge, err := g.Edge(CTypeNodeHash(parent), CTypeNodeHash(child))
-		CheckErr(err)
-
-		child_fields = edge.Properties.Data.([]FieldInfo)
-	}
-
-	if child.Stored_down == nil {
-		child.Stored_down = make(map[Stored]struct{})
-	}
-
-	// PARENT: Append child field info and child type to all own stored, add to child's stored
-	// XXX make push* prints into debug logs
-	fmt.Printf("\nstored_down %v => %v:\n", parent.Names, child.Names)
-	// If from leaf: replace the old values
-	leaf_stored_down := make(map[Stored]struct{})
-
-	for parent_stored := range parent.Stored_down {
-		if !from_leaf {
-			parent_stored.Path = fmt.Sprintf("%v,%v", parent_stored.Path, CTypeNodeHash(child))
-		}
-		for _, child_field := range child_fields {
-			parent_stored.FieldInfo.Field = fmt.Sprintf("%v.%v", parent_stored.FieldInfo.Field, child_field.Field)
-			parent_stored.FieldInfo.Tag = fmt.Sprintf("%v.%v", parent_stored.FieldInfo.Tag, child_field.Tag)
-			parent_stored.FieldInfo.Tag, _ = strings.CutPrefix(parent_stored.FieldInfo.Tag, ".")
-			// XXX handle arrays - codegen needs to loop over them
-			if !from_leaf {
-				child.Stored_down[parent_stored] = struct{}{}
-				PrintStored(parent_stored)
-			} else {
-				leaf_stored_down[parent_stored] = struct{}{}
-			}
-		}
-	}
-	if from_leaf {
-		child.Stored_down = make(map[Stored]struct{})
-		for stored := range leaf_stored_down {
-			PrintStored(stored)
-			child.Stored_down[stored] = struct{}{}
-		}
-	}
-
-	return child
-}
-
-func (c *CTypes) pushDown() error {
-	// parent and child are copies - return the new PARENT
-	// Initialize roots (receive nothing pushed down)
-	initializeRoots := func(g graph.Graph[CTypeHash, CTypeNode], parent CTypeNode, child CTypeNode) CTypeNode {
-		root := parent.Stored_down == nil
-		if root {
-			// Just need one entry with empty field/tag to append child info to
-			parent.Stored_down = make(map[Stored]struct{})
-			stored := Stored{Path: string(CTypeNodeHash(parent))} // field info will be filled in later
-			parent.Stored_down[stored] = struct{}{}
-		}
-		return parent
-	}
-
-	update_vertices := graph.UpdatePathVertices[CTypeHash, CTypeNode]{
-		UpdateChild:  &pushDownFunc,
-		UpdateParent: &initializeRoots,
-		UpdateFirst:  graph.Parent,
-	}
-
-	opts := graph.DFSOpts[CTypeHash, CTypeNode]{Update_vertices: update_vertices, All_paths: true, Direction: graph.Forwards}
-	return graph.DFSAllStartingNodes(c.Graph, opts)
-}
-
-// Remove keys corresponding to nodes before n in path (if any).
-// Don't do this in-place in Stored_up, since parent needs this info
-func updateFieldKeys(n CTypeNode, stored Stored) Stored {
-	// XXX if node is inline, no corresponding key. Any other tag options to handle?
-	path_i := pathIdx(stored.Path, CTypeNodeHash(n))
-	key_parts := strings.Split(stored.FieldInfo.Field, ".")
-	key_parts = key_parts[1:] // part[0] is "" due to leading "."
-	leaf := path_i == pathLen(stored.Path)-1
-	if leaf && len(key_parts) < pathLen(stored.Path) {
-		// Should only happen if leaf has no field
-		stored.FieldInfo.Field = ""
-	} else {
-		key := strings.Join(key_parts[path_i:], ".")
-		key = "." + key
-		stored.FieldInfo.Field = key
-	}
-
-	return stored
-}
-
-func (c *CTypes) pushUp() error {
-	// parent and child are copies - return the new CHILD
-	// Initialize leaves (receive nothing pushed up)
-	initializeLeaves := func(g graph.Graph[CTypeHash, CTypeNode], parent CTypeNode, child CTypeNode) CTypeNode {
-		leaf := child.Stored_up == nil
-		if leaf {
-			// Append own field keys, if any (for non-leaves, happens when adding edge)
-			child = pushDownFunc(g, child, child)
-			child.Stored_up = child.Stored_down // all the info has been pushed down to leaves
-			child.Stored_final = make(map[Stored]struct{})
-			for stored := range child.Stored_up {
-				child.Stored_final[updateFieldKeys(child, stored)] = struct{}{}
-			}
-			fmt.Printf("\nleaf stored_up:\n")
-			PrintStoredX(child.Stored_up)
-			fmt.Printf("\nleaf stored_final:\n")
-			PrintStoredX(child.Stored_final)
-		}
-
-		return child
-	}
-
-	// parent and child are copies - return the new PARENT
-	pushUp := func(g graph.Graph[CTypeHash, CTypeNode], parent CTypeNode, child CTypeNode) CTypeNode {
-
-		if parent.Stored_up == nil {
-			parent.Stored_up = make(map[Stored]struct{})
-			// Could clear out parent.Stored_down at this point too (all the relevant info is coming up from the leaves now)
-		}
-		if parent.Stored_final == nil {
-			parent.Stored_final = make(map[Stored]struct{})
-		}
-
-		fmt.Printf("\npush up %v => %v:\n", parent.Names, child.Names)
-		for child_stored := range child.Stored_up {
-			// CHILD: Send all stored only if parent is parent in corresponding path
-			// TODO (minor): See "ideally" comment in TestConftamerAlias - sometimes we'd want to push additional tags up
-			if pathParent(child_stored.Path, CTypeNodeHash(child)) == CTypeNodeHash(parent) {
-				// PARENT: Remove field keys corresponding to types before me in path, add to stored_final
-				// (separate from stored_up since parent needs the removed keys)
-				parent.Stored_up[child_stored] = struct{}{}
-				fmt.Printf("stored_up: ")
-				PrintStored(child_stored)
-				parent.Stored_final[updateFieldKeys(parent, child_stored)] = struct{}{}
-				fmt.Printf("stored_final: ")
-				PrintStored(updateFieldKeys(parent, child_stored))
-			}
-		}
-
-		return parent
-	}
-
-	update_vertices := graph.UpdatePathVertices[CTypeHash, CTypeNode]{
-		UpdateChild:  &initializeLeaves,
-		UpdateParent: &pushUp,
-		UpdateFirst:  graph.Child,
-	}
-
-	opts := graph.DFSOpts[CTypeHash, CTypeNode]{Update_vertices: update_vertices, All_paths: true, Direction: graph.Backwards}
-	return graph.DFSAllStartingNodes(c.Graph, opts)
-}
-
-// For each CType:
-// Get the full names of the parameters it can access (prefixing with <section.subsection...>),
-// and via which expression(s) (e.g. A.B.C for CType A, B.C for CType B)
-func (c *CTypes) GetCTypeParams() error {
-	// 1. PUSH DOWN: Accumulate full param keys and field keys at leaves
-	err := c.pushDown()
-	CheckErr(err)
-
-	// 2. PUSH UP: Push full param keys and field keys all the way up
-	// Also clip irrelevant parts of field keys (roots need all, leaves need none)
-	err = c.pushUp()
-	CheckErr(err)
-	return nil
 }
 
 // Panic on err (if running in dlv, will stop at a breakpoint)

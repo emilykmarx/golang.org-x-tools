@@ -45,10 +45,27 @@ func (a *Stored) UnmarshalText(text []byte) error {
 type MarshalableNode struct {
 	Names   []FullTypeName
 	Methods []FullTypeName
+	Tags    map[string]string // Field name => tag (populated if struct)
+}
+
+// If n is a struct, get its field tags
+func getTags(n *CTypeNode) map[string]string {
+	struct_info := IsStruct(n.TypeInfo)
+	if struct_info == nil {
+		// not a struct
+		return nil
+	}
+	tags := make(map[string]string)
+
+	for i := range struct_info.NumFields() {
+		tags[struct_info.Field(i).Name()] = struct_info.Tag(i)
+	}
+
+	return tags
 }
 
 func (n *CTypeNode) MarshalJSON() ([]byte, error) {
-	m := MarshalableNode{Names: n.Names, Methods: n.Methods}
+	m := MarshalableNode{Names: n.Names, Methods: n.Methods, Tags: getTags(n)}
 	return json.Marshal(m)
 
 	// marshal without error to empty string (probably bc interesting fields aren't exported): types.Type, *types.Named, types.Named
@@ -61,6 +78,7 @@ func (n *CTypeNode) UnmarshalJSON(b []byte) error {
 	}
 	n.Names = m.Names
 	n.Methods = m.Methods
+	n.Tags = m.Tags
 
 	return nil
 }
@@ -69,12 +87,13 @@ func (n *CTypeNode) UnmarshalJSON(b []byte) error {
 type Marshalable struct {
 	Edges    []graph.Edge[CTypeHash]
 	Vertices []CTypeNode
+	List     CTypeList
 }
 
 // Cut prefix from both vertex names and edge hashes.
 // Vertices are marshaled as in MarshalJSON() override above.
 // Edges are marshaled with default MarshalJSON, which includes src/target and edge data.
-func Marshal(g CTypeGraph, cutprefix string) ([]byte, Marshalable) {
+func Marshal(g CTypeGraph, l CTypeList, cutprefix string) ([]byte, Marshalable) {
 	// Edges
 	all := Marshalable{}
 	edges, err := g.Edges()
@@ -104,13 +123,22 @@ func Marshal(g CTypeGraph, cutprefix string) ([]byte, Marshalable) {
 	}
 	all.Vertices = short_vertices
 
+	// List
+	short_list := make(CTypeList)
+	for k, v := range l {
+		short_k, _ := strings.CutPrefix(string(k), cutprefix)
+		short_v, _ := strings.CutPrefix(string(v), cutprefix)
+		short_list[FullTypeName(short_k)] = CTypeHash(short_v)
+	}
+	all.List = short_list
+
 	marshaled, err := json.Marshal(all)
 	CheckErr(err)
 	return marshaled, all
 }
 
 func (c *CTypes) Serialize(filename string, cutprefix string) {
-	marshaled, _ := Marshal(c.Graph, cutprefix)
+	marshaled, _ := Marshal(c.Graph, c.List, cutprefix)
 	WriteTestFile(marshaled, filename)
 }
 
