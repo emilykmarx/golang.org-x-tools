@@ -63,6 +63,12 @@ type ExpectedGraph struct {
 	ignoreEdgeData bool
 }
 
+// Generates a graph for use by the dlv client (writes it to conftamer/dlv/testdata) -
+// doesn't verify anything about it
+func TestGenerateGraph(t *testing.T) {
+	runTestConftamer(t, []string{"./conftamer/dlv/main_test.go"}, nil, nil)
+}
+
 // Tests local and global interface implementations
 // (i.e. find an interface CType T, then find CTypes that implement it in both T's package and another package),
 // and global references (i.e. find a concrete CType T, then find CTypes enclosing it outside T's package).
@@ -85,7 +91,7 @@ func TestConftamerInterface(t *testing.T) {
 		{Source: ct.CTypeNodeHash(expected.Vertices[4]), Target: ct.CTypeNodeHash(expected.Vertices[2])}, // global ref => impl
 	}
 
-	runTestConftamer(t, []string{"interface.go", "interface_global.go"}, nil, &ExpectedGraph{graph: expected, ignoreEdgeData: true})
+	runTestConftamer(t, []string{"testdata/conftamer/interface.go", "testdata/conftamer/interface_global.go"}, nil, &ExpectedGraph{graph: expected, ignoreEdgeData: true})
 }
 
 func TestConftamerAlias(t *testing.T) {
@@ -147,7 +153,7 @@ func TestConftamerAlias(t *testing.T) {
 
 	expected_stored := []ct.TestNode{aliasroot, realroot, alias}
 
-	runTestConftamer(t, []string{"alias.go"}, expected_stored, nil)
+	runTestConftamer(t, []string{"testdata/conftamer/alias.go"}, expected_stored, nil)
 }
 
 func TestConftamerFields(t *testing.T) {
@@ -285,7 +291,7 @@ func TestConftamerFields(t *testing.T) {
 	expected_stored := []ct.TestNode{root}
 	expected_stored = append(expected_stored, rest...)
 
-	runTestConftamer(t, []string{"fields.go"}, expected_stored, nil)
+	runTestConftamer(t, []string{"testdata/conftamer/fields.go"}, expected_stored, nil)
 }
 
 func checkExpectedStored(t *testing.T, tree string, expected_stored []ct.TestNode) {
@@ -368,8 +374,7 @@ func runTestConftamer(t *testing.T, module_files []string, expected_stored []ct.
 	t.Parallel()
 	module_srcs := []string{}
 	for _, module_file := range module_files {
-		module_path := "./testdata/conftamer/" + module_file
-		fd, err := os.Open(module_path)
+		fd, err := os.Open(module_file)
 		require.NoError(t, err)
 		defer fd.Close()
 		module_src, err := io.ReadAll(fd)

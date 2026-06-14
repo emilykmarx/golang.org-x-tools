@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"testing"
+
+	"gopkg.in/yaml.v2"
 )
 
 // Fake module (with unit tests and CType definitions all in one package)
@@ -42,6 +45,11 @@ func Test_Field_Slice(t *testing.T) {
 func (c ParentFirst) Method() {
 	fmt.Printf("RECVR VALUE IN METHOD: %+v\n", c)
 }
+func (c *ParentFirst) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	*c = ParentFirst{}
+	type plain ParentFirst
+	return unmarshal((*plain)(c))
+}
 
 func Test_Multiple_AST_Paths(t *testing.T) {
 	t2 := T2{F3: T3{Val: 1}, F4: []T3{{Val: 2}, {Val: 3}}}
@@ -52,5 +60,15 @@ func Test_Multiple_AST_Paths(t *testing.T) {
 }
 
 func (c T1) Method() {
-	fmt.Printf("RECVR VALUE IN METHOD: %+v\n", c)
+	marshaled, err := yaml.Marshal(c)
+	if err != nil {
+		log.Fatalf("error marshaling: %v", err)
+	}
+
+	fmt.Printf("**MARSHALED RECVR**\n\n %+v\n", string(marshaled))
+}
+func (c *T1) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	*c = T1{}
+	type plain T1
+	return unmarshal((*plain)(c))
 }
