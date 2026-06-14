@@ -37,8 +37,9 @@ func Test_ASTPaths(t *testing.T) {
 
 	g, m := ct.Deserialize(graph_file)
 	ctypes := ct.CTypes{Graph: g, List: m.List}
-	_, ast_paths := graph.CTypePathsToLeaves(ctypes.Graph, recvr_hash)
+	ctype_paths, ast_paths := graph.CTypePathsToLeaves(ctypes.Graph, recvr_hash)
 
+	// TEST CTypePathsToLeaves()
 	sort := func(a graph.ASTPath, b graph.ASTPath) int {
 		// Sort by T1 field, then T2 field
 		cmp := strings.Compare(a[1], b[1])
@@ -53,5 +54,31 @@ func Test_ASTPaths(t *testing.T) {
 
 	if !reflect.DeepEqual(ast_paths, expected_ast_paths) {
 		t.Fatalf("AST paths:\nExpected \n%v\nActual \n%v", expected_ast_paths, ast_paths)
+	}
+
+	// TEST AstIdxToEdge()
+	for i, ctype_path := range ctype_paths {
+		for which_ast, ast_path := range ast_paths[i] {
+			for idx := range ast_path {
+				expected_edge_src := "T1"
+				// Paths starting with F1 get sorted first
+				if which_ast < 2 {
+					// Path starts with F1
+					if idx >= len(expected_edges_T1[0]) {
+						expected_edge_src = "T2"
+					}
+				} else {
+					// Path starts with F2
+					if idx >= len(expected_edges_T1[1]) {
+						expected_edge_src = "T2"
+					}
+
+				}
+				edge := graph.AstIdxToEdge(ctype_path, ast_path, idx)
+				if edge.Source.Names[0] != ct.FullTypeName(expected_edge_src) {
+					t.Fatalf("AST path %v - expected edge %v for idx %v, got %v", ast_path, expected_edge_src, idx, edge.Source.Names[0])
+				}
+			}
+		}
 	}
 }

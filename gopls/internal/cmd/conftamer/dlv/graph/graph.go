@@ -1,6 +1,9 @@
 package graph
 
 import (
+	"fmt"
+	"reflect"
+
 	"github.com/dominikbraun/graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
 )
@@ -23,6 +26,40 @@ func edgeASTPaths(edge graph.Edge[ct.CTypeNode]) []ASTPath {
 		}
 	}
 	return ast_paths
+}
+
+// Find corresponding CType edge based on index in concatenated AST path
+func AstIdxToEdge(ctypes_path CTypesPath, ast_path ASTPath, want int) graph.Edge[ct.CTypeNode] {
+	cur := 0
+	for _, edge := range ctypes_path {
+		edge_ast_paths := edgeASTPaths(edge)
+		// Find which one this ast_path took
+
+		found := false
+		for _, edge_ast_path := range edge_ast_paths {
+			part := ast_path[:len(edge_ast_path)] // corresponding part of path
+			if reflect.DeepEqual(part, edge_ast_path) {
+				edge_end := cur + len(edge_ast_path) - 1 // inclusive
+
+				if want <= edge_end {
+					// idx we're looking for is in this edge
+					return edge
+				}
+
+				// Eat the AST edges we took, check the next CType edge
+				cur += len(edge_ast_path)
+				ast_path = ast_path[cur:]
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			panic(fmt.Errorf("Failed to find corresponding ast_path for idx %v on %v", want, ctypes_path))
+		}
+	}
+
+	panic(fmt.Errorf("Failed to find corresponding ast_path for %v on %v", ast_path, ctypes_path))
 }
 
 // Find all CTypes paths from start_hash to a leaf,
