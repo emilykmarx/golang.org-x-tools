@@ -21,7 +21,7 @@ type ChildSecond struct {
 	Val int
 }
 
-// Multiple AST paths on single CType edge, on consecutive CType edges.
+// TEST 2: Multiple AST paths on single CType edge, on consecutive CType edges.
 // (combinatorial AST paths)
 type T1 struct {
 	F1 T2
@@ -52,12 +52,18 @@ func (c *ParentFirst) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return unmarshal((*plain)(c))
 }
 
-func Test_Multiple_AST_Paths(t *testing.T) {
+func Test_Multiple_AST_Paths_Recvr_Root(t *testing.T) {
+	// TEST 2.1: Recvr is root
 	t2 := T2{F3: T3{Val: 1}, F4: []T3{{Val: 2}, {Val: 3}}}
 	t2_2 := T2{F3: T3{Val: 4}, F4: []T3{{Val: 5}, {Val: 6}}}
 	t2_3 := T2{F3: T3{Val: 7}, F4: []T3{{Val: 8}, {Val: 9}}}
-	ctype := T1{F1: t2, F2: []T2{t2_2, t2_3}}
-	ctype.Method()
+	t1 := T1{F1: t2, F2: []T2{t2_2, t2_3}}
+	t1.Method()
+}
+func Test_Multiple_AST_Paths_Recvr_Leaf(t *testing.T) {
+	// TEST 2.2: Recvr is leaf
+	t3 := T3{Val: 1}
+	t3.Method()
 }
 
 func (c T1) Method() {
@@ -71,5 +77,18 @@ func (c T1) Method() {
 func (c *T1) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	*c = T1{}
 	type plain T1
+	return unmarshal((*plain)(c))
+}
+func (c T3) Method() {
+	marshaled, err := yaml.Marshal(c)
+	if err != nil {
+		log.Fatalf("error marshaling: %v", err)
+	}
+
+	fmt.Printf("**MARSHALED RECVR**\n\n %+v\n", string(marshaled))
+}
+func (c *T3) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	*c = T3{}
+	type plain T3
 	return unmarshal((*plain)(c))
 }

@@ -6,8 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dominikbraun/graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
-	"golang.org/x/tools/gopls/internal/cmd/conftamer/dlv/graph"
+	dlvgraph "golang.org/x/tools/gopls/internal/cmd/conftamer/dlv/graph"
 )
 
 // Tests for main.go
@@ -17,30 +18,30 @@ func Test_ASTPaths(t *testing.T) {
 	recvr_type := "T1"
 	recvr_hash := ct.CTypeHash(recvr_type)
 
-	expected_edges_T1 := []graph.ASTPath{
-		graph.ASTPath{"StructType.Fields", "Field:F1", "FieldList.List", "Field.Type"},
-		graph.ASTPath{"StructType.Fields", "Field:F2", "FieldList.List", "Field.Type", "ArrayType.Elt"},
+	expected_edges_T1 := []dlvgraph.ASTPath{
+		dlvgraph.ASTPath{"StructType.Fields", "Field:F1", "FieldList.List", "Field.Type"},
+		dlvgraph.ASTPath{"StructType.Fields", "Field:F2", "FieldList.List", "Field.Type", "ArrayType.Elt"},
 	}
 
-	expected_edges_T2 := []graph.ASTPath{
-		graph.ASTPath{"StructType.Fields", "Field:F3", "FieldList.List", "Field.Type"},
-		graph.ASTPath{"StructType.Fields", "Field:F4", "FieldList.List", "Field.Type", "ArrayType.Elt"},
+	expected_edges_T2 := []dlvgraph.ASTPath{
+		dlvgraph.ASTPath{"StructType.Fields", "Field:F3", "FieldList.List", "Field.Type"},
+		dlvgraph.ASTPath{"StructType.Fields", "Field:F4", "FieldList.List", "Field.Type", "ArrayType.Elt"},
 	}
-	expected_edges := []graph.ASTPath{}
+	expected_edges := []dlvgraph.ASTPath{}
 	// 4 paths for the path T1 => T2 => T3: Each of T1 fields + each of T2 fields
 	for _, edge1 := range expected_edges_T1 {
 		for _, edge2 := range expected_edges_T2 {
 			expected_edges = append(expected_edges, append(edge1, edge2...))
 		}
 	}
-	expected_ast_paths := [][]graph.ASTPath{expected_edges}
+	expected_ast_paths := [][]dlvgraph.ASTPath{expected_edges}
 
 	g, m := ct.Deserialize(graph_file)
 	ctypes := ct.CTypes{Graph: g, List: m.List}
-	ctype_paths, ast_paths := graph.CTypePathsToLeaves(ctypes.Graph, recvr_hash)
+	ctype_paths, ast_paths := dlvgraph.CTypePathsToOrFrom(ctypes.Graph, recvr_hash, graph.Forwards)
 
-	// TEST CTypePathsToLeaves()
-	sort := func(a graph.ASTPath, b graph.ASTPath) int {
+	// TEST CTypePathsToOrFrom()
+	sort := func(a dlvgraph.ASTPath, b dlvgraph.ASTPath) int {
 		// Sort by T1 field, then T2 field
 		cmp := strings.Compare(a[1], b[1])
 		if cmp != 0 {
@@ -74,7 +75,7 @@ func Test_ASTPaths(t *testing.T) {
 					}
 
 				}
-				edge := graph.AstIdxToEdge(ctype_path, ast_path, idx)
+				edge := dlvgraph.AstIdxToEdge(ctype_path, ast_path, idx)
 				if edge.Source.Names[0] != ct.FullTypeName(expected_edge_src) {
 					t.Fatalf("AST path %v - expected edge %v for idx %v, got %v", ast_path, expected_edge_src, idx, edge.Source.Names[0])
 				}

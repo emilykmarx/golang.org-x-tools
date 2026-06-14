@@ -62,24 +62,43 @@ func AstIdxToEdge(ctypes_path CTypesPath, ast_path ASTPath, want int) graph.Edge
 	panic(fmt.Errorf("Failed to find corresponding ast_path for %v on %v", ast_path, ctypes_path))
 }
 
-// Find all CTypes paths from start_hash to a leaf,
+// Find all CTypes paths from a root to hash (`Backwards`), or from hash to a leaf,
 // and all AST paths corresponding to each.
-// (An edge can have multiple AST paths - get all combos of AST paths across all edges)
+// (An edge can have multiple AST paths - get all combos of AST paths across all edges).
 // Assumes g has been marshaled (which changes the type of the edge data).
-// For each path, also return corresponding AST path(s).
-func CTypePathsToLeaves(g ct.CTypeGraph, start_hash ct.CTypeHash) ([]CTypesPath, [][]ASTPath) {
+// If hash is a root(Backwards)/leaf(Forwards), make a fake path with a self-edge
+func CTypePathsToOrFrom(g ct.CTypeGraph, hash ct.CTypeHash, direction graph.Direction) ([]CTypesPath, [][]ASTPath) {
 	all_ctypes_paths := []CTypesPath{}
 	all_ast_paths := [][]ASTPath{}
 
-	_, leaves, err := graph.RootsLeaves(g)
+	roots, leaves, err := graph.RootsLeaves(g)
 	ct.CheckErr(err)
-	for _, leaf := range leaves {
+	others := roots
+	if direction == graph.Forwards {
+		others = leaves
+	}
+
+	for _, other := range others {
 		// PERF: Recomputes the adjacency map on every call to AllPathsBetween.
-		paths, err := graph.AllPathsBetween(g, start_hash, leaf)
+		var paths [][]ct.CTypeHash
+		var err error
+		if direction == graph.Forwards {
+			paths, err = graph.AllPathsBetween(g, hash, other)
+		} else {
+			paths, err = graph.AllPathsBetween(g, other, hash)
+		}
 		ct.CheckErr(err)
+
 		for _, path := range paths {
 			ctype_path := CTypesPath{}
 			prev_edge_ast_paths := []ASTPath{} // as of previous edge
+			if len(path) == 1 {
+				// hash is root/leaf
+				node, err := g.Vertex(hash)
+				ct.CheckErr(err)
+				edge := graph.Edge[ct.CTypeNode]{Source: node, Target: node}
+				ctype_path = append(ctype_path, edge)
+			}
 
 			for i := range path[:len(path)-1] {
 				edge, err := g.Edge(path[i], path[i+1])
