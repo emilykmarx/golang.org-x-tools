@@ -144,10 +144,16 @@ func CTypePathToParams(ctype_path graph.CTypesPath, ast_path graph.ASTPath, ast_
 
 			switch ast_edge {
 			case "ArrayType.Elt":
+				// Children are array/slice elements
 				for _, elem := range cur_var.Children {
 					new_key := *key // don't share between children, else they will keep appending
 					CTypePathToParams(ctype_path, ast_path, cur_ast_path_idx+1, elem, params, &new_key)
 				}
+				return
+
+			case "StarExpr.X":
+				// Child is target of pointer
+				CTypePathToParams(ctype_path, ast_path, cur_ast_path_idx+1, cur_var.Children[0], params, key)
 				return
 
 			// Case 2. A type of edge we know we can skip
@@ -155,6 +161,8 @@ func CTypePathToParams(ctype_path graph.CTypesPath, ast_path graph.ASTPath, ast_
 			case "StructType.Fields":
 			case "FieldList.List":
 			case "Field.Type":
+
+			// When adding a new edge type: return after recursing
 
 			default:
 				// Case 3. Not yet supported

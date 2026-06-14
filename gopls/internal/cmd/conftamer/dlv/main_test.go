@@ -10,11 +10,11 @@ import (
 
 // Fake module (with unit tests and CType definitions all in one package)
 
-// CType edge with field and array AST edges.
+// CType edge with field, pointer, and array AST edges.
 // Non-CType field (child that should be ignored).
 // Struct tag.
 type ParentFirst struct {
-	ChildField1 []ChildSecond `yaml:"renamed_key"`
+	ChildField1 *[]ChildSecond `yaml:"renamed_key"`
 	NonCType    int
 }
 type ChildSecond struct {
@@ -37,8 +37,9 @@ type T3 struct {
 	Val int
 }
 
-func Test_Field_Slice(t *testing.T) {
-	ctype := ParentFirst{ChildField1: []ChildSecond{{Val: -1}, {Val: -2}}, NonCType: -5}
+func Test_Field_Ptr_Slice(t *testing.T) {
+	children := []ChildSecond{{Val: -1}, {Val: -2}}
+	ctype := ParentFirst{ChildField1: &children, NonCType: -5}
 	ctype.Method()
 }
 
