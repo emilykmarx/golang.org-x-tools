@@ -109,15 +109,21 @@ const (
 	NeighIsChild
 )
 
-// Interfaces that are just `String()`
+// Interfaces whose implementations we won't search for after finding the initial unmarshal implementers
 var (
-	STRING_INTERFACES = []ct.FullTypeName{
+	IGNORED_INTERFACES = []ct.FullTypeName{
+		// String()
 		"fmt.Stringer",
 		"expvar.Var",
 		"runtime.stringer",
 		"context.stringer",
 		"os/signal.stringer",
 		"github.com/distribution/reference.Reference",
+
+		// UnmarshalYAML()
+		"gopkg.in/yaml.v3.obsoleteUnmarshaler",
+		"sigs.k8s.io/yaml/goyaml.v2.Unmarshaler",
+		"gopkg.in/yaml.v2.Unmarshaler",
 	}
 )
 
@@ -187,7 +193,7 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_name *ct.FullT
 
 	if _, is_iface := typ.TypeInfo.Type().Underlying().(*types.Interface); is_iface {
 		// Implementing string interface doesn't indicate anything interesting
-		if !slices.Contains(STRING_INTERFACES, cur_name) {
+		if !slices.Contains(IGNORED_INTERFACES, cur_name) {
 			iface_impls, err := c.getInterfaceImpls(defn_locs)
 			ct.CheckErr(err)
 			children = append(children, iface_impls...)
