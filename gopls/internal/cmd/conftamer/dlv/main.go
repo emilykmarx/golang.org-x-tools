@@ -21,50 +21,210 @@ func main() {
 	var dlv_port int
 	var test_pkg, test_name, graph_file, module_prefix string
 	flag.IntVar(&dlv_port, "dlv-port", 4040, "Listening port for dlv")
-	flag.StringVar(&test_pkg, "test-pkg", "", "Package of test to run")
-	flag.StringVar(&test_name, "test-name", "", "Name of test to run")
 	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
+	flag.StringVar(&test_pkg, "test-pkg", "", "Package of test to run, relative to module with leading slash "+
+		" (optional - defaults to all packages in module)")
+	flag.StringVar(&test_name, "test-name", "", "Name of test to run (optional - defaults to all tests in package)")
 	flag.StringVar(&graph_file, "graph-file", "", "File containing CTypes graph")
 	flag.Parse()
 
-	Run(dlv_port, test_pkg, test_name, graph_file)
+	if module_prefix == "" || graph_file == "" {
+		flag.Usage()
+		log.Fatalf("Missing mandatory argument")
+	}
+
+	_, ok := strings.CutPrefix(test_pkg, "/")
+	if test_pkg != "" && !ok {
+		log.Fatalf("test package missing leading /")
+	}
+
+	Run(dlv_port, module_prefix, test_pkg, test_name, graph_file)
 }
 
-func Run(dlv_port int, test_pkg string, test_name string, graph_file string) {
+// Info passed to the dlv client for each package
+type ClientInfo struct {
+	ctypes     ct.CTypes
+	pkg        string
+	pkg_ctypes []ct.CTypeNode
+}
+
+func Run(dlv_port int, module_prefix string, test_pkg string, test_name string, graph_file string) {
 	// 1. Load the CTypes graph
-	graph_file = "testdata/graph.text"
 	g, m := ct.Deserialize(graph_file)
 	ctypes := ct.CTypes{Graph: g, List: m.List}
-	// 2. Connect to dlv server and run test
-	if err := contexttrack.Run(dlv_port, test_pkg, test_name, ctypes, RunDlvClient); err != nil {
-		panic(err)
+
+	// 2. Get packages that have CTypes
+	per_pkg_ctypes := GetCTypesPackages(g, test_pkg)
+	if len(per_pkg_ctypes) == 0 {
+		panic("no ctypes found - bad package name?")
+	}
+
+	// 3. For each package:
+	// Connect to dlv server and run tests
+	// (dlv can only run tests in one package at a time)
+	for pkg, pkg_ctypes := range per_pkg_ctypes {
+		client_info := ClientInfo{ctypes: ctypes, pkg: pkg, pkg_ctypes: pkg_ctypes}
+		if err := contexttrack.Run(dlv_port, module_prefix+pkg, test_name, client_info, RunDlvClient); err != nil {
+			if _, ok := err.(*contexttrack.ErrNoTests); ok {
+				if test_pkg != "" {
+					// Presumably user thought package had tests
+					panic(err)
+				} else {
+					// No tests in this package
+				}
+			} else {
+				panic(err)
+			}
+		}
 	}
 }
 
 var (
-	loadcfg = api.LoadConfig{FollowPointers: true, MaxVariableRecurse: 100, MaxStringLen: 100, MaxArrayValues: 100, MaxStructFields: -1}
+	loadcfg = api.LoadConfig{FollowPointers: true, MaxVariableRecurse: 100, MaxStringLen: 100, MaxArrayValues: 1, MaxStructFields: -1}
 	scope   = api.EvalScope{GoroutineID: -1}
+	// don't set breakpoints on these
+	IGNORED_METHODS = []string{
+		"String",
+		"UnmarshalYAML",
+	}
 )
 
-func RunDlvClient(dlv_endpoint string, ctypes_all any) error {
+// Get module's CTypes, organized by package (avoid iterating over entire graph for each package)
+// package format: "/<path after module prefix>"
+func GetCTypesPackages(g ct.CTypeGraph, test_pkg string) map[string][]ct.CTypeNode {
+	ctypes := make(map[string][]ct.CTypeNode)
+
+	nodes, err := g.Vertices()
+	ct.CheckErr(err)
+	for _, node := range nodes {
+		_, contains_prefix := ct.IsModuleNode(ct.CTypeNodeHash(node), "/", g)
+		if contains_prefix {
+			// See comment in AddCType - if a node has multiple names, we may be missing some methods
+			// Should check that - for now, assume all methods are in same package
+			pkg := strings.Split(string(node.Names[0]), ".")[0] // assumes package name minus module prefix contains no "."
+			if pkg == "/storage_test" || pkg == "/promql_test" {
+				// TODO (minor) gopls skips the last directory in the path for these packages
+				// (both in recording the type name and methods)
+				// e.g. records github.com/prometheus/prometheus/storage_test, not github.com/prometheus/prometheus/storage/storage_test
+				// They're the only package names with "_", maybe that confuses it??
+				continue
+			}
+			if test_pkg == "" || pkg == test_pkg {
+				ctypes[pkg] = append(ctypes[pkg], node)
+			}
+		}
+	}
+
+	return ctypes
+}
+
+// Set breakpoints on methods of CTypes in package
+func SetCTypesBreakpoints(client *rpc2.RPCClient, ctypes []ct.CTypeNode) {
+	for _, node := range ctypes {
+		for _, method := range node.Methods {
+			method_parts := strings.Split(string(method), ".")
+			method_name := method_parts[len(method_parts)-1]
+			if !slices.Contains(IGNORED_METHODS, method_name) {
+
+				// Fix format
+				method_dlv := string(method)
+				if stripped, ok := strings.CutPrefix(method_dlv, "(*"); ok {
+					// gopls records methods with pointer receivers as (*pkg.recvr).method, but dlv wants pkg.(*recvr).method
+					method_parts = strings.Split(stripped, ".") // pkg parts (may have "."), recvr), method
+					pkg_parts := method_parts[:len(method_parts)-2]
+					method_parts_final := make([]string, len(pkg_parts))
+					copy(method_parts_final, pkg_parts)
+					method_parts_final = append(method_parts_final, "(*")
+					part1 := strings.Join(method_parts_final, ".")
+					part2 := strings.Join(method_parts[len(pkg_parts):], ".")
+					method_dlv = part1 + part2
+				} else {
+					// gopls records methods with non-pointer receivers as (pkg.recvr).method, but dlv wants pkg.recvr.method
+					method_dlv = strings.ReplaceAll(method_dlv, "(", "")
+					method_dlv = strings.ReplaceAll(method_dlv, ")", "")
+				}
+
+				bp := api.Breakpoint{FunctionName: method_dlv}
+				_, err := client.CreateBreakpoint(&bp)
+				if err != nil {
+					if _, ok := strings.CutPrefix(err.Error(), "could not find function"); !ok {
+						ct.CheckErr(err)
+					} else {
+						// Method not compiled in (or malformed method name, if there is an unknown bug above)
+						// TODO any way to tell the difference?
+						// (`dlv test` only compiles in methods that will be called in the tests)
+					}
+				}
+			}
+		}
+	}
+}
+
+func HandleCTypesMethodEntry(client *rpc2.RPCClient, args ClientInfo, method string) {
+	fmt.Printf("ENTER CTYPES METHOD %v\n", method)
+
+	// TODO proper handling for incomplete loads - see ClientHowTo.md
+	recvr_name := "d" // XXX get recvr name and type from dlv
+	recvr_var, err := client.EvalVariable(scope, recvr_name, loadcfg)
+	fmt.Println("EVALED")
+	ct.CheckErr(err)
+
+	recvr_type := "/discovery/kubernetes.Discovery"
+	recvr_hash := ct.CTypeHash(recvr_type)
+	params := []CTypeParam{}
+
+	// 1. Get key prefixes for all paths from a root to the receiver
+	key_prefixes := []string{}
+	ctype_paths, ast_paths := dlvgraph.CTypePathsToOrFrom(args.ctypes.Graph, recvr_hash, graph.Backwards)
+	fmt.Printf("ctype paths: %v\n", ctype_paths)
+	fmt.Printf("ast paths: %v\n", ast_paths)
+
+	for i, ctype_path := range ctype_paths {
+		for _, ast_path := range ast_paths[i] {
+			key := ""
+			CTypePathToParams(ctype_path, ast_path, 0, api.Variable{}, &params, &key)
+			key_prefixes = append(key_prefixes, key)
+		}
+		// If receiver is root, this will do nothing which is correct
+	}
+
+	// 2. Get key postfixes and values for all paths from the receiver to a leaf
+	ctype_paths, ast_paths = dlvgraph.CTypePathsToOrFrom(args.ctypes.Graph, recvr_hash, graph.Forwards)
+	for i, ctype_path := range ctype_paths {
+		for _, ast_path := range ast_paths[i] {
+			key := ""
+			// populates params with keys and values
+			CTypePathToParams(ctype_path, ast_path, 0, *recvr_var, &params, &key)
+		}
+		if len(ast_paths[i]) == 0 {
+			// Receiver is leaf
+			key := ""
+			CTypePathToParams(ctype_path, dlvgraph.ASTPath{}, 0, *recvr_var, &params, &key)
+		}
+	}
+
+	// 3. Final keys: prepend all prefixes to all postfixes
+	// (if a key appears in multiple sections of file, the corresponding type has multiple paths to it in the graph)
+	final_params := []CTypeParam{}
+	for _, param := range params {
+		for _, key_prefix := range key_prefixes {
+			final_param := param
+			final_param.Key = key_prefix + "." + param.Key
+			fmt.Printf("FINAL PARAM: KEY %v, VAL %+v\n", final_param.Key, final_param.Value)
+			final_params = append(final_params, final_param)
+		}
+	}
+}
+
+func RunDlvClient(dlv_endpoint string, info any) error {
 	fmt.Printf("Connecting to dlv on %v\n", dlv_endpoint)
 
-	ctypes := ctypes_all.(ct.CTypes)
+	args := info.(ClientInfo)
 
 	client := rpc2.NewClient(dlv_endpoint)
-	// Set breakpoints on methods of CTypes in module
-	// XXX also set bps on messages
-
-	// XXX get these from graph
-	// XXX get recvr hash - (need to lookup recvr CType - for now assume its node hash is its name)
-	module_name := "golang.org/x/tools/gopls/internal/cmd/conftamer/dlv"
-	recvr_type := "ParentFirst"
-	method_name := module_name + "." + recvr_type + ".Method"
-	recvr_name := "c"
-	bp := api.Breakpoint{FunctionName: method_name}
-
-	_, err := client.CreateBreakpoint(&bp)
-	ct.CheckErr(err)
+	// XXX also set bps on messages (currently prom uses forked k8s client that logs them), and method exits
+	// XXX log info similarly to conftamer repo - may need a lock around the data used to hold the info (for parallel tests)?
+	SetCTypesBreakpoints(client, args.pkg_ctypes)
 
 	state := <-client.Continue()
 
@@ -73,50 +233,10 @@ func RunDlvClient(dlv_endpoint string, ctypes_all any) error {
 			log.Fatalf("Error in debugger state: %v\n", state.Err)
 		}
 
-		// XXX check which bp was hit
-		// TODO proper handling for incomplete loads - see ClientHowTo.md
-		recvr_var, err := client.EvalVariable(scope, recvr_name, loadcfg)
-		ct.CheckErr(err)
-
-		recvr_hash := ct.CTypeHash(recvr_type)
-		params := []CTypeParam{}
-
-		// 1. Get key prefixes for all paths from a root to the receiver
-		key_prefixes := []string{}
-		ctype_paths, ast_paths := dlvgraph.CTypePathsToOrFrom(ctypes.Graph, recvr_hash, graph.Backwards)
-		for i, ctype_path := range ctype_paths {
-			for _, ast_path := range ast_paths[i] {
-				key := ""
-				CTypePathToParams(ctype_path, ast_path, 0, api.Variable{}, &params, &key)
-				key_prefixes = append(key_prefixes, key)
-			}
-			// If receiver is root, this will do nothing which is correct
-		}
-
-		// 2. Get key postfixes and values for all paths from the receiver to a leaf
-		ctype_paths, ast_paths = dlvgraph.CTypePathsToOrFrom(ctypes.Graph, recvr_hash, graph.Forwards)
-		for i, ctype_path := range ctype_paths {
-			for _, ast_path := range ast_paths[i] {
-				key := ""
-				// populates params with keys and values
-				CTypePathToParams(ctype_path, ast_path, 0, *recvr_var, &params, &key)
-			}
-			if len(ast_paths[i]) == 0 {
-				// Receiver is leaf
-				key := ""
-				CTypePathToParams(ctype_path, dlvgraph.ASTPath{}, 0, *recvr_var, &params, &key)
-			}
-		}
-
-		// 3. Final keys: prepend all prefixes to all postfixes
-		// (if a key appears in multiple sections of file, the corresponding type has multiple paths to it in the graph)
-		final_params := []CTypeParam{}
-		for _, param := range params {
-			for _, key_prefix := range key_prefixes {
-				final_param := param
-				final_param.Key = key_prefix + "." + param.Key
-				fmt.Printf("FINAL PARAM: KEY %v, VAL %+v\n", final_param.Key, final_param.Value)
-				final_params = append(final_params, final_param)
+		for _, thread := range state.Threads {
+			hit_bp := thread.Breakpoint
+			if hit_bp != nil {
+				HandleCTypesMethodEntry(client, args, hit_bp.FunctionName)
 			}
 		}
 	}
