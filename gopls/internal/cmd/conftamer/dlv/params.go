@@ -18,6 +18,8 @@ import (
 
 func MethodParams(client *rpc2.RPCClient, args ClientInfo, method string) {
 	// TODO proper handling for incomplete loads - see ClientHowTo.md
+	loadcfg := api.LoadConfig{FollowPointers: true, MaxVariableRecurse: 100, MaxStringLen: 100, MaxArrayValues: 1, MaxStructFields: -1}
+	scope := api.EvalScope{GoroutineID: -1}
 	recvr_name := "d" // XXX get recvr name and type from dlv
 	recvr_var, err := client.EvalVariable(scope, recvr_name, loadcfg)
 	fmt.Println("EVALED")

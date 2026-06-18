@@ -4,17 +4,18 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"slices"
 	"strings"
 
 	"github.com/emilykmarx/conftamer/contexttrack"
 	"github.com/go-delve/delve/service/api"
 	"github.com/go-delve/delve/service/rpc2"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
+	modulemsginfo "k8s.io/client-go/testing"
 )
 
 func main() {
 	var dlv_port int
+	var msg_send_funcs arrayFlags
 	var test_pkg, test_name, graph_file, module_prefix string
 	flag.IntVar(&dlv_port, "dlv-port", 4040, "Listening port for dlv")
 	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
@@ -22,9 +23,10 @@ func main() {
 		" (optional - defaults to all packages in module)")
 	flag.StringVar(&test_name, "test-name", "", "Name of test to run (optional - defaults to all tests in package)")
 	flag.StringVar(&graph_file, "graph-file", "", "File containing CTypes graph")
+	flag.Var(&msg_send_funcs, "send-funcs", "Functions that send messages (format: --send-funcs='f1' --send-funcs='f2'")
 	flag.Parse()
 
-	if module_prefix == "" || graph_file == "" {
+	if module_prefix == "" || graph_file == "" || len(msg_send_funcs) == 0 {
 		flag.Usage()
 		log.Fatalf("Missing mandatory argument")
 	}
@@ -34,17 +36,29 @@ func main() {
 		log.Fatalf("test package missing leading /")
 	}
 
-	Run(dlv_port, module_prefix, test_pkg, test_name, graph_file)
+	Run(dlv_port, module_prefix, test_pkg, test_name, graph_file, msg_send_funcs)
+}
+
+// Allow array CLI arg
+type arrayFlags []string
+
+func (i *arrayFlags) String() string {
+	return fmt.Sprintf("%v", *i)
+}
+func (i *arrayFlags) Set(value string) error {
+	*i = append(*i, value)
+	return nil
 }
 
 // Info passed to the dlv client for each package
 type ClientInfo struct {
-	ctypes     ct.CTypes
-	pkg        string
-	pkg_ctypes []ct.CTypeNode
+	ctypes         ct.CTypes
+	pkg            string
+	pkg_ctypes     []ct.CTypeNode
+	msg_send_funcs []string
 }
 
-func Run(dlv_port int, module_prefix string, test_pkg string, test_name string, graph_file string) {
+func Run(dlv_port int, module_prefix string, test_pkg string, test_name string, graph_file string, msg_send_funcs []string) {
 	// 1. Load the CTypes graph
 	g, m := ct.Deserialize(graph_file)
 	ctypes := ct.CTypes{Graph: g, List: m.List}
@@ -59,7 +73,7 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name string, 
 	// Connect to dlv server and run tests
 	// (dlv can only run tests in one package at a time)
 	for pkg, pkg_ctypes := range per_pkg_ctypes {
-		client_info := ClientInfo{ctypes: ctypes, pkg: pkg, pkg_ctypes: pkg_ctypes}
+		client_info := ClientInfo{ctypes: ctypes, pkg: pkg, pkg_ctypes: pkg_ctypes, msg_send_funcs: msg_send_funcs}
 		if err := contexttrack.Run(dlv_port, module_prefix+pkg, test_name, client_info, RunDlvClient); err != nil {
 			if _, ok := err.(*contexttrack.ErrNoTests); ok {
 				if test_pkg != "" {
@@ -76,8 +90,6 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name string, 
 }
 
 var (
-	loadcfg = api.LoadConfig{FollowPointers: true, MaxVariableRecurse: 100, MaxStringLen: 100, MaxArrayValues: 1, MaxStructFields: -1}
-	scope   = api.EvalScope{GoroutineID: -1}
 	// don't set breakpoints on these
 	IGNORED_METHODS = []string{
 		"String",
@@ -114,52 +126,38 @@ func GetCTypesPackages(g ct.CTypeGraph, test_pkg string) map[string][]ct.CTypeNo
 	return ctypes
 }
 
-// Set breakpoints on methods of CTypes in package
-func SetCTypesBreakpoints(client *rpc2.RPCClient, ctypes []ct.CTypeNode) {
-	for _, node := range ctypes {
-		for _, method := range node.Methods {
-			method_parts := strings.Split(string(method), ".")
-			method_name := method_parts[len(method_parts)-1]
-			if !slices.Contains(IGNORED_METHODS, method_name) {
-
-				// Fix format
-				method_dlv := string(method)
-				if stripped, ok := strings.CutPrefix(method_dlv, "(*"); ok {
-					// gopls records methods with pointer receivers as (*pkg.recvr).method, but dlv wants pkg.(*recvr).method
-					method_parts = strings.Split(stripped, ".") // pkg parts (may have "."), recvr), method
-					pkg_parts := method_parts[:len(method_parts)-2]
-					method_parts_final := make([]string, len(pkg_parts))
-					copy(method_parts_final, pkg_parts)
-					method_parts_final = append(method_parts_final, "(*")
-					part1 := strings.Join(method_parts_final, ".")
-					part2 := strings.Join(method_parts[len(pkg_parts):], ".")
-					method_dlv = part1 + part2
-				} else {
-					// gopls records methods with non-pointer receivers as (pkg.recvr).method, but dlv wants pkg.recvr.method
-					method_dlv = strings.ReplaceAll(method_dlv, "(", "")
-					method_dlv = strings.ReplaceAll(method_dlv, ")", "")
-				}
-
-				bp := api.Breakpoint{FunctionName: method_dlv}
-				_, err := client.CreateBreakpoint(&bp)
-				if err != nil {
-					if _, ok := strings.CutPrefix(err.Error(), "could not find function"); !ok {
-						ct.CheckErr(err)
-					} else {
-						// Method not compiled in (or malformed method name, if there is an unknown bug above)
-						// TODO any way to tell the difference?
-						// (`dlv test` only compiles in methods that will be called in the tests)
-					}
-				}
-			}
-		}
+// Set breakpoints on message send functions
+func SetMessageSendBreakpoints(client *rpc2.RPCClient, send_funcs []string) {
+	for _, f := range send_funcs {
+		bp := api.Breakpoint{FunctionName: f}
+		_, err := client.CreateBreakpoint(&bp)
+		ct.CheckErr(err)
 	}
 }
 
-func HandleCTypesMethodEntry(client *rpc2.RPCClient, args ClientInfo, method string) {
-	fmt.Printf("ENTER CTYPES METHOD %v\n", method)
+/*
+- Params can affect 3 decisions we can track (CF):
+  - Msg send
+  - Function call
+  - Goroutine spawn (currently don't track)
 
-	MethodParams(client, args, method)
+- Params can be copied from method's CType to msg send via function calls (DF)
+
+Thus:
+  - Msg is CF-tainted by all in-scope params, across all goroutines
+    -- TODO: should limit to the goroutines in the sending one's spawn tree - need to track spawning for that
+  - Check DF from the CType method that sent the msg
+
+Thus:
+- BP on msg send - on hit:
+  - Check stack of all goroutines for all CTypes methods (CF)
+  - Check stack of sending goroutine for most recent CTypes method (DF)
+*/
+func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoint, goroutine int64) {
+	msgID, err := modulemsginfo.GetMessageInfo(client, bp, goroutine)
+	ct.CheckErr(err)
+	// LEFT OFF the last "Thus" above
+	fmt.Printf("MSG SEND %v\n", msgID)
 }
 
 func RunDlvClient(dlv_endpoint string, info any) error {
@@ -168,9 +166,8 @@ func RunDlvClient(dlv_endpoint string, info any) error {
 	args := info.(ClientInfo)
 
 	client := rpc2.NewClient(dlv_endpoint)
-	// XXX also set bps on messages (currently prom uses forked k8s client that logs them), and method exits
 	// XXX log info similarly to conftamer repo - may need a lock around the data used to hold the info (for parallel tests)?
-	SetCTypesBreakpoints(client, args.pkg_ctypes)
+	SetMessageSendBreakpoints(client, args.msg_send_funcs)
 
 	state := <-client.Continue()
 
@@ -182,7 +179,7 @@ func RunDlvClient(dlv_endpoint string, info any) error {
 		for _, thread := range state.Threads {
 			hit_bp := thread.Breakpoint
 			if hit_bp != nil {
-				HandleCTypesMethodEntry(client, args, hit_bp.FunctionName)
+				HandleMessageSend(client, args, hit_bp, thread.GoroutineID)
 			}
 		}
 	}
