@@ -196,17 +196,35 @@ const (
 	NotStructField
 )
 
+type NeighAge int
+
+const (
+	NeighIsParent NeighAge = iota
+	NeighIsChild
+)
+
+// Info about the neighbor CType from which we found a new CType
+type NeighInfo struct {
+	Name     FullTypeName
+	Age      NeighAge
+	Ast_path []string
+}
+
 // Given the object defined at the location, record its info.
 // If not struct field, combine with the corresponding existing node if any.
 // Return whether existed
-func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_name *FullTypeName, neigh_ast_path []string) (TypeNameExistence, error) {
-	if typ.TypeSource != golang.Implementer && len(neigh_ast_path) == 0 {
-		// If no AST edges (i.e. only the TypeSpec_Type one) from enclosed/enclosing, `type  X Y` => combine
-		existed, err, combined := c.combineTypes(typ.TypeInfo, *neigh_name)
-		CheckErr(err)
-		if combined {
-			// If combineTypes combined nodes, it already updated the list => check the value of existed it returned
-			return existed, nil
+func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_info *NeighInfo) (TypeNameExistence, error) {
+	if typ.TypeSource != golang.Implementer {
+		combine := len(neigh_info.Ast_path) == 0 || slices.Compare(neigh_info.Ast_path, []string{"SelectorExpr.Sel"}) == 0
+		if combine {
+			// If no AST edges (i.e. only the TypeSpec_Type one) from enclosed/enclosing (or just one for pkg.T), `type X Y` => combine
+			// (If not iface implementer, should always have a neigh_info)
+			existed, err, combined := c.combineTypes(typ.TypeInfo, neigh_info.Name)
+			CheckErr(err)
+			if combined {
+				// If combineTypes combined nodes, it already updated the list => check the value of existed it returned
+				return existed, nil
+			}
 		}
 	}
 

@@ -96,41 +96,49 @@ func (c *conftamer) getInterfaceImpls(defn_locs []string) ([]golang.TypeInfo, er
 		implementations, err := c.local_server.ImplementationMoreInfo(c.ctx, p)
 		ct.CheckErr(err)
 
+		// Also returns the other unmarshal interfaces => ignore
+		implementations = slices.DeleteFunc(implementations, func(a golang.TypeInfo) bool {
+			return slices.Contains(UNMARSHAL_INTERFACES, ct.TypeName(a.TypeInfo))
+		})
 		impl_ctypes = append(impl_ctypes, implementations...)
 	}
 
 	return impl_ctypes, nil
 }
 
-type NeighAge int
+// Which neighbors to find
+type NeighFind struct {
+	children    bool
+	parents     bool
+	iface_impls bool
+	// If path to newly found type has one of these edges, ignore the new type
+	excluded_ast_edges []string
+}
 
-const (
-	NeighIsParent NeighAge = iota
-	NeighIsChild
-)
+var UNMARSHAL_INTERFACES = []ct.FullTypeName{
+	"gopkg.in/yaml.v3.obsoleteUnmarshaler",
+	"sigs.k8s.io/yaml/goyaml.v2.Unmarshaler",
+	"gopkg.in/yaml.v2.Unmarshaler",
+}
+var STRING_INTERFACES = []ct.FullTypeName{
+	// String()
+	"fmt.Stringer",
+	"expvar.Var",
+	"runtime.stringer",
+	"context.stringer",
+	"os/signal.stringer",
+	"github.com/distribution/reference.Reference",
+}
 
-// Interfaces whose implementations we won't search for after finding the initial unmarshal implementers
+// Interfaces whose implementations we won't search for
 var (
-	IGNORED_INTERFACES = []ct.FullTypeName{
-		// String()
-		"fmt.Stringer",
-		"expvar.Var",
-		"runtime.stringer",
-		"context.stringer",
-		"os/signal.stringer",
-		"github.com/distribution/reference.Reference",
-
-		// UnmarshalYAML()
-		"gopkg.in/yaml.v3.obsoleteUnmarshaler",
-		"sigs.k8s.io/yaml/goyaml.v2.Unmarshaler",
-		"gopkg.in/yaml.v2.Unmarshaler",
-	}
+	IGNORED_INTERFACES = append(UNMARSHAL_INTERFACES, STRING_INTERFACES...)
 )
 
-// Add all CTypes reachable from this one, stopping on reaching one we've already found
-// neigh_* is info about the neighbor we found this obj via (if any)
+// Add all CTypes reachable from this one via neigh_find, stopping on reaching one we've already found
+// neigh_info is info about the neighbor we found this obj via (if any)
 // defn_locs is of the obj (the 1-indexed format, which is what the gopls functions take but not what they return)
-func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_name *ct.FullTypeName, neigh_age NeighAge, neigh_ast_path []string) error {
+func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind, neigh_info *ct.NeighInfo) error {
 	// Ignore types not declared in package scope
 	if typ.TypeInfo.Parent() == nil || typ.TypeInfo.Parent().Parent() != types.Universe {
 		// e.g. function-local types, or `error`
@@ -138,18 +146,28 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_name *ct.FullT
 		graph.Logf(c.log, slog.LevelDebug, "Ignoring non-package-scope type %v", ct.TypeNameSafe(typ.TypeInfo))
 		return nil
 	}
+
+	// Ignore type if AST path to it has an excluded edge
+	if neigh_info != nil {
+		for _, ast_edge := range neigh_info.Ast_path {
+			if slices.Contains(neigh_find.excluded_ast_edges, ast_edge) {
+				return nil
+			}
+		}
+	}
+
 	cur_name := ct.TypeName(typ.TypeInfo)
 
 	// 1. Add the CType to the graph, combining with neighbor node if they're the same type.
 	graph.Logf(c.log, slog.LevelDebug, "ADD CTYPE %v", cur_name)
 
-	existed, err := c.ctypes.AddCType(typ, neigh_name, neigh_ast_path)
+	existed, err := c.ctypes.AddCType(typ, neigh_info)
 	ct.CheckErr(err)
 
 	// 2. Add edge to neighbor we found obj via, if we didn't combine it with the neighbor -
 	// even if we had already added the node for obj (need edge for all of obj's neighbors)
-	if neigh_name != nil {
-		neigh_hash, ok := c.ctypes.GetHash(*neigh_name)
+	if neigh_info != nil {
+		neigh_hash, ok := c.ctypes.GetHash(neigh_info.Name)
 		if !ok {
 			err := fmt.Errorf("neighbor %v doesn't exist", neigh_hash)
 			ct.CheckErr(err)
@@ -163,13 +181,13 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_name *ct.FullT
 			// didn't combine
 			parent_hash := neigh_hash
 			child_name := cur_name
-			if neigh_age == NeighIsChild {
+			if neigh_info.Age == ct.NeighIsChild {
 				parent_hash = own_hash
-				child_name = *neigh_name
+				child_name = neigh_info.Name
 			}
 			// Need parent's type info and child's type name =>
 			// pass HASH of parent and NAME of child
-			err = c.ctypes.AddCTypeEdge(parent_hash, child_name, neigh_ast_path)
+			err = c.ctypes.AddCTypeEdge(parent_hash, child_name, neigh_info.Ast_path)
 			ct.CheckErr(err)
 		}
 	}
@@ -180,43 +198,55 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_name *ct.FullT
 		return nil
 	}
 
-	// 3. Find new neighbors (direct parents and children), and nodes reachable from them -
-	// i.e. find enclosing (parent) CTypes, and enclosed (child) CTypes, then recurse on them
+	// 3. Find new neighbors (direct parents and/or children), and nodes reachable from them -
+	// i.e. find enclosing (parent) CTypes, and/or enclosed (child) CTypes, then recurse on them
 	defn_locs, err := locsToSpans(c.ctx, c.cli, []protocol.Location{typ.Loc})
 	ct.CheckErr(err)
 
-	parents, err := c.getParentCTypes(defn_locs)
-	ct.CheckErr(err)
+	// Parents
+	if neigh_find.parents {
+		parents, err := c.getParentCTypes(defn_locs)
+		ct.CheckErr(err)
+		graph.Logf(c.log, slog.LevelDebug, "PARENTS: %+v", parents)
 
-	children, err := c.getChildCTypes(defn_locs)
-	ct.CheckErr(err)
-
-	if _, is_iface := typ.TypeInfo.Type().Underlying().(*types.Interface); is_iface {
-		// Implementing string interface doesn't indicate anything interesting
-		if !slices.Contains(IGNORED_INTERFACES, cur_name) {
-			iface_impls, err := c.getInterfaceImpls(defn_locs)
+		for _, new := range parents {
+			// cur is now neigh => if found a parent, pass child as relation
+			neigh_info := ct.NeighInfo{Name: cur_name, Age: ct.NeighIsChild, Ast_path: new.ASTPath}
+			err = c.addReachableCTypes(new, neigh_find, &neigh_info)
 			ct.CheckErr(err)
-			children = append(children, iface_impls...)
 		}
 	}
 
-	graph.Logf(c.log, slog.LevelDebug, "PARENTS: %+v", parents)
-	graph.Logf(c.log, slog.LevelDebug, "CHILDREN: %+v", children)
+	// Children via type definitions
+	if neigh_find.children {
+		children, err := c.getChildCTypes(defn_locs)
+		ct.CheckErr(err)
+		graph.Logf(c.log, slog.LevelDebug, "CHILDREN: %+v", children)
 
-	for parent_or_child, new_neighbors := range [][]golang.TypeInfo{parents, children} {
-		for _, new := range new_neighbors {
-			// cur is now neigh => if found a parent, pass child as relation
-			neigh_age := NeighIsChild
-			if parent_or_child == 1 {
-				neigh_age = NeighIsParent
-			}
-			err = c.addReachableCTypes(new, &cur_name, neigh_age, new.ASTPath)
+		for _, new := range children {
+			neigh_info := ct.NeighInfo{Name: cur_name, Age: ct.NeighIsParent, Ast_path: new.ASTPath}
+			err = c.addReachableCTypes(new, neigh_find, &neigh_info)
 			ct.CheckErr(err)
+		}
+	}
+
+	// Children via interface implementations
+	if neigh_find.iface_impls && !slices.Contains(IGNORED_INTERFACES, cur_name) {
+		if _, is_iface := typ.TypeInfo.Type().Underlying().(*types.Interface); is_iface {
+			iface_impls, err := c.getInterfaceImpls(defn_locs)
+			ct.CheckErr(err)
+
+			for _, new := range iface_impls {
+				neigh_info := ct.NeighInfo{Name: cur_name, Age: ct.NeighIsParent, Ast_path: new.ASTPath}
+				err = c.addReachableCTypes(new, neigh_find, &neigh_info)
+				ct.CheckErr(err)
+			}
 		}
 	}
 
 	return nil
 }
+
 func (c *conftamer) LogGraphStats(start time.Time) {
 	graph.Logf(c.log, slog.LevelInfo, "Begin graph stats")
 	defer func() {
@@ -292,8 +322,7 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	start := time.Now()
 	graph.Logf(c.log, slog.LevelInfo, "Start CTypes finder")
 
-	// 1. Find types that contain config file contents,
-	// i.e. those that implement UnmarshalYAML
+	// 1. Find "Unmarshalers": Types that implement UnmarshalYAML
 	// TODO also find all types passed as 2nd arg to yaml.Unmarshal - for any that don't impl Unmarshal, record their params
 
 	c.local_server = cli.server.(*server.Server)
@@ -301,19 +330,21 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	unmarshalImpls, err := c.getInterfaceImpls([]string{c.UnmarshalDefn})
 	ct.CheckErr(err)
 
-	// 2. Find all CTypes reachable from the unmarshaling types
+	// 2. Find "Unmarshaler Subgraph": Descendants of Unmarshalers, via type definition and interface implementation.
+	// Ignore descendant if AST path includes a function call (Unmarshal won't populate function arg/retval)
 	for _, unmarshalImpl := range unmarshalImpls {
-		graph.Logf(c.log, slog.LevelInfo, "Finding types reachable from %v", ct.TypeName(unmarshalImpl.TypeInfo))
-		ct.CheckErr(err)
+		graph.Logf(c.log, slog.LevelInfo, "Finding descendants of %v", ct.TypeName(unmarshalImpl.TypeInfo))
 
-		err = c.addReachableCTypes(unmarshalImpl, nil, 0, nil)
+		unmarshaler_subgraph_find := NeighFind{children: true, parents: false, iface_impls: true,
+			excluded_ast_edges: []string{"FuncType.Params", "FuncType.Results"}}
+
+		err = c.addReachableCTypes(unmarshalImpl, unmarshaler_subgraph_find, nil)
 		ct.CheckErr(err)
 	}
 
 	c.LogGraphStats(start)
-	// Persist graph before proceeding - rest is slow and may crash
 	start = time.Now()
-	graph.Logf(c.log, slog.LevelInfo, "Serializing")
+	graph.Logf(c.log, slog.LevelInfo, "Serializing Unmarshaler Subgraph")
 	c.ctypes.Serialize("graph.text", c.ModulePrefix)
 	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
 
