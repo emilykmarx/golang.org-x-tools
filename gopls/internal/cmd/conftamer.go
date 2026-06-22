@@ -23,14 +23,27 @@ import (
 
 // conftamer implements the conftamer verb for gopls
 type conftamer struct {
-	app           *Application
-	ctx           context.Context
-	cli           *client
-	local_server  *server.Server
-	ctypes        *ct.CTypes
-	log           *slog.Logger
-	UnmarshalDefn string `flag:"u,unmarshal_defn" help:"Location of the unmarshal interface definition"`
-	ModulePrefix  string `flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print)"`
+	app                     *Application
+	ctx                     context.Context
+	cli                     *client
+	local_server            *server.Server
+	unmarshaler_subgraph    *ct.CTypes
+	accessors               *ct.CTypes
+	log                     *slog.Logger
+	UnmarshalDefn           string `flag:"u-defn,unmarshal_defn" help:"Location of the unmarshal interface definition (optional - defaults to DEFAULT_UNMARSHAL_DEFN)"`
+	ModulePrefix            string `flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print and possibly ignore unmarshaler subgraph nodes)"`
+	UnmarshalerSubgraphFile string `flag:"u-out,unmarshaler_subgraph" help:"Unmarshaler subgraph outfile (mandatory)"`
+	AccessorsFile           string `flag:"a-out,accessors" help:"Accessor subgraph outfile (optional - will find accessors iff passed)"`
+}
+
+func (c *conftamer) graph() *ct.CTypes {
+	// Edit Unmarshaler Subgraph if Accessors isn't populated, else Accessors
+	g := c.unmarshaler_subgraph
+	if c.accessors != nil {
+		g = c.accessors
+	}
+
+	return g
 }
 
 const (
@@ -44,6 +57,8 @@ func (c *conftamer) Usage() string     { return "[conftamer-flags]" }
 func (c *conftamer) ShortHelp() string { return "Finds the CTypes graph" }
 func (c *conftamer) DetailedHelp(f *flag.FlagSet) {
 	fmt.Fprint(f.Output(), `
+	Find Unmarshaler Subgraph and/or Accessors.
+
 	conftamer-flags:`)
 	printFlagDefaults(f)
 	fmt.Fprintf(f.Output(), `
@@ -161,18 +176,18 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 	// 1. Add the CType to the graph, combining with neighbor node if they're the same type.
 	graph.Logf(c.log, slog.LevelDebug, "ADD CTYPE %v", cur_name)
 
-	existed, err := c.ctypes.AddCType(typ, neigh_info)
+	existed, err := c.graph().AddCType(typ, neigh_info)
 	ct.CheckErr(err)
 
 	// 2. Add edge to neighbor we found obj via, if we didn't combine it with the neighbor -
 	// even if we had already added the node for obj (need edge for all of obj's neighbors)
 	if neigh_info != nil {
-		neigh_hash, ok := c.ctypes.GetHash(neigh_info.Name)
+		neigh_hash, ok := c.graph().GetHash(neigh_info.Name)
 		if !ok {
 			err := fmt.Errorf("neighbor %v doesn't exist", neigh_hash)
 			ct.CheckErr(err)
 		}
-		own_hash, ok := c.ctypes.GetHash(cur_name)
+		own_hash, ok := c.graph().GetHash(cur_name)
 		if !ok {
 			err = fmt.Errorf("cur node %v doesn't exist", own_hash)
 			ct.CheckErr(err)
@@ -187,7 +202,7 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 			}
 			// Need parent's type info and child's type name =>
 			// pass HASH of parent and NAME of child
-			err = c.ctypes.AddCTypeEdge(parent_hash, child_name, neigh_info.Ast_path)
+			err = c.graph().AddCTypeEdge(parent_hash, child_name, neigh_info.Ast_path)
 			ct.CheckErr(err)
 		}
 	}
@@ -248,9 +263,9 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 }
 
 func (c *conftamer) LogGraphStats(start time.Time) {
-	graph.Logf(c.log, slog.LevelInfo, "Begin graph stats")
+	graph.Logf(c.log, slog.LevelInfo, "Begin stats")
 	defer func() {
-		graph.Logf(c.log, slog.LevelInfo, "End graph stats")
+		graph.Logf(c.log, slog.LevelInfo, "End stats")
 	}()
 
 	// Time
@@ -264,23 +279,89 @@ func (c *conftamer) LogGraphStats(start time.Time) {
 	graph.Logf(c.log, slog.LevelInfo, "gopls total: %v", gopls_time)
 
 	var graph_time time.Duration
-	for operation, time := range c.ctypes.Latency {
-		graph.Logf(c.log, slog.LevelInfo, "graph %v: %v calls, %v", operation, time.NCalls, time.TotalTime)
+	for operation, time := range c.graph().Latency {
+		graph.Logf(c.log, slog.LevelInfo, "graph lib %v: %v calls, %v", operation, time.NCalls, time.TotalTime)
 		graph_time += time.TotalTime
 	}
-	graph.Logf(c.log, slog.LevelInfo, "graph total: %v", graph_time)
+	graph.Logf(c.log, slog.LevelInfo, "graph lib total: %v", graph_time)
 
 	// Size
-	n_edges, err := c.ctypes.Graph.Size()
+	n_edges, err := c.graph().Graph.Size()
 	ct.CheckErr(err)
-	n_nodes, err := c.ctypes.Graph.Order()
+	n_nodes, err := c.graph().Graph.Order()
 	ct.CheckErr(err)
 	graph.Logf(c.log, slog.LevelInfo, "%v nodes, %v edges", n_nodes, n_edges)
-	roots, leaves, err := graph.RootsLeaves(c.ctypes.Graph)
+	roots, leaves, err := graph.RootsLeaves(c.graph().Graph)
 	ct.CheckErr(err)
 
 	graph.Logf(c.log, slog.LevelInfo, "%v roots", len(roots))
 	graph.Logf(c.log, slog.LevelInfo, "%v leaves", len(leaves))
+}
+
+func (c *conftamer) FindUnmarshalerSubgraph() {
+	start := time.Now()
+	c.unmarshaler_subgraph = ct.New(c.log)
+
+	// 1. Find "Unmarshalers": Types that implement UnmarshalYAML
+	// TODO also find all types passed as 2nd arg to yaml.Unmarshal - for any that don't impl Unmarshal, record their params
+	graph.Logf(c.log, slog.LevelInfo, "Finding Unmarshalers: Types implementing UnmarshalYAML")
+	unmarshalImpls, err := c.getInterfaceImpls([]string{c.UnmarshalDefn})
+	ct.CheckErr(err)
+
+	graph.Logf(c.log, slog.LevelInfo, "Finding rest of Unmarshaler Subgraph: Types contained in Unmarshalers")
+	// 2. Find "Unmarshaler Subgraph": Descendants of Unmarshalers, via type definition and interface implementation.
+	// Ignore descendant if AST path includes a function call (Unmarshal won't populate function arg/retval)
+	for _, unmarshalImpl := range unmarshalImpls {
+		graph.Logf(c.log, slog.LevelInfo, "Finding descendants of %v", ct.TypeName(unmarshalImpl.TypeInfo))
+
+		unmarshaler_subgraph_find := NeighFind{children: true, parents: false, iface_impls: true,
+			excluded_ast_edges: []string{"FuncType.Params", "FuncType.Results"}}
+
+		err = c.addReachableCTypes(unmarshalImpl, unmarshaler_subgraph_find, nil)
+		ct.CheckErr(err)
+	}
+
+	c.LogGraphStats(start)
+	graph.Logf(c.log, slog.LevelInfo, "Serializing")
+	c.graph().Serialize(c.UnmarshalerSubgraphFile, c.ModulePrefix, true)
+	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
+}
+
+func (c *conftamer) FindAccessors() {
+	start := time.Now()
+
+	// 3. Find "Accessors": Ancestors of Unmarshaler Subgraph, via type definition only
+	// Each leaf is a copy of the ingress node in the Unmarshaler Subgraph.
+
+	graph.Logf(c.log, slog.LevelInfo, "Finding Accessors: Types containing types in Unmarshaler Subgraph")
+	// Wait to create until now, since other functions switch from editing unmarshaler subgraph to accessors once it's created
+	c.accessors = ct.New(c.log)
+
+	unmarshaler_subnodes, err := c.unmarshaler_subgraph.Graph.Vertices()
+	ct.CheckErr(err)
+	module_repo := filepath.Dir(c.ModulePrefix)
+
+	for _, unmarshaler_subnode := range unmarshaler_subnodes {
+		// Skip nodes not defined in the repo containing the module (e.g. github.com/prometheus)
+		if _, ok := ct.IsModuleNode(ct.CTypeNodeHash(unmarshaler_subnode), module_repo, c.unmarshaler_subgraph.Graph); !ok {
+			graph.Logf(c.log, slog.LevelInfo, "Skipping ancestors of %v", ct.CTypeNodeHash(unmarshaler_subnode))
+			continue
+		}
+
+		graph.Logf(c.log, slog.LevelInfo, "Finding ancestors of %v", ct.CTypeNodeHash(unmarshaler_subnode))
+		accessor_find := NeighFind{children: false, parents: true, iface_impls: false,
+			excluded_ast_edges: []string{}}
+
+		for _, gopls_info := range unmarshaler_subnode.GoplsInfo {
+			err = c.addReachableCTypes(gopls_info, accessor_find, nil)
+			ct.CheckErr(err)
+		}
+	}
+
+	c.LogGraphStats(start)
+	graph.Logf(c.log, slog.LevelInfo, "Serializing")
+	c.graph().Serialize(c.AccessorsFile, c.ModulePrefix, true)
+	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
 }
 
 func (c *conftamer) Run(ctx context.Context, args ...string) error {
@@ -298,6 +379,9 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		}
 		graph.Logf(c.log, slog.LevelWarn, "Module prefix not set")
 	}
+	if c.UnmarshalerSubgraphFile == "" {
+		return tool.CommandLineErrorf("unmarshaler subgraph not set")
+	}
 
 	cli, _, err := c.app.connect(ctx)
 	if err != nil {
@@ -306,6 +390,7 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	defer cli.terminate(ctx)
 	c.ctx = ctx
 	c.cli = cli
+	c.local_server = cli.server.(*server.Server)
 	c.log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{AddSource: true, Level: slog.LevelInfo,
 		// Shorten paths
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
@@ -317,36 +402,11 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 			}
 			return a
 		}}))
-	c.ctypes = ct.New(c.log)
 
-	start := time.Now()
-	graph.Logf(c.log, slog.LevelInfo, "Start CTypes finder")
-
-	// 1. Find "Unmarshalers": Types that implement UnmarshalYAML
-	// TODO also find all types passed as 2nd arg to yaml.Unmarshal - for any that don't impl Unmarshal, record their params
-
-	c.local_server = cli.server.(*server.Server)
-	graph.Logf(c.log, slog.LevelInfo, "Finding types implementing UnmarshalYAML")
-	unmarshalImpls, err := c.getInterfaceImpls([]string{c.UnmarshalDefn})
-	ct.CheckErr(err)
-
-	// 2. Find "Unmarshaler Subgraph": Descendants of Unmarshalers, via type definition and interface implementation.
-	// Ignore descendant if AST path includes a function call (Unmarshal won't populate function arg/retval)
-	for _, unmarshalImpl := range unmarshalImpls {
-		graph.Logf(c.log, slog.LevelInfo, "Finding descendants of %v", ct.TypeName(unmarshalImpl.TypeInfo))
-
-		unmarshaler_subgraph_find := NeighFind{children: true, parents: false, iface_impls: true,
-			excluded_ast_edges: []string{"FuncType.Params", "FuncType.Results"}}
-
-		err = c.addReachableCTypes(unmarshalImpl, unmarshaler_subgraph_find, nil)
-		ct.CheckErr(err)
+	c.FindUnmarshalerSubgraph()
+	if c.AccessorsFile != "" {
+		c.FindAccessors()
 	}
-
-	c.LogGraphStats(start)
-	start = time.Now()
-	graph.Logf(c.log, slog.LevelInfo, "Serializing Unmarshaler Subgraph")
-	c.ctypes.Serialize("graph.text", c.ModulePrefix)
-	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
 
 	graph.Logf(c.log, slog.LevelInfo, "Exit CTypes finder")
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/dominikbraun/graph"
+	"github.com/dominikbraun/graph/draw"
 )
 
 /* Utilities for printing and parsing the output of the CTypes finder */
@@ -137,9 +138,22 @@ func Marshal(g CTypeGraph, l CTypeList, cutprefix string) ([]byte, Marshalable) 
 	return marshaled, all
 }
 
-func (c *CTypes) Serialize(filename string, cutprefix string) {
+// Marshal graph and write result to file which can be deserialized - module prefix is cut.
+// If draw_dot, also write DOT file which can be drawn - module prefix is not cut.
+// DOT filename is <filename prefix>.gv
+func (c *CTypes) Serialize(filename string, cutprefix string, draw_dot bool) {
 	marshaled, _ := Marshal(c.Graph, c.List, cutprefix)
 	WriteTestFile(marshaled, filename)
+
+	if draw_dot {
+		// TODO (minor) - would be nice to cut the module prefix
+		parts := strings.Split(filename, ".")
+		gv_filename := strings.Join(parts[:len(parts)-1], ".") + ".gv"
+		gv, err := os.Create(gv_filename)
+		CheckErr(err)
+		err = draw.DOT(c.Graph, gv)
+		CheckErr(err)
+	}
 }
 
 func Deserialize(filename string) (CTypeGraph, Marshalable) {

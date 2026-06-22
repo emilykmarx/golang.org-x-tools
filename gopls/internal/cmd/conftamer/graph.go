@@ -65,6 +65,10 @@ type CTypeNode struct {
 	// Info about the type
 	TypeInfo types.Type
 
+	// All the info gopls returned (multiple for `type X Y`)
+	// (contains TypeInfo, but copied here to finding initial Accessors easier)
+	GoplsInfo []golang.TypeInfo
+
 	// (these are also in TypeInfo, but copied here to make [un]marshaling easier)
 	Methods []FullTypeName
 	Tags    map[string]string // Field name => tag (populated if struct)
@@ -112,10 +116,10 @@ const (
 // Else, add obj to neighbor node.
 // Update the list accordingly.
 // Return whether obj already existed in some node, and whether combined (or were already combined).
-func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (TypeNameExistence, error, bool) {
+func (c *CTypes) combineTypes(typ golang.TypeInfo, neigh_name FullTypeName) (TypeNameExistence, error, bool) {
 	// 1. Check whether to combine
 	combined := false
-	new_name := TypeName(obj)
+	new_name := TypeName(typ.TypeInfo)
 
 	existing_hash, exists := c.GetHash(new_name)
 	existed := TypeNameNotExists
@@ -136,15 +140,6 @@ func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (Typ
 		return existed, nil, combined
 	}
 
-	if new_node.TypeInfo.Underlying() != obj.Type().Underlying() {
-		// Shouldn't happen if they have no AST edges?
-		// TODO happens occasionally in Prometheus even when types look the same at a glance - e.g.
-		// promql.Vector and promql.vectorByReverseValueHeap
-		graph.Logf(c.Graph.Log(), slog.LevelError, "combineTypes called on different types: %v and %v (types %+v and %+v)",
-			new_name, new_node.Names, new_node.TypeInfo.Underlying(), obj.Type().Underlying())
-		return existed, nil, combined
-	}
-
 	// 2. Combine
 
 	combined = true
@@ -159,8 +154,10 @@ func (c *CTypes) combineTypes(obj *types.TypeName, neigh_name FullTypeName) (Typ
 		graph.Logf(c.Graph.Log(), slog.LevelDebug, "%v node BEFORE combine: %+v", existing_hash, existing_node)
 
 		new_node.Names = append(new_node.Names, existing_node.Names...)
+		new_node.GoplsInfo = append(new_node.GoplsInfo, existing_node.GoplsInfo...)
 	} else {
 		new_node.Names = append(new_node.Names, new_name)
+		new_node.GoplsInfo = append(new_node.GoplsInfo, typ)
 	}
 
 	// Keep names sorted
@@ -214,12 +211,13 @@ type NeighInfo struct {
 // If not struct field, combine with the corresponding existing node if any.
 // Return whether existed
 func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_info *NeighInfo) (TypeNameExistence, error) {
-	if typ.TypeSource != golang.Implementer {
+	if typ.TypeSource != golang.Implementer && neigh_info != nil {
+		// Found via a neighbor we may need to combine with
 		combine := len(neigh_info.Ast_path) == 0 || slices.Compare(neigh_info.Ast_path, []string{"SelectorExpr.Sel"}) == 0
 		if combine {
 			// If no AST edges (i.e. only the TypeSpec_Type one) from enclosed/enclosing (or just one for pkg.T), `type X Y` => combine
 			// (If not iface implementer, should always have a neigh_info)
-			existed, err, combined := c.combineTypes(typ.TypeInfo, neigh_info.Name)
+			existed, err, combined := c.combineTypes(typ, neigh_info.Name)
 			CheckErr(err)
 			if combined {
 				// If combineTypes combined nodes, it already updated the list => check the value of existed it returned
@@ -234,7 +232,9 @@ func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_info *NeighInfo) (TypeNameE
 	}
 
 	// Make new node
-	new_ctype := CTypeNode{TypeInfo: typ.TypeInfo.Type(), Names: []FullTypeName{TypeName(typ.TypeInfo)}}
+	new_ctype := CTypeNode{TypeInfo: typ.TypeInfo.Type(), Names: []FullTypeName{TypeName(typ.TypeInfo)},
+		GoplsInfo: []golang.TypeInfo{typ}}
+
 	// TODO if we combine nodes, do we need to add the methods of the new type?
 	CopyMethods(&new_ctype)
 	err := c.Graph.AddVertex(new_ctype, func(vp *graph.VertexProperties) {})
