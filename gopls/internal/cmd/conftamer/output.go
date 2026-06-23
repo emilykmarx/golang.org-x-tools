@@ -51,6 +51,11 @@ type MarshalableNode struct {
 
 // If n is a struct, get its field tags
 func getTags(n *CTypeNode) map[string]string {
+	if n.TypeInfo == nil {
+		// E.g. if marshaling a subgraph created by querying - tags are already populated
+		return n.Tags
+	}
+
 	struct_info := IsStruct(n.TypeInfo)
 	if struct_info == nil {
 		// not a struct
@@ -148,6 +153,9 @@ func (c *CTypes) Serialize(filename string, cutprefix string, draw_dot bool) {
 	if draw_dot {
 		// TODO (minor) - would be nice to cut the module prefix
 		parts := strings.Split(filename, ".")
+		if len(parts) == 1 {
+			panic("filename should have a .")
+		}
 		gv_filename := strings.Join(parts[:len(parts)-1], ".") + ".gv"
 		gv, err := os.Create(gv_filename)
 		CheckErr(err)
@@ -225,7 +233,7 @@ func (c *CTypes) PrettyPrint(cutprefix string, only_prefix bool, all_paths bool)
 		return child
 	}
 
-	visit := func(hash CTypeHash) bool {
+	visit := func(hash CTypeHash, _ CTypeHash) graph.VisitRet {
 		names, contains_prefix := IsModuleNode(hash, cutprefix, c.Graph)
 
 		node, err := c.Graph.Vertex(hash)
@@ -245,7 +253,7 @@ func (c *CTypes) PrettyPrint(cutprefix string, only_prefix bool, all_paths bool)
 			Stored_up:    node.Stored_up,
 			Stored_final: node.Stored_final,
 		})
-		return false // continue
+		return graph.KeepVisiting
 	}
 
 	opts := graph.DFSOpts[CTypeHash, CTypeNode]{Visit: &visit, Update_vertices: graph.UpdatePathVertices[CTypeHash, CTypeNode]{UpdateChild: &recordIndent},
