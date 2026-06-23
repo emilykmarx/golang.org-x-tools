@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	"github.com/emilykmarx/conftamer/contexttrack"
@@ -16,17 +17,18 @@ import (
 func main() {
 	var dlv_port int
 	var msg_send_funcs arrayFlags
-	var test_pkg, test_name, graph_file, module_prefix string
+	var test_pkg, test_name, unmarshaler_subgraph, accessors, module_prefix string
 	flag.IntVar(&dlv_port, "dlv-port", 4040, "Listening port for dlv")
 	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
 	flag.StringVar(&test_pkg, "test-pkg", "", "Package of test to run, relative to module with leading slash "+
 		" (optional - defaults to all packages in module)")
 	flag.StringVar(&test_name, "test-name", "", "Name of test to run (optional - defaults to all tests in package)")
-	flag.StringVar(&graph_file, "graph-file", "", "File containing CTypes graph")
+	flag.StringVar(&unmarshaler_subgraph, "unmarshaler-subgraph", "", "File containing serialized unmarshaler subgraph")
+	flag.StringVar(&accessors, "accessors", "", "File containing serialized Accessors graph")
 	flag.Var(&msg_send_funcs, "send-funcs", "Functions that send messages (format: --send-funcs='f1' --send-funcs='f2'")
 	flag.Parse()
 
-	if module_prefix == "" || graph_file == "" || len(msg_send_funcs) == 0 {
+	if module_prefix == "" || unmarshaler_subgraph == "" || accessors == "" || len(msg_send_funcs) == 0 {
 		flag.Usage()
 		log.Fatalf("Missing mandatory argument")
 	}
@@ -36,7 +38,7 @@ func main() {
 		log.Fatalf("test package missing leading /")
 	}
 
-	Run(dlv_port, module_prefix, test_pkg, test_name, graph_file, msg_send_funcs)
+	Run(dlv_port, module_prefix, test_pkg, test_name, unmarshaler_subgraph, accessors, msg_send_funcs)
 }
 
 // Allow array CLI arg
@@ -52,28 +54,37 @@ func (i *arrayFlags) Set(value string) error {
 
 // Info passed to the dlv client for each package
 type ClientInfo struct {
-	ctypes         ct.CTypes
-	pkg            string
-	pkg_ctypes     []ct.CTypeNode
-	msg_send_funcs []string
+	unmarshaler_subgraph ct.CTypes
+	accessors            ct.CTypes
+	methods              map[string]struct{}
+	pkg                  string
+	msg_send_funcs       []string
 }
 
-func Run(dlv_port int, module_prefix string, test_pkg string, test_name string, graph_file string, msg_send_funcs []string) {
-	// 1. Load the CTypes graph
-	g, m := ct.Deserialize(graph_file)
-	ctypes := ct.CTypes{Graph: g, List: m.List}
+func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
+	unmarshaler_subgraph_file string, accessors_file string, msg_send_funcs []string) {
 
-	// 2. Get packages that have CTypes
-	per_pkg_ctypes := GetCTypesPackages(g, test_pkg)
-	if len(per_pkg_ctypes) == 0 {
-		panic("no ctypes found - bad package name?")
+	// 1. Load the CTypes graphs
+	g, m := ct.Deserialize(unmarshaler_subgraph_file)
+	unmarshaler_subgraph := ct.CTypes{Graph: g, List: m.List}
+	g, m = ct.Deserialize(accessors_file)
+	accessors := ct.CTypes{Graph: g, List: m.List}
+
+	// 2. Parse info from CTypes graphs
+	pkgs := make(map[string]struct{})
+	methods := make(map[string]struct{})
+	for _, g := range []ct.CTypeGraph{unmarshaler_subgraph.Graph, accessors.Graph} {
+		GetCTypesInfo(g, test_pkg, pkgs, methods)
+		if len(pkgs) == 0 {
+			panic("no ctypes found - bad package name?")
+		}
 	}
 
 	// 3. For each package:
 	// Connect to dlv server and run tests
 	// (dlv can only run tests in one package at a time)
-	for pkg, pkg_ctypes := range per_pkg_ctypes {
-		client_info := ClientInfo{ctypes: ctypes, pkg: pkg, pkg_ctypes: pkg_ctypes, msg_send_funcs: msg_send_funcs}
+	for pkg := range pkgs {
+		client_info := ClientInfo{unmarshaler_subgraph: unmarshaler_subgraph, accessors: accessors, methods: methods, pkg: pkg, msg_send_funcs: msg_send_funcs}
 		if err := contexttrack.Run(dlv_port, module_prefix+pkg, test_name, client_info, RunDlvClient); err != nil {
 			if _, ok := err.(*contexttrack.ErrNoTests); ok {
 				if test_pkg != "" {
@@ -89,19 +100,11 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name string, 
 	}
 }
 
-var (
-	// don't set breakpoints on these
-	IGNORED_METHODS = []string{
-		"String",
-		"UnmarshalYAML",
-	}
-)
-
-// Get module's CTypes, organized by package (avoid iterating over entire graph for each package)
+// Terminology note: "CType" = in Unmarshal Subgraph and/or Accessors
+// Get all packages in the module that define CTypes
+// Get all CTypes methods
 // package format: "/<path after module prefix>"
-func GetCTypesPackages(g ct.CTypeGraph, test_pkg string) map[string][]ct.CTypeNode {
-	ctypes := make(map[string][]ct.CTypeNode)
-
+func GetCTypesInfo(g ct.CTypeGraph, test_pkg string, pkgs map[string]struct{}, methods map[string]struct{}) {
 	nodes, err := g.Vertices()
 	ct.CheckErr(err)
 	for _, node := range nodes {
@@ -118,12 +121,15 @@ func GetCTypesPackages(g ct.CTypeGraph, test_pkg string) map[string][]ct.CTypeNo
 				continue
 			}
 			if test_pkg == "" || pkg == test_pkg {
-				ctypes[pkg] = append(ctypes[pkg], node)
+				pkgs[pkg] = struct{}{}
 			}
 		}
+		for _, orig_method := range node.Methods {
+			method := string(orig_method)
+			sanitizeMethod(&method)
+			methods[method] = struct{}{}
+		}
 	}
-
-	return ctypes
 }
 
 // Set breakpoints on message send functions
@@ -147,17 +153,69 @@ Thus:
   - Msg is CF-tainted by all in-scope params, across all goroutines
     -- TODO: should limit to the goroutines in the sending one's spawn tree - need to track spawning for that
   - Check DF from the CType method that sent the msg
-
-Thus:
-- BP on msg send - on hit:
-  - Check stack of all goroutines for all CTypes methods (CF)
-  - Check stack of sending goroutine for most recent CTypes method (DF)
 */
-func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoint, goroutine int64) {
-	msgID, err := modulemsginfo.GetMessageInfo(client, bp, goroutine)
+
+func sanitizeMethod(method *string) {
+	// gopls and dlv put the * and () in different places in method names => remove them
+	*method = strings.ReplaceAll(*method, "*", "")
+	*method = strings.ReplaceAll(*method, "(", "")
+	*method = strings.ReplaceAll(*method, ")", "")
+
+	// if appears to be an anonymous function, switch to the function that defined it
+	parts := strings.Split(*method, ".")
+	maybe_anon := parts[len(parts)-1]
+	if n, ok := strings.CutPrefix(maybe_anon, "func"); ok {
+		if _, err := strconv.Atoi(n); err == nil {
+			// ends with ".funcX", where X is a number => remove that postfix
+			*method = strings.Join(parts[:len(parts)-1], ".")
+		}
+	}
+}
+
+func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoint, send_goroutine int64) {
+	msgID, err := modulemsginfo.GetMessageInfo(client, bp, send_goroutine)
 	ct.CheckErr(err)
-	// LEFT OFF the last "Thus" above
-	fmt.Printf("MSG SEND %v\n", msgID)
+
+	fmt.Printf("MSG SEND: %v\n", msgID)
+	scope := api.EvalScope{GoroutineID: send_goroutine}
+	user := api.ListGoroutinesFilter{Kind: api.GoroutineUser}
+	goroutines, _, _, _, err := client.ListGoroutinesWithFilter(0, 0, []api.ListGoroutinesFilter{user}, nil, &scope)
+	ct.CheckErr(err)
+
+	send_method := "" // The most recent CTypes method in the sending goroutine's stack (if any)
+	for _, goroutine := range goroutines {
+		// TODO check for partially loaded, and hitting max depth (see how PrintStack() in dlv does it)
+		stack, err := client.Stacktrace(goroutine.ID, 100, -1, api.StacktraceSimple, &api.LoadConfig{})
+		ct.CheckErr(err)
+
+		for _, frame := range stack {
+			fn := frame.Function.Name()
+			sanitizeMethod(&fn)
+
+			if _, ok := args.methods[fn]; ok {
+				// TODO ignore the same types in the Unmarshaler Subgraph that we do when finding Accessors
+
+				// CF:
+				// CTypes method in stack of any goroutine
+				fmt.Printf("CF METHOD: %v\n", fn)
+
+				if goroutine.ID == send_goroutine && send_method == "" {
+					// DF:
+					// Most recent CTypes method in stack of sending goroutine.
+					// If sending goroutine is running an anonymous function defined in a CTypes method, count that CTypes method as the "most recent"
+					// (Since that CTypes method may copy its argument into the argument to the anonymous function)
+					// e.g. in discovery/kubernetes tests, sender stack is: <cache stuff>, (*Discovery).newNodeInformer.func2, (*FakeNodes).Watch, send func
+					// (*Discovery).newNodeInformer copies receiver params into the arguments to (*FakeNodes).Watch
+					send_method = fn
+					fmt.Printf("DF METHOD: %v\n", fn)
+					// For anonymous function, CType shows up in locals but not args
+					fmt.Printf("LOCALS: %+v\n", frame.Locals)
+					fmt.Printf("ARGS: %+v\n", frame.Arguments)
+				}
+			}
+		}
+	}
+
 }
 
 func RunDlvClient(dlv_endpoint string, info any) error {
@@ -166,7 +224,7 @@ func RunDlvClient(dlv_endpoint string, info any) error {
 	args := info.(ClientInfo)
 
 	client := rpc2.NewClient(dlv_endpoint)
-	// XXX log info similarly to conftamer repo - may need a lock around the data used to hold the info (for parallel tests)?
+	// XXX log info similarly to conftamer repo
 	SetMessageSendBreakpoints(client, args.msg_send_funcs)
 
 	state := <-client.Continue()
