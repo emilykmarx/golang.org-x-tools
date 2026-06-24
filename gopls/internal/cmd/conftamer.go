@@ -123,9 +123,10 @@ func (c *conftamer) getInterfaceImpls(defn_locs []string) ([]golang.TypeInfo, er
 
 // Which neighbors to find
 type NeighFind struct {
-	children    bool
-	parents     bool
-	iface_impls bool
+	children                    bool
+	parents                     bool
+	iface_impls                 bool
+	ignore_unmarshaler_subnodes bool
 	// If path to newly found type has one of these edges, ignore the new type
 	excluded_ast_edges []string
 }
@@ -153,7 +154,7 @@ var (
 // Add all CTypes reachable from this one via neigh_find, stopping on reaching one we've already found
 // neigh_info is info about the neighbor we found this obj via (if any)
 // defn_locs is of the obj (the 1-indexed format, which is what the gopls functions take but not what they return)
-func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind, neigh_info *ct.NeighInfo) error {
+func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind, neigh_info *ct.NeighInfo, depth int) error {
 	// Ignore types not declared in package scope
 	if typ.TypeInfo.Parent() == nil || typ.TypeInfo.Parent().Parent() != types.Universe {
 		// e.g. function-local types, or `error`
@@ -162,16 +163,30 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 		return nil
 	}
 
-	// Ignore type if AST path to it has an excluded edge
+	cur_name := ct.TypeName(typ.TypeInfo)
+
 	if neigh_info != nil {
+		// Ignore type if AST path to it has an excluded edge
 		for _, ast_edge := range neigh_info.Ast_path {
 			if slices.Contains(neigh_find.excluded_ast_edges, ast_edge) {
 				return nil
 			}
 		}
+		if neigh_find.ignore_unmarshaler_subnodes {
+			// When finding initial edges from Unmarshaler Subgraph to Accessors, don't take edges to US nodes.
+			// When finding edges from Accessors, stop if find one back into US - this wouldn't happen if
+			// we found descendants in same way as ancestors, but we don't, hence this happens in a few cases:
+			// - Edge from Accessor => US has an AST edge that US excludes
+			// - Accessor finds a node the US doesn't, due to two things we may want to fix:
+			// Embedded fields and discovery/xds.KumaSDConfig - TODO for both
+			if _, ok := c.unmarshaler_subgraph.GetHash(cur_name); ok {
+				if depth != 1 {
+					graph.Logf(c.log, slog.LevelInfo, "Accessor has edge back in to Unmarshaler Subgraph: %v => %v\n", cur_name, neigh_info.Name)
+				}
+				return nil
+			}
+		}
 	}
-
-	cur_name := ct.TypeName(typ.TypeInfo)
 
 	// 1. Add the CType to the graph, combining with neighbor node if they're the same type.
 	graph.Logf(c.log, slog.LevelDebug, "ADD CTYPE %v", cur_name)
@@ -227,7 +242,7 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 		for _, new := range parents {
 			// cur is now neigh => if found a parent, pass child as relation
 			neigh_info := ct.NeighInfo{Name: cur_name, Age: ct.NeighIsChild, Ast_path: new.ASTPath}
-			err = c.addReachableCTypes(new, neigh_find, &neigh_info)
+			err = c.addReachableCTypes(new, neigh_find, &neigh_info, depth+1)
 			ct.CheckErr(err)
 		}
 	}
@@ -240,7 +255,7 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 
 		for _, new := range children {
 			neigh_info := ct.NeighInfo{Name: cur_name, Age: ct.NeighIsParent, Ast_path: new.ASTPath}
-			err = c.addReachableCTypes(new, neigh_find, &neigh_info)
+			err = c.addReachableCTypes(new, neigh_find, &neigh_info, depth+1)
 			ct.CheckErr(err)
 		}
 	}
@@ -253,7 +268,7 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 
 			for _, new := range iface_impls {
 				neigh_info := ct.NeighInfo{Name: cur_name, Age: ct.NeighIsParent, Ast_path: new.ASTPath}
-				err = c.addReachableCTypes(new, neigh_find, &neigh_info)
+				err = c.addReachableCTypes(new, neigh_find, &neigh_info, depth+1)
 				ct.CheckErr(err)
 			}
 		}
@@ -315,9 +330,10 @@ func (c *conftamer) FindUnmarshalerSubgraph() {
 		graph.Logf(c.log, slog.LevelInfo, "Finding descendants of %v", ct.TypeName(unmarshalImpl.TypeInfo))
 
 		unmarshaler_subgraph_find := NeighFind{children: true, parents: false, iface_impls: true,
-			excluded_ast_edges: []string{"FuncType.Params", "FuncType.Results"}}
+			ignore_unmarshaler_subnodes: false,
+			excluded_ast_edges:          []string{"FuncType.Params", "FuncType.Results"}}
 
-		err = c.addReachableCTypes(unmarshalImpl, unmarshaler_subgraph_find, nil)
+		err = c.addReachableCTypes(unmarshalImpl, unmarshaler_subgraph_find, nil, 0)
 		ct.CheckErr(err)
 	}
 
@@ -327,11 +343,64 @@ func (c *conftamer) FindUnmarshalerSubgraph() {
 	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
 }
 
+// Confirm a few things about the relationship between Accessors and Unmarshaler Subgraph
+func (c *conftamer) CheckAccessors(unmarshaler_subnodes []ct.CTypeNode) {
+	adjacencyMap, err := c.graph().Graph.AdjacencyMap()
+	ct.CheckErr(err)
+
+	// 1. Every node in US is also in A, but as leaf
+	for _, unmarshaler_subnode := range unmarshaler_subnodes {
+		accessor_hash, in_us := c.graph().GetHash(ct.FullTypeName(ct.CTypeNodeHash(unmarshaler_subnode)))
+		if !in_us {
+			if !c.skipUnmarshalerSubnode(unmarshaler_subnode) {
+				// not ignored
+				graph.Logf(c.log, slog.LevelError, "Unmarshaler subnode %v is not in accessors\n", unmarshaler_subnode)
+			}
+		}
+
+		outEdges := adjacencyMap[accessor_hash]
+		if len(outEdges) > 0 {
+			graph.Logf(c.log, slog.LevelError, "Unmarshaler subnode %v is in accessors, but not as leaf - has out edges:\n", unmarshaler_subnode)
+		}
+		for _, edge := range outEdges {
+			graph.Logf(c.log, slog.LevelError, "=> %v", edge.Target)
+		}
+	}
+
+	// 2. Every A leaf is in US, and every A non-leaf is not in US
+	for accessor_hash, outEdges := range adjacencyMap {
+		_, in_us := c.unmarshaler_subgraph.GetHash(ct.FullTypeName(accessor_hash))
+		if len(outEdges) == 0 {
+			// leaf
+			if !in_us {
+				graph.Logf(c.log, slog.LevelError, "Accessor leaf %v is not in Unmarshaler Subgraph\n", accessor_hash)
+			}
+		} else {
+			// non-leaf
+			if in_us {
+				graph.Logf(c.log, slog.LevelError, "Accessor non-leaf %v IS in US\n", accessor_hash)
+			}
+		}
+	}
+}
+
+// Whether to skip unmarshaler subnode when finding accessors
+func (c *conftamer) skipUnmarshalerSubnode(unmarshaler_subnode ct.CTypeNode) bool {
+	module_repo := filepath.Dir(c.ModulePrefix)
+
+	// Skip nodes not defined in the repo containing the module (e.g. github.com/prometheus)
+	if _, ok := ct.IsModuleNode(ct.CTypeNodeHash(unmarshaler_subnode), module_repo, c.unmarshaler_subgraph.Graph); !ok {
+		return true
+	}
+	return false
+}
+
 func (c *conftamer) FindAccessors() {
 	start := time.Now()
 
-	// 3. Find "Accessors": Ancestors of Unmarshaler Subgraph, via type definition only
-	// Each leaf is a copy of the ingress node in the Unmarshaler Subgraph.
+	// 3. Find "Accessors": Ancestors of Unmarshaler Subgraph, via type definition only.
+	// Each leaf is a copy of the ingress node in the Unmarshaler Subgraph (except one - see CheckAccessors) -
+	// the rest of the path is outside the Unmarshaler Subgraph
 
 	graph.Logf(c.log, slog.LevelInfo, "Finding Accessors: Types containing types in Unmarshaler Subgraph")
 	// Wait to create until now, since other functions switch from editing unmarshaler subgraph to accessors once it's created
@@ -339,21 +408,20 @@ func (c *conftamer) FindAccessors() {
 
 	unmarshaler_subnodes, err := c.unmarshaler_subgraph.Graph.Vertices()
 	ct.CheckErr(err)
-	module_repo := filepath.Dir(c.ModulePrefix)
 
 	for _, unmarshaler_subnode := range unmarshaler_subnodes {
-		// Skip nodes not defined in the repo containing the module (e.g. github.com/prometheus)
-		if _, ok := ct.IsModuleNode(ct.CTypeNodeHash(unmarshaler_subnode), module_repo, c.unmarshaler_subgraph.Graph); !ok {
+		if c.skipUnmarshalerSubnode(unmarshaler_subnode) {
 			graph.Logf(c.log, slog.LevelInfo, "Skipping ancestors of %v", ct.CTypeNodeHash(unmarshaler_subnode))
 			continue
 		}
 
 		graph.Logf(c.log, slog.LevelInfo, "Finding ancestors of %v", ct.CTypeNodeHash(unmarshaler_subnode))
 		accessor_find := NeighFind{children: false, parents: true, iface_impls: false,
-			excluded_ast_edges: []string{}}
+			ignore_unmarshaler_subnodes: true,
+			excluded_ast_edges:          []string{}}
 
 		for _, gopls_info := range unmarshaler_subnode.GoplsInfo {
-			err = c.addReachableCTypes(gopls_info, accessor_find, nil)
+			err = c.addReachableCTypes(gopls_info, accessor_find, nil, 0)
 			ct.CheckErr(err)
 		}
 	}
@@ -362,6 +430,8 @@ func (c *conftamer) FindAccessors() {
 	graph.Logf(c.log, slog.LevelInfo, "Serializing")
 	c.graph().Serialize(c.AccessorsFile, c.ModulePrefix, true)
 	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
+
+	c.CheckAccessors(unmarshaler_subnodes)
 }
 
 func (c *conftamer) Run(ctx context.Context, args ...string) error {

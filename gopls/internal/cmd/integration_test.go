@@ -65,8 +65,8 @@ type ExpectedGraph struct {
 
 // Generates a graph for use by the dlv client (writes it to conftamer/dlv/testdata) -
 // doesn't verify anything about it
-func TestGenerateGraph(t *testing.T) {
-	runTestConftamer(t, []string{"./conftamer/dlv/main_test.go"}, nil, nil)
+func TestConftamerGenerateGraph(t *testing.T) {
+	runTestConftamer(t, []string{"testdata/conftamer/embedded.go"}, nil, nil)
 }
 
 // Tests local and global interface implementations
@@ -400,21 +400,26 @@ go 1.18
 	if len(module_files) == 1 {
 		module_prefix += "a."
 	}
-	res := gopls(t, tree, "conftamer", "-m", module_prefix)
+
+	unmarshaler_subgraph := "unmarshaler_subgraph.txt"
+	accessors := "accessors.txt"
+	res := gopls(t, tree, "conftamer", "-m", module_prefix, "-u-out", unmarshaler_subgraph, "-a-out", accessors)
 	res.checkExit(true)
 	// Need to print res.stderr/out to see it, unless checkExit fails
 	fmt.Println(res.stderr)
 	fmt.Println(res.stdout)
 
-	graph_file := filepath.Join(tree, "graph.text")
-	graph_data, err := os.ReadFile(graph_file)
-	if err != nil {
-		t.Fatal(err)
-		return
-	}
+	for _, g := range []string{unmarshaler_subgraph, accessors} {
+		graph_file := filepath.Join(tree, g)
+		graph_data, err := os.ReadFile(graph_file)
+		if err != nil {
+			t.Fatal(err)
+			return
+		}
 
-	// Write graph to non-temporary file for dlv client test
-	ct.WriteTestFile(graph_data, "conftamer/dlv/testdata/graph.text")
+		// Write graphs to non-temporary file for dlv client test
+		ct.WriteTestFile(graph_data, "conftamer/dlv/testdata/"+g)
+	}
 
 	// CHECK OUTPUT
 	if expected_stored != nil {
