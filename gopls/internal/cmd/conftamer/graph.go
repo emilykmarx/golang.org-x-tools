@@ -202,9 +202,9 @@ const (
 
 // Info about the neighbor CType from which we found a new CType
 type NeighInfo struct {
-	Name     FullTypeName
-	Age      NeighAge
-	Ast_path []string
+	Name FullTypeName
+	Age  NeighAge
+	Typ  golang.TypeInfo
 }
 
 // Given the object defined at the location, record its info.
@@ -213,7 +213,7 @@ type NeighInfo struct {
 func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_info *NeighInfo) (TypeNameExistence, error) {
 	if typ.TypeSource == golang.Enclosed && neigh_info != nil {
 		// Found via a neighbor we may need to combine with
-		combine := len(neigh_info.Ast_path) == 0 || slices.Compare(neigh_info.Ast_path, []string{"SelectorExpr.Sel"}) == 0
+		combine := len(neigh_info.Typ.ASTPath) == 0 || slices.Compare(neigh_info.Typ.ASTPath, []string{"SelectorExpr.Sel"}) == 0
 		if combine {
 			// If no AST edges (i.e. only the TypeSpec_Type one) from enclosed/enclosing (or just one for pkg.T), `type X Y` => combine
 			// (If not iface implementer, should always have a neigh_info)

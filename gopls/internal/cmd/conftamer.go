@@ -127,8 +127,9 @@ type NeighFind struct {
 	parents                     bool
 	iface_impls                 bool
 	ignore_unmarshaler_subnodes bool
-	// If path to newly found type has one of these edges, ignore the new type
+	// If path to newly found type has one of these edges or sources, ignore the new type
 	excluded_ast_edges []string
+	excluded_sources   []golang.TypeSource
 }
 
 var UNMARSHAL_INTERFACES = []ct.FullTypeName{
@@ -167,11 +168,17 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 
 	if neigh_info != nil {
 		// Ignore type if AST path to it has an excluded edge
-		for _, ast_edge := range neigh_info.Ast_path {
+		for _, ast_edge := range neigh_info.Typ.ASTPath {
 			if slices.Contains(neigh_find.excluded_ast_edges, ast_edge) {
 				return nil
 			}
 		}
+
+		// Ignore type if found via an excluded source
+		if slices.Contains(neigh_find.excluded_sources, neigh_info.Typ.TypeSource) {
+			return nil
+		}
+
 		if neigh_find.ignore_unmarshaler_subnodes {
 			// When finding initial edges from Unmarshaler Subgraph to Accessors, don't take edges to US nodes.
 			// When finding edges from Accessors, stop if find one back into US - this wouldn't happen if
@@ -183,6 +190,7 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 				if depth != 1 {
 					graph.Logf(c.log, slog.LevelInfo, "Accessor has edge back in to Unmarshaler Subgraph: %v => %v\n", cur_name, neigh_info.Name)
 				}
+				// TODO we don't add the edge - I guess we should
 				return nil
 			}
 		}
@@ -217,7 +225,7 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 			}
 			// Need parent's type info and child's type name =>
 			// pass HASH of parent and NAME of child
-			err = c.graph().AddCTypeEdge(parent_hash, child_name, neigh_info.Ast_path)
+			err = c.graph().AddCTypeEdge(parent_hash, child_name, neigh_info.Typ.ASTPath)
 			ct.CheckErr(err)
 		}
 	}
@@ -241,7 +249,7 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 
 		for _, new := range parents {
 			// cur is now neigh => if found a parent, pass child as relation
-			neigh_info := ct.NeighInfo{Name: cur_name, Age: ct.NeighIsChild, Ast_path: new.ASTPath}
+			neigh_info := ct.NeighInfo{Name: cur_name, Age: ct.NeighIsChild, Typ: new}
 			err = c.addReachableCTypes(new, neigh_find, &neigh_info, depth+1)
 			ct.CheckErr(err)
 		}
@@ -254,7 +262,7 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 		graph.Logf(c.log, slog.LevelDebug, "CHILDREN: %+v", children)
 
 		for _, new := range children {
-			neigh_info := ct.NeighInfo{Name: cur_name, Age: ct.NeighIsParent, Ast_path: new.ASTPath}
+			neigh_info := ct.NeighInfo{Name: cur_name, Age: ct.NeighIsParent, Typ: new}
 			err = c.addReachableCTypes(new, neigh_find, &neigh_info, depth+1)
 			ct.CheckErr(err)
 		}
@@ -267,7 +275,7 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 			ct.CheckErr(err)
 
 			for _, new := range iface_impls {
-				neigh_info := ct.NeighInfo{Name: cur_name, Age: ct.NeighIsParent, Ast_path: new.ASTPath}
+				neigh_info := ct.NeighInfo{Name: cur_name, Age: ct.NeighIsParent, Typ: new}
 				err = c.addReachableCTypes(new, neigh_find, &neigh_info, depth+1)
 				ct.CheckErr(err)
 			}
@@ -399,8 +407,8 @@ func (c *conftamer) FindAccessors() {
 	start := time.Now()
 
 	// 3. Find "Accessors": Ancestors of Unmarshaler Subgraph, via type definition only.
-	// Each leaf is a copy of the ingress node in the Unmarshaler Subgraph (except one - see CheckAccessors) -
-	// the rest of the path is outside the Unmarshaler Subgraph
+	// Each leaf is a copy of the ingress node in the Unmarshaler Subgraph (generally - see CheckAccessors) -
+	// the rest of the path is outside the Unmarshaler Subgraph.
 
 	graph.Logf(c.log, slog.LevelInfo, "Finding Accessors: Types containing types in Unmarshaler Subgraph")
 	// Wait to create until now, since other functions switch from editing unmarshaler subgraph to accessors once it's created
@@ -418,7 +426,8 @@ func (c *conftamer) FindAccessors() {
 		graph.Logf(c.log, slog.LevelInfo, "Finding ancestors of %v", ct.CTypeNodeHash(unmarshaler_subnode))
 		accessor_find := NeighFind{children: false, parents: true, iface_impls: false,
 			ignore_unmarshaler_subnodes: true,
-			excluded_ast_edges:          []string{}}
+			excluded_ast_edges:          []string{},
+			excluded_sources:            []golang.TypeSource{golang.ArgToRet}}
 
 		for _, gopls_info := range unmarshaler_subnode.GoplsInfo {
 			err = c.addReachableCTypes(gopls_info, accessor_find, nil, 0)
