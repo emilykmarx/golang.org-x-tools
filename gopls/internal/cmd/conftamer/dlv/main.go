@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/emilykmarx/conftamer/contexttrack"
+	dlv "github.com/emilykmarx/conftamer/utils"
 	"github.com/go-delve/delve/service/api"
 	"github.com/go-delve/delve/service/rpc2"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
@@ -85,8 +85,8 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
 	// (dlv can only run tests in one package at a time)
 	for pkg := range pkgs {
 		client_info := ClientInfo{unmarshaler_subgraph: unmarshaler_subgraph, accessors: accessors, methods: methods, pkg: pkg, msg_send_funcs: msg_send_funcs}
-		if err := contexttrack.Run(dlv_port, module_prefix+pkg, test_name, client_info, RunDlvClient); err != nil {
-			if _, ok := err.(*contexttrack.ErrNoTests); ok {
+		if err := dlv.Run(dlv_port, module_prefix+pkg, test_name, client_info, RunDlvClient); err != nil {
+			if _, ok := err.(*dlv.ErrNoTests); ok {
 				if test_pkg != "" {
 					// Presumably user thought package had tests
 					panic(err)
