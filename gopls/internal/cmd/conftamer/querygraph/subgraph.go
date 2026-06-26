@@ -3,6 +3,9 @@ package main
 import (
 	"flag"
 	"log"
+	"log/slog"
+	"os"
+	"time"
 
 	"github.com/dominikbraun/graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
@@ -28,7 +31,22 @@ func main() {
 		panic("type not found")
 	}
 
+	// needed for logging in graph lib
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == "msg" {
+				return a
+			} else {
+				return slog.Attr{}
+			}
+		}}))
+
+	g.SetLog(log)
+
+	start := time.Now()
+	graph.Logf(g.Log(), slog.LevelInfo, "Querying for paths containing %v", type_name)
 	sub_g := graph.Query(g, hash)
+	graph.Logf(g.Log(), slog.LevelInfo, "Query time: %v", time.Since(start))
 
 	// reuse list (will be superset of nodes actually in subgraph)
 	sub_ctypes := ct.CTypes{Graph: sub_g, List: m.List}
