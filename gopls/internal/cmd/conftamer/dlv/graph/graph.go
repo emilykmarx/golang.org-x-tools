@@ -11,18 +11,20 @@ import (
 type ASTPath []string
 type CTypesPath []graph.Edge[ct.CTypeNode]
 
-func edgeASTPaths(edge graph.Edge[ct.CTypeNode]) []ASTPath {
+func EdgeASTPaths(edgeProperties graph.EdgeProperties) []ASTPath {
 	ast_paths := []ASTPath{}
 	// Edge data marshals annoyingly by default
-	if edge.Properties.Data != nil {
-		ast_paths_raw := edge.Properties.Data.([]interface{})
+	if edgeProperties.Data != nil {
+		ast_paths_raw := edgeProperties.Data.([]interface{})
 		for _, ast_path_raw := range ast_paths_raw { // range over [][]string
 			ast_path := ASTPath{}
-			for _, ast_edge_raw := range ast_path_raw.([]interface{}) { // range over []string
-				ast_edge := ast_edge_raw.(string)
-				ast_path = append(ast_path, ast_edge)
+			if ast_path_raw != nil {
+				for _, ast_edge_raw := range ast_path_raw.([]interface{}) { // range over []string
+					ast_edge := ast_edge_raw.(string)
+					ast_path = append(ast_path, ast_edge)
+				}
+				ast_paths = append(ast_paths, ast_path)
 			}
-			ast_paths = append(ast_paths, ast_path)
 		}
 	}
 	return ast_paths
@@ -32,7 +34,7 @@ func edgeASTPaths(edge graph.Edge[ct.CTypeNode]) []ASTPath {
 func AstIdxToEdge(ctypes_path CTypesPath, ast_path ASTPath, want int) graph.Edge[ct.CTypeNode] {
 	cur := 0
 	for _, edge := range ctypes_path {
-		edge_ast_paths := edgeASTPaths(edge)
+		edge_ast_paths := EdgeASTPaths(edge.Properties)
 		// Find which one this ast_path took
 
 		found := false
@@ -104,7 +106,7 @@ func CTypePathsToOrFrom(g ct.CTypeGraph, hash ct.CTypeHash, direction graph.Dire
 				edge, err := g.Edge(path[i], path[i+1])
 				ct.CheckErr(err)
 				ctype_path = append(ctype_path, edge)
-				edge_ast_paths := edgeASTPaths(edge)
+				edge_ast_paths := EdgeASTPaths(edge.Properties)
 				new_ast_paths := []ASTPath{}
 
 				if i > 0 {
