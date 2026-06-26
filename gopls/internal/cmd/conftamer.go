@@ -183,14 +183,13 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 			// When finding initial edges from Unmarshaler Subgraph to Accessors, don't take edges to US nodes.
 			// When finding edges from Accessors, stop if find one back into US - this wouldn't happen if
 			// we found descendants in same way as ancestors, but we don't, hence this happens in a few cases:
-			// - Edge from Accessor => US has an AST edge that US excludes
+			// - Edge from US => Accessor has an AST edge that US excludes
 			// - Accessor finds a node the US doesn't, due to two things we may want to fix:
 			// Embedded fields and discovery/xds.KumaSDConfig - TODO for both
 			if _, ok := c.unmarshaler_subgraph.GetHash(cur_name); ok {
 				if depth != 1 {
-					graph.Logf(c.log, slog.LevelInfo, "Accessor has edge back in to Unmarshaler Subgraph: %v => %v\n", cur_name, neigh_info.Name)
+					graph.Logf(c.log, slog.LevelInfo, "Accessors would have edge out of Unmarshaler Subgraph: %v => %v\n", cur_name, neigh_info.Name)
 				}
-				// TODO we don't add the edge - I guess we should
 				return nil
 			}
 		}
