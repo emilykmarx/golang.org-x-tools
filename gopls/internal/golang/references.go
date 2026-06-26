@@ -54,8 +54,9 @@ func References(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, r
 	return locations, nil
 }
 
+// returned []Locations is the references, []TypeInfo is the parent types (each reference may have 0,1,or multiple)
 func ReferencesMoreInfo(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range, includeDeclaration bool) ([]protocol.Location, []TypeInfo, error) {
-	references, structs, err := references(ctx, snapshot, fh, rng, includeDeclaration)
+	references, parent_types, err := references(ctx, snapshot, fh, rng, includeDeclaration)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -63,7 +64,7 @@ func ReferencesMoreInfo(ctx context.Context, snapshot *cache.Snapshot, fh file.H
 	for i, ref := range references {
 		locations[i] = ref.location
 	}
-	return locations, structs, nil
+	return locations, parent_types, nil
 }
 
 // A reference describes an identifier that refers to the same
@@ -88,11 +89,11 @@ func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rn
 	}
 
 	var refs []reference
-	var structs []TypeInfo
+	var parent_types []TypeInfo
 	if inPackageName {
 		refs, err = packageReferences(ctx, snapshot, f.URI())
 	} else {
-		refs, structs, err = ordinaryReferences(ctx, snapshot, f.URI(), rng)
+		refs, parent_types, err = ordinaryReferences(ctx, snapshot, f.URI(), rng)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -118,7 +119,7 @@ func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rn
 	}
 	refs = out
 
-	return refs, structs, nil
+	return refs, parent_types, nil
 }
 
 // packageReferences returns a list of references to the package
@@ -366,13 +367,17 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 		}
 	}
 
-	// The search functions will call report(loc) for each hit, passing parent_struct_name if loc is of a use in a struct
+	// The search functions will call report(loc) for each hit,
+	// passing a corresponding parent type if there is one
+	// (a location may have multiple, in which case report() is called for each).
+	// report() records the loc whether a parent_type is passed or not.
 	var (
-		refsMu         sync.Mutex
-		refs           []reference
-		parent_structs []TypeInfo
+		refsMu       sync.Mutex
+		refs         []reference
+		parent_types []TypeInfo
 	)
-	report := func(loc protocol.Location, parent_struct *TypeInfo, isDecl bool) {
+	report := func(loc protocol.Location, parent_type *TypeInfo, isDecl bool) {
+		// record loc
 		ref := reference{
 			isDeclaration: isDecl,
 			location:      loc,
@@ -380,8 +385,10 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 		}
 		refsMu.Lock()
 		refs = append(refs, ref)
-		if parent_struct != nil {
-			parent_structs = append(parent_structs, *parent_struct)
+
+		// record parent type if any
+		if parent_type != nil {
+			parent_types = append(parent_types, *parent_type)
 		}
 		refsMu.Unlock()
 	}
@@ -441,7 +448,7 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 			// Report the locations of the declaration(s).
 			// TODO(adonovan): what about for corresponding methods? Add tests.
 			for _, o := range objects {
-				// This is the declaration, so no parent struct
+				// This is the declaration, so no parent type
 				report(mustLocation(pgf, o.cur.Node()), nil, true)
 			}
 
@@ -503,11 +510,18 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 				if err != nil {
 					return err
 				}
-				parent_type, err := enclosingType(ref_pkg, ref_pgf, *ref_cursor)
+				parent_types, err := parentTypes(ref_pkg, ref_pgf, *ref_cursor)
 				if err != nil {
 					return err
 				}
-				report(loc, parent_type, false)
+				// Report the hit even if no parent types
+				if len(parent_types) == 0 {
+					report(loc, nil, false)
+				}
+				// Report each parent type
+				for _, parent_type := range parent_types {
+					report(loc, &parent_type, false)
+				}
 			}
 		}
 		return nil
@@ -516,7 +530,7 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 	if err := group.Wait(); err != nil {
 		return nil, nil, err
 	}
-	return refs, parent_structs, nil
+	return refs, parent_types, nil
 }
 
 func locToCursor(ctx context.Context, snapshot *cache.Snapshot, loc protocol.Location) (*cache.Package, *parsego.File, *inspector.Cursor, error) {
@@ -656,11 +670,19 @@ func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspo
 			}
 			if obj, ok := pkg.TypesInfo().Uses[id]; ok && matches(obj) {
 				// Found a use
-				parent_type, err := enclosingType(pkg, pgf, curId)
+				parent_types, err := parentTypes(pkg, pgf, curId)
 				if err != nil {
 					return err
 				}
-				report(mustLocation(pgf, id), parent_type, false)
+				loc := mustLocation(pgf, id)
+				// Report the hit even if no parent types
+				if len(parent_types) == 0 {
+					report(loc, nil, false)
+				}
+				// Report each parent type
+				for _, parent_type := range parent_types {
+					report(loc, &parent_type, false)
+				}
 			}
 		}
 	}
@@ -668,7 +690,91 @@ func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspo
 }
 
 // child_cursor is an identifier in a reference.
-// If reference is part of a type declaration, find the type being declared
+// If reference is part of a function argument, find the returned types, if any
+func argToRetType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector.Cursor) ([]TypeInfo, error) {
+	found_param := false
+	retvals := []TypeInfo{}
+	var retvals_cursor *inspector.Cursor
+
+	// Check if child_cursor is in function arg
+	for parent_cursor := range child_cursor.Enclosing() {
+		if parent_cursor.ParentEdgeKind() == edge.FuncType_Params {
+			// Path to function indicates child_cursor was in a param
+			found_param = true
+		}
+		if _, ok := parent_cursor.Node().(*ast.FuncType); ok {
+			// Found a function decl => check if child_cursor was part of an arg, or some other part (e.g. ret)
+			if found_param {
+				found_ret := false
+				for func_child := range parent_cursor.Children() {
+					if func_child.ParentEdgeKind() == edge.FuncType_Results {
+						found_ret = true
+					}
+				}
+				if found_ret {
+					c := parent_cursor.ChildAt(edge.FuncType_Results, -1)
+					retvals_cursor = &c
+				}
+			}
+		}
+	}
+
+	if retvals_cursor == nil {
+		// child_cursor is not in function arg
+		return nil, nil
+	}
+
+	// get return type(s)
+	filter := []ast.Node{(*ast.Ident)(nil)}
+
+	retvals_cursor.Inspect(filter, func(child_cursor inspector.Cursor) bool {
+		ret_node := child_cursor.Node()
+
+		// identifier - check if it's of a type name
+		ret_typeinfo, err := cursorToTypeInfo(ret_node, *retvals_cursor, pkg)
+		if err != nil {
+			// Not a type name
+			// TODO (conftamer) (minor) Some of these errors may be actual errors
+			return true
+		}
+
+		ret_type := ret_typeinfo.Type()
+		if _, ok := ret_type.(*types.Basic); ok {
+			// ignore built-in types
+			return true
+		}
+		ret_type_loc := mustLocation(pgf, ret_node)
+		retvals = append(retvals, TypeInfo{Loc: ret_type_loc, TypeInfo: ret_typeinfo,
+			ASTPath: nil, TypeSource: ArgToRet}) // no AST path from an argument to its ret
+
+		return false
+	})
+
+	return retvals, nil
+}
+
+// child_cursor is an identifier in a reference.
+// Find parent types that have "access" to the child type - i.e.
+// parent encloses child in its type definition, or child is an argument to a function that returns parent
+func parentTypes(pkg *cache.Package, pgf *parsego.File, child_cursor inspector.Cursor) ([]TypeInfo, error) {
+	parents, err := argToRetType(pkg, pgf, child_cursor)
+	if err != nil {
+		return nil, err
+	}
+
+	enclosing, err := enclosingType(pkg, pgf, child_cursor)
+	if err != nil {
+		return nil, err
+	}
+	if enclosing != nil {
+		parents = append(parents, *enclosing)
+	}
+
+	return parents, nil
+}
+
+// child_cursor is an identifier in a reference.
+// If reference is part of a type declaration, find the type being declared.
 // (If part of a nested type decl, find the innermost one)
 // (e.g. a struct containing a field of child_cursor's type)
 func enclosingType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector.Cursor) (*TypeInfo, error) {

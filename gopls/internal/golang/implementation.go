@@ -105,6 +105,7 @@ type TypeSource string
 const (
 	Enclosed    TypeSource = "enclosed"
 	Enclosing   TypeSource = "enclosing"
+	ArgToRet    TypeSource = "function arg => ret"
 	Implementer TypeSource = "implementation"
 )
 
@@ -365,15 +366,17 @@ func implementationsMsets(ctx context.Context, snapshot *cache.Snapshot, pkg *ca
 					if err != nil {
 						return err
 					}
-					impl, err := enclosingType(impl_pkg, impl_pgf, *impl_cursor)
+					// Use parentTypes() to get typeInfo
+					parents, err := parentTypes(impl_pkg, impl_pgf, *impl_cursor)
 					if err != nil {
 						return err
 					}
 					var typeInfo *types.TypeName
-					if impl != nil {
-						typeInfo = impl.TypeInfo
-					} else {
-						// e.g. method, not type
+					// Just want the enclosing type - there should be one if querying for implementing types (none if querying for implementing methods)
+					for _, parent := range parents {
+						if parent.TypeSource == Enclosing {
+							typeInfo = parent.TypeInfo
+						}
 					}
 					yield(index.PkgPath, res.TypeName, res.IsInterface, ploc, typeInfo)
 					return nil

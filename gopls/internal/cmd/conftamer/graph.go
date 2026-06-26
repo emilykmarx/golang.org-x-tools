@@ -211,7 +211,7 @@ type NeighInfo struct {
 // If not struct field, combine with the corresponding existing node if any.
 // Return whether existed
 func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_info *NeighInfo) (TypeNameExistence, error) {
-	if typ.TypeSource != golang.Implementer && neigh_info != nil {
+	if typ.TypeSource == golang.Enclosed && neigh_info != nil {
 		// Found via a neighbor we may need to combine with
 		combine := len(neigh_info.Ast_path) == 0 || slices.Compare(neigh_info.Ast_path, []string{"SelectorExpr.Sel"}) == 0
 		if combine {
