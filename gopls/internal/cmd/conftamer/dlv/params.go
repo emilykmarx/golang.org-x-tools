@@ -1,8 +1,8 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 
@@ -16,60 +16,95 @@ import (
 
 /* Functions for getting the parameters a CTypes method has access to */
 
-func MethodParams(client *rpc2.RPCClient, args ClientInfo, method string) {
-	// TODO proper handling for incomplete loads - see ClientHowTo.md
-	loadcfg := api.LoadConfig{FollowPointers: true, MaxVariableRecurse: 100, MaxStringLen: 100, MaxArrayValues: 1, MaxStructFields: -1}
-	scope := api.EvalScope{GoroutineID: -1}
-	recvr_name := "d" // XXX get recvr name and type from dlv
-	recvr_var, err := client.EvalVariable(scope, recvr_name, loadcfg)
-	fmt.Println("EVALED")
-	ct.CheckErr(err)
-
-	recvr_type := "/discovery/kubernetes.Discovery"
-	recvr_hash := ct.CTypeHash(recvr_type)
-	params := []CTypeParam{}
-
-	// 1. Get key prefixes for all paths from a root to the receiver
+// Get all param keys the given Unmarshaler Subgraph node has access to
+func UnmarshalerIngressParams(args ClientInfo, ingress_hash ct.CTypeHash) []string {
+	// 1. Get key prefixes for all paths from a root to the ingress
+	// Don't include non-custom fields (not part of the key prefix)
 	key_prefixes := []string{}
-	ctype_paths, ast_paths := dlvgraph.CTypePathsToOrFrom(args.ctypes.Graph, recvr_hash, graph.Backwards)
-	fmt.Printf("ctype paths: %v\n", ctype_paths)
-	fmt.Printf("ast paths: %v\n", ast_paths)
+	opts := graph.DFSOpts[ct.CTypeHash, ct.CTypeNode]{Direction: graph.Backwards, All_paths: true}
+	ctype_paths, ast_paths := dlvgraph.CTypePathsToOrFrom(args.unmarshaler_subgraph.Graph, ingress_hash, opts)
 
 	for i, ctype_path := range ctype_paths {
 		for _, ast_path := range ast_paths[i] {
 			key := ""
-			CTypePathToParams(ctype_path, ast_path, 0, api.Variable{}, &params, &key)
-			key_prefixes = append(key_prefixes, key)
+			ASTPathToParams(ctype_path, nil, ast_path, 0, &key_prefixes, &key, false)
 		}
-		// If receiver is root, this will do nothing which is correct
 	}
 
-	// 2. Get key postfixes and values for all paths from the receiver to a leaf
-	ctype_paths, ast_paths = dlvgraph.CTypePathsToOrFrom(args.ctypes.Graph, recvr_hash, graph.Forwards)
+	// 2. Get key postfixes for all paths from the ingress to a leaf
+	// Include non-custom fields (ingress has access to them)
+	key_postfixes := []string{}
+	opts.Direction = graph.Forwards
+	ctype_paths, ast_paths = dlvgraph.CTypePathsToOrFrom(args.unmarshaler_subgraph.Graph, ingress_hash, opts)
+
 	for i, ctype_path := range ctype_paths {
 		for _, ast_path := range ast_paths[i] {
 			key := ""
-			// populates params with keys and values
-			CTypePathToParams(ctype_path, ast_path, 0, *recvr_var, &params, &key)
+			ASTPathToParams(ctype_path, ctype_paths, ast_path, 0, &key_postfixes, &key, true)
 		}
 		if len(ast_paths[i]) == 0 {
-			// Receiver is leaf
+			// Ingress is leaf
 			key := ""
-			CTypePathToParams(ctype_path, dlvgraph.ASTPath{}, 0, *recvr_var, &params, &key)
+			ASTPathToParams(ctype_path, ctype_paths, nil, 0, &key_postfixes, &key, true)
 		}
 	}
 
 	// 3. Final keys: prepend all prefixes to all postfixes
 	// (if a key appears in multiple sections of file, the corresponding type has multiple paths to it in the graph)
-	final_params := []CTypeParam{}
-	for _, param := range params {
-		for _, key_prefix := range key_prefixes {
-			final_param := param
-			final_param.Key = key_prefix + "." + param.Key
-			fmt.Printf("FINAL PARAM: KEY %v, VAL %+v\n", final_param.Key, final_param.Value)
-			final_params = append(final_params, final_param)
+	final_keys := []string{}
+	for _, key_prefix := range key_prefixes {
+		for _, key_postfix := range key_postfixes {
+			final_key := strings.Trim(key_prefix+"."+key_postfix, ".")
+			final_keys = append(final_keys, final_key)
 		}
 	}
+
+	return final_keys
+}
+
+// 1. Get all Unmarshaler Subgraph nodes the receiver has an Accessors path to
+func UnmarshalerIngresses(args ClientInfo, recvr_hash ct.CTypeHash) []ct.CTypeHash {
+	ingresses := []ct.CTypeHash{}
+	// Just get the leaf, not all paths to it (we don't need them, and has big perf impact for big graphs -
+	// AllPaths is much slower than ShortestPath)
+	for _, accessor_leaf := range args.accessor_leaves {
+		_, err := graph.ShortestPath(args.accessors.Graph, recvr_hash, accessor_leaf)
+		if err == nil {
+			ingress, in_us := args.unmarshaler_subgraph.GetHash(ct.FullTypeName(accessor_leaf))
+			if in_us {
+				ingresses = append(ingresses, ingress)
+			} else {
+				// Accessor leaf is not in Unmarshaler Subgraph - rare (see CheckAccessors())
+				panic(fmt.Errorf("Accessor leaf %v is not in Unmarshaler Subgraph", accessor_leaf))
+			}
+		} else if errors.Is(err, graph.ErrTargetNotReachable) {
+			// no path to ingress - ok
+		} else {
+			ct.CheckErr(err)
+		}
+	}
+
+	return ingresses
+}
+
+// Get the param keys the method's receiver has access to
+func MethodParams(client *rpc2.RPCClient, args ClientInfo, method string) []string {
+	// XXX get recvr type from dlv. If it's in the US, handle that.
+	recvr_type := "/discovery/kubernetes.Discovery"
+	recvr_hash := ct.CTypeHash(recvr_type)
+	ingresses := UnmarshalerIngresses(args, recvr_hash)
+	param_keys := []string{}
+
+	for _, ingress_hash := range ingresses {
+		param_keys = append(param_keys, UnmarshalerIngressParams(args, ingress_hash)...)
+	}
+
+	// Sort and dedup for convenience
+	slices.Sort(param_keys)
+	param_keys = slices.Compact(param_keys)
+
+	fmt.Printf("METHOD %v: keys %v\n", method, param_keys)
+	return param_keys
 }
 
 // The key and value of a config param that a CType has access to,
@@ -79,121 +114,93 @@ type CTypeParam struct {
 	Value api.Variable
 }
 
-// Given a CType path and optionally the variable for the CType at the beginning,
-// get the corresponding parameter key(s) from CType info.
-// If variable is passed, also get parameter value(s) from variable.
-// Assume the default behavior of UnmarshalYAML wrt mapping file keys to types.
-func CTypePathToParams(ctype_path dlvgraph.CTypesPath, ast_path dlvgraph.ASTPath, ast_path_idx int,
-	cur_var api.Variable, params *[]CTypeParam, key *string) {
+func appendFieldTag(field string, tag string, key *string) {
+	key_part := FieldToParamKey(field, tag)
+	*key = fmt.Sprintf("%v.%v", *key, key_part)
+	*key = strings.Trim(*key, ".")
+}
 
-	get_values := cur_var.Addr != 0
+// Return true if field has no AST edges out on any ctype path.
+// (Unless `all_ctype_paths` not passed)
+func nonCustomField(field string, ctype_edge graph.Edge[ct.CTypeNode], all_ctype_paths []dlvgraph.CTypesPath) bool {
+	if all_ctype_paths == nil {
+		return false
+	}
 
-	// Don't modify ast_path, since multiple elems need to recurse on it
-	// ast_path_idx/cur_ast_path_idx is index in full ast_path
-	cur_ast_path_idx := ast_path_idx
-
-	if ast_path_idx < len(ast_path) {
-		// 1. Eat AST edges until find child Variable(s) to recurse on, or reach end
-		// Edge between CTypes isn't necessarily 1:1 with edge in path between Variable and its Children
-		// (e.g. pointer Variable has a Child for its target)
-		for i, ast_edge := range ast_path[ast_path_idx:] {
-			cur_ast_path_idx = ast_path_idx + i
-
-			// Case 1. Edge corresponds to one or more of the Variable's direct Children => recurse on the relevant children
-			if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
-				// Children are fields
-				found_field := false
-				for _, child_field := range cur_var.Children {
-					// Identify named fields by their field name, not their type, since e.g. if their type is []T the CType edge is to T not []T
-					// (See Prometheus edge /tsdb/index.MemPostings => /storage.SeriesRef for more complex example)
-					if child_field.Name == field {
-						// corresponding field
-						cur_var = child_field
-						found_field = true
-						break
+	found := false
+	for _, other_ctype_path := range all_ctype_paths {
+		for _, other_edge := range other_ctype_path {
+			if ct.NodeEqual(other_edge.Source, ctype_edge.Source) {
+				// Same node on other path => see if it has out AST edges for this field
+				for _, other_ast_path := range dlvgraph.EdgeASTPaths(other_edge.Properties) {
+					for _, other_ast_edge := range other_ast_path {
+						if other_field, ok := strings.CutPrefix(other_ast_edge, golang.FIELD_NAME_PREFIX); ok {
+							if other_field == field {
+								found = true
+							}
+						}
 					}
 				}
-
-				if !found_field && get_values {
-					// Should find the field even if code doesn't explicitly set it
-					panic(fmt.Errorf("Field %v not found in %+v - path %v\n", field, cur_var, ast_path))
-				}
-
-				// Append field tag to key
-				edge := dlvgraph.AstIdxToEdge(ctype_path, ast_path, cur_ast_path_idx)
-				key_part := FieldToParamKey(field, edge.Source.Tags[field])
-				*key = fmt.Sprintf("%v.%v", *key, key_part)
-
-				// Recurse on field
-				CTypePathToParams(ctype_path, ast_path, cur_ast_path_idx+1, cur_var, params, key)
-
-				// TODO Should also recurse on any non-custom fields - they won't have an edge out, but
-				// are effectively leaves thus considered params (e.g. ownNamespace in k8s Discovery)
-				return
-			}
-
-			switch ast_edge {
-			case "ArrayType.Elt":
-				// Children are array/slice elements
-				for _, elem := range cur_var.Children {
-					new_key := *key // don't share between children, else they will keep appending
-					CTypePathToParams(ctype_path, ast_path, cur_ast_path_idx+1, elem, params, &new_key)
-				}
-				if !get_values {
-					CTypePathToParams(ctype_path, ast_path, cur_ast_path_idx+1, cur_var, params, key)
-				}
-				return
-
-			case "StarExpr.X":
-				child := cur_var
-				if get_values {
-					// Child is target of pointer
-					child = cur_var.Children[0]
-				}
-				CTypePathToParams(ctype_path, ast_path, cur_ast_path_idx+1, child, params, key)
-				return
-
-			// Case 2. A type of edge we know we can skip
-			// Struct stuff (fields handled above)
-			case "StructType.Fields":
-			case "FieldList.List":
-			case "Field.Type":
-
-			// When adding a new edge type: return after recursing
-
-			default:
-				// Case 3. Not yet supported
-				panic(fmt.Errorf("edge type %v not supported - path %v, cur var %+v\n", ast_edge, ast_path, cur_var))
 			}
 		}
 	}
 
-	if cur_ast_path_idx >= len(ast_path)-1 {
-		// End of AST path
+	return !found
+}
 
-		if get_values {
-			// Traversed receiver to leaf => get leaf's params
-			if len(cur_var.Children) == 0 {
-				// no children => a param
-				*key, _ = strings.CutPrefix(*key, ".")
-				*params = append(*params, CTypeParam{Key: *key, Value: cur_var})
-				fmt.Printf("APPEND PARAM: KEY %v, VAL %+v\n", *key, cur_var)
-			} else {
-				// recurse on all children
-				for _, child := range cur_var.Children {
-					new_key := *key // each field will have different key
-					if cur_var.Kind == reflect.Struct {
-						// If leaf is struct: Append field tag to key
-						leaf_node := ctype_path[len(ctype_path)-1].Target
-						key_part := FieldToParamKey(child.Name, leaf_node.Tags[child.Name])
-						new_key = fmt.Sprintf("%v.%v", *key, key_part)
+// Given an AST path and corresponding CType path,
+// get the corresponding parameter key(s) from CType info.
+// If `leaf_keys`: Append all of the last node's tags to the final key (won't have corresponding AST edges in given path).
+// If `all_ctype_paths`: Also include non-custom fields.
+// Assume the default behavior of UnmarshalYAML wrt mapping file keys to types.
+func ASTPathToParams(ctype_path dlvgraph.CTypesPath, all_ctype_paths []dlvgraph.CTypesPath, ast_path dlvgraph.ASTPath, ast_path_idx int,
+	keys *[]string, key *string, leaf_keys bool) {
+	// Note key is shared across all recursive calls, so must copy it when want recursive calls to have their own
+
+	// ast_path_idx/cur_ast_path_idx is index in full ast_path
+	cur_ast_path_idx := ast_path_idx
+
+	if ast_path_idx < len(ast_path) {
+		// Eat edges until find field to recurse on
+		for i, ast_edge := range ast_path[ast_path_idx:] {
+			cur_ast_path_idx = ast_path_idx + i
+			if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
+				ctype_edge := dlvgraph.AstIdxToEdge(ctype_path, ast_path, cur_ast_path_idx)
+				tags := ctype_edge.Source.Tags
+
+				// Check for any non-custom fields - won't have an AST edge out, but are params if the node is a CType.
+				for other_field := range tags {
+					if other_field != field {
+						if nonCustomField(other_field, ctype_edge, all_ctype_paths) {
+							key_copy := *key
+							appendFieldTag(other_field, tags[other_field], &key_copy)
+							*keys = append(*keys, key_copy)
+						}
 					}
-					CTypePathToParams(ctype_path, ast_path, cur_ast_path_idx, child, params, &new_key)
 				}
+
+				// Append corresponding field tag to key
+				appendFieldTag(field, tags[field], key)
+
+				// Recurse on field
+				ASTPathToParams(ctype_path, all_ctype_paths, ast_path, cur_ast_path_idx+1, keys, key, leaf_keys)
+
+				return
 			}
 		}
+	}
+
+	// Reached end of AST path => record key(s)
+	last_node := ctype_path[len(ctype_path)-1].Target
+	if !leaf_keys || len(last_node.Tags) == 0 {
+		*keys = append(*keys, *key)
 	} else {
-		// Traversed root to receiver => done (got key already)
+		for field, tag := range last_node.Tags {
+			key_copy := *key
+			// Append tag to key
+			appendFieldTag(field, tag, &key_copy)
+			*keys = append(*keys, key_copy)
+		}
 	}
 }
 
@@ -207,9 +214,8 @@ func FieldToParamKey(field string, tag string) string {
 		tag = strings.Trim(tag, "\"")
 		tag_parts := strings.Split(tag, ",")
 		param_key = tag_parts[0]
-		tag_flags := tag_parts[1:]
-		if slices.Contains(tag_flags, "inline") {
-			// Will need this later (for getting full param name)
+		if param_key == "-" {
+			param_key = ""
 		}
 	} else {
 		// No tag => take key as lowercased field name:

@@ -399,6 +399,7 @@ func (c *conftamer) skipUnmarshalerSubnode(unmarshaler_subnode ct.CTypeNode) boo
 	if _, ok := ct.IsModuleNode(ct.CTypeNodeHash(unmarshaler_subnode), module_repo, c.unmarshaler_subgraph.Graph); !ok {
 		return true
 	}
+	// NOTE if we change this policy, may want to update key-finding accordingly
 	return false
 }
 

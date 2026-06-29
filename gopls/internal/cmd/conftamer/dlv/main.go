@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dominikbraun/graph"
 	dlv "github.com/emilykmarx/conftamer/utils"
 	"github.com/go-delve/delve/service/api"
 	"github.com/go-delve/delve/service/rpc2"
@@ -56,6 +57,7 @@ func (i *arrayFlags) Set(value string) error {
 type ClientInfo struct {
 	unmarshaler_subgraph ct.CTypes
 	accessors            ct.CTypes
+	accessor_leaves      []ct.CTypeHash
 	methods              map[string]struct{}
 	pkg                  string
 	msg_send_funcs       []string
@@ -80,11 +82,17 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
 		}
 	}
 
+	_, accessor_leaves, err := graph.RootsLeaves(accessors.Graph)
+	ct.CheckErr(err)
+
 	// 3. For each package:
 	// Connect to dlv server and run tests
 	// (dlv can only run tests in one package at a time)
 	for pkg := range pkgs {
-		client_info := ClientInfo{unmarshaler_subgraph: unmarshaler_subgraph, accessors: accessors, methods: methods, pkg: pkg, msg_send_funcs: msg_send_funcs}
+		client_info := ClientInfo{unmarshaler_subgraph: unmarshaler_subgraph,
+			accessors: accessors, accessor_leaves: accessor_leaves,
+			methods: methods, pkg: pkg, msg_send_funcs: msg_send_funcs}
+
 		if err := dlv.Run(dlv_port, module_prefix+pkg, test_name, client_info, RunDlvClient); err != nil {
 			if _, ok := err.(*dlv.ErrNoTests); ok {
 				if test_pkg != "" {
@@ -198,6 +206,7 @@ func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoi
 				// CF:
 				// CTypes method in stack of any goroutine
 				fmt.Printf("CF METHOD: %v\n", fn)
+				MethodParams(client, args, fn)
 
 				if goroutine.ID == send_goroutine && send_method == "" {
 					// DF:
@@ -209,8 +218,6 @@ func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoi
 					send_method = fn
 					fmt.Printf("DF METHOD: %v\n", fn)
 					// For anonymous function, CType shows up in locals but not args
-					fmt.Printf("LOCALS: %+v\n", frame.Locals)
-					fmt.Printf("ARGS: %+v\n", frame.Arguments)
 				}
 			}
 		}
