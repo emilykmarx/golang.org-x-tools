@@ -89,9 +89,22 @@ func UnmarshalerIngresses(args ClientInfo, recvr_hash ct.CTypeHash) []ct.CTypeHa
 
 // Get the param keys the method's receiver has access to
 func MethodParams(client *rpc2.RPCClient, args ClientInfo, method string) []string {
-	// XXX get recvr type from dlv. If it's in the US, handle that.
-	recvr_type := "/discovery/kubernetes.Discovery"
-	recvr_hash := ct.CTypeHash(recvr_type)
+	// XXX Ignore types defined in tests to reduce fake keys.
+
+	parts := strings.Split(method, ".")
+	recvr_type := strings.Join(parts[:len(parts)-1], ".")
+
+	recvr_hash, in_us := args.unmarshaler_subgraph.GetHash(ct.FullTypeName(recvr_type))
+	// XXX If it's in the US, handle that.
+	if in_us {
+		panic(fmt.Errorf("Receiver %v is in Unmarshaler Subgraph - not handled yet", recvr_type))
+	}
+
+	recvr_hash, in_accessors := args.accessors.GetHash(ct.FullTypeName(recvr_type))
+	if !in_accessors {
+		// Shouldn't happen
+		panic(fmt.Errorf("Receiver %v not in Accessors", recvr_type))
+	}
 	ingresses := UnmarshalerIngresses(args, recvr_hash)
 	param_keys := []string{}
 

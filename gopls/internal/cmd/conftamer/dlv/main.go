@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dominikbraun/graph"
+	"github.com/emilykmarx/conftamer/parsetests"
 	dlv "github.com/emilykmarx/conftamer/utils"
 	"github.com/go-delve/delve/service/api"
 	"github.com/go-delve/delve/service/rpc2"
@@ -55,12 +56,14 @@ func (i *arrayFlags) Set(value string) error {
 
 // Info passed to the dlv client for each package
 type ClientInfo struct {
+	module_prefix        string
 	unmarshaler_subgraph ct.CTypes
 	accessors            ct.CTypes
 	accessor_leaves      []ct.CTypeHash
 	methods              map[string]struct{}
 	pkg                  string
 	msg_send_funcs       []string
+	msg_taint            parsetests.AllTaint
 }
 
 func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
@@ -76,7 +79,7 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
 	pkgs := make(map[string]struct{})
 	methods := make(map[string]struct{})
 	for _, g := range []ct.CTypeGraph{unmarshaler_subgraph.Graph, accessors.Graph} {
-		GetCTypesInfo(g, test_pkg, pkgs, methods)
+		GetCTypesInfo(g, module_prefix, test_pkg, pkgs, methods)
 		if len(pkgs) == 0 {
 			panic("no ctypes found - bad package name?")
 		}
@@ -84,14 +87,15 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
 
 	_, accessor_leaves, err := graph.RootsLeaves(accessors.Graph)
 	ct.CheckErr(err)
+	msg_taint := make(parsetests.AllTaint)
 
 	// 3. For each package:
 	// Connect to dlv server and run tests
 	// (dlv can only run tests in one package at a time)
 	for pkg := range pkgs {
-		client_info := ClientInfo{unmarshaler_subgraph: unmarshaler_subgraph,
+		client_info := ClientInfo{module_prefix: module_prefix, unmarshaler_subgraph: unmarshaler_subgraph,
 			accessors: accessors, accessor_leaves: accessor_leaves,
-			methods: methods, pkg: pkg, msg_send_funcs: msg_send_funcs}
+			methods: methods, pkg: pkg, msg_send_funcs: msg_send_funcs, msg_taint: msg_taint}
 
 		if err := dlv.Run(dlv_port, module_prefix+pkg, test_name, client_info, RunDlvClient); err != nil {
 			if _, ok := err.(*dlv.ErrNoTests); ok {
@@ -109,16 +113,15 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
 }
 
 // Terminology note: "CType" = in Unmarshal Subgraph and/or Accessors
-// Get all packages in the module that define CTypes
-// Get all CTypes methods
+// Get all packages in the module that define CTypes, and all CTypes methods (both with module prefix removed).
 // package format: "/<path after module prefix>"
-func GetCTypesInfo(g ct.CTypeGraph, test_pkg string, pkgs map[string]struct{}, methods map[string]struct{}) {
+func GetCTypesInfo(g ct.CTypeGraph, module_prefix string, test_pkg string, pkgs map[string]struct{}, methods map[string]struct{}) {
 	nodes, err := g.Vertices()
 	ct.CheckErr(err)
 	for _, node := range nodes {
 		_, contains_prefix := ct.IsModuleNode(ct.CTypeNodeHash(node), "/", g)
 		if contains_prefix {
-			// See comment in AddCType - if a node has multiple names, we may be missing some methods
+			// TODO See comment in AddCType - if a node has multiple names, we may be missing some methods
 			// Should check that - for now, assume all methods are in same package
 			pkg := strings.Split(string(node.Names[0]), ".")[0] // assumes package name minus module prefix contains no "."
 			if pkg == "/storage_test" || pkg == "/promql_test" {
@@ -134,7 +137,7 @@ func GetCTypesInfo(g ct.CTypeGraph, test_pkg string, pkgs map[string]struct{}, m
 		}
 		for _, orig_method := range node.Methods {
 			method := string(orig_method)
-			sanitizeMethod(&method)
+			sanitizeMethod(&method, module_prefix)
 			methods[method] = struct{}{}
 		}
 	}
@@ -163,7 +166,7 @@ Thus:
   - Check DF from the CType method that sent the msg
 */
 
-func sanitizeMethod(method *string) {
+func sanitizeMethod(method *string, module_prefix string) {
 	// gopls and dlv put the * and () in different places in method names => remove them
 	*method = strings.ReplaceAll(*method, "*", "")
 	*method = strings.ReplaceAll(*method, "(", "")
@@ -178,6 +181,9 @@ func sanitizeMethod(method *string) {
 			*method = strings.Join(parts[:len(parts)-1], ".")
 		}
 	}
+
+	short_method, _ := strings.CutPrefix(*method, module_prefix)
+	*method = short_method
 }
 
 func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoint, send_goroutine int64) {
@@ -198,7 +204,7 @@ func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoi
 
 		for _, frame := range stack {
 			fn := frame.Function.Name()
-			sanitizeMethod(&fn)
+			sanitizeMethod(&fn, args.module_prefix)
 
 			if _, ok := args.methods[fn]; ok {
 				// TODO ignore the same types in the Unmarshaler Subgraph that we do when finding Accessors
@@ -206,7 +212,8 @@ func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoi
 				// CF:
 				// CTypes method in stack of any goroutine
 				fmt.Printf("CF METHOD: %v\n", fn)
-				MethodParams(client, args, fn)
+				param_keys := MethodParams(client, args, fn)
+				args.msg_taint.AddCTypeMethodCall(*msgID, param_keys, fn) // TODO get test name
 
 				if goroutine.ID == send_goroutine && send_method == "" {
 					// DF:
@@ -222,7 +229,6 @@ func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoi
 			}
 		}
 	}
-
 }
 
 func RunDlvClient(dlv_endpoint string, info any) error {
@@ -231,7 +237,6 @@ func RunDlvClient(dlv_endpoint string, info any) error {
 	args := info.(ClientInfo)
 
 	client := rpc2.NewClient(dlv_endpoint)
-	// XXX log info similarly to conftamer repo
 	SetMessageSendBreakpoints(client, args.msg_send_funcs)
 
 	state := <-client.Continue()
