@@ -101,7 +101,7 @@ func (c *conftamer) getChildCTypes(defn_locs []string) ([]golang.TypeInfo, error
 	return child_ctypes, nil
 }
 
-func (c *conftamer) getInterfaceImpls(defn_locs []string) ([]golang.TypeInfo, error) {
+func (c *conftamer) getInterfaceImpls(defn_locs []string, ignore_ifaces bool) ([]golang.TypeInfo, error) {
 	impl_ctypes := []golang.TypeInfo{}
 
 	for _, defn_loc := range defn_locs {
@@ -111,10 +111,17 @@ func (c *conftamer) getInterfaceImpls(defn_locs []string) ([]golang.TypeInfo, er
 		implementations, err := c.local_server.ImplementationMoreInfo(c.ctx, p)
 		ct.CheckErr(err)
 
-		// Also returns the other unmarshal interfaces => ignore
-		implementations = slices.DeleteFunc(implementations, func(a golang.TypeInfo) bool {
-			return slices.Contains(UNMARSHAL_INTERFACES, ct.TypeName(a.TypeInfo))
-		})
+		if ignore_ifaces {
+			// Also returns interfaces that have the same method set as the query => ignore
+			implementations = slices.DeleteFunc(implementations, func(impl golang.TypeInfo) bool {
+				if _, is_iface := impl.TypeInfo.Type().Underlying().(*types.Interface); is_iface {
+					return true
+				}
+
+				return false
+			})
+		}
+
 		impl_ctypes = append(impl_ctypes, implementations...)
 	}
 
@@ -131,26 +138,6 @@ type NeighFind struct {
 	excluded_ast_edges []string
 	excluded_sources   []golang.TypeSource
 }
-
-var UNMARSHAL_INTERFACES = []ct.FullTypeName{
-	"gopkg.in/yaml.v3.obsoleteUnmarshaler",
-	"sigs.k8s.io/yaml/goyaml.v2.Unmarshaler",
-	"gopkg.in/yaml.v2.Unmarshaler",
-}
-var STRING_INTERFACES = []ct.FullTypeName{
-	// String()
-	"fmt.Stringer",
-	"expvar.Var",
-	"runtime.stringer",
-	"context.stringer",
-	"os/signal.stringer",
-	"github.com/distribution/reference.Reference",
-}
-
-// Interfaces whose implementations we won't search for
-var (
-	IGNORED_INTERFACES = append(UNMARSHAL_INTERFACES, STRING_INTERFACES...)
-)
 
 // Add all CTypes reachable from this one via neigh_find, stopping on reaching one we've already found
 // neigh_info is info about the neighbor we found this obj via (if any)
@@ -268,9 +255,9 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 	}
 
 	// Children via interface implementations
-	if neigh_find.iface_impls && !slices.Contains(IGNORED_INTERFACES, cur_name) {
+	if neigh_find.iface_impls {
 		if _, is_iface := typ.TypeInfo.Type().Underlying().(*types.Interface); is_iface {
-			iface_impls, err := c.getInterfaceImpls(defn_locs)
+			iface_impls, err := c.getInterfaceImpls(defn_locs, false)
 			ct.CheckErr(err)
 
 			for _, new := range iface_impls {
@@ -327,7 +314,7 @@ func (c *conftamer) FindUnmarshalerSubgraph() {
 	// 1. Find "Unmarshalers": Types that implement UnmarshalYAML
 	// TODO also find all types passed as 2nd arg to yaml.Unmarshal - for any that don't impl Unmarshal, record their params
 	graph.Logf(c.log, slog.LevelInfo, "Finding Unmarshalers: Types implementing UnmarshalYAML")
-	unmarshalImpls, err := c.getInterfaceImpls([]string{c.UnmarshalDefn})
+	unmarshalImpls, err := c.getInterfaceImpls([]string{c.UnmarshalDefn}, true)
 	ct.CheckErr(err)
 
 	graph.Logf(c.log, slog.LevelInfo, "Finding rest of Unmarshaler Subgraph: Types contained in Unmarshalers")
