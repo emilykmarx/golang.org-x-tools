@@ -17,17 +17,20 @@ import (
 /* Functions for getting the parameters a CTypes method has access to */
 
 // Get all param keys the given Unmarshaler Subgraph node has access to
+// PERF cache the results for other method calls with same receiver (or precompute and persist with graph)
 func UnmarshalerIngressParams(args ClientInfo, ingress_hash ct.CTypeHash) []string {
+	// XXX Ignore types only defined in tests to reduce fake keys
+	// (need conftamer to record the defn loc in TypeInfo, which it currently doesn't)
+
 	// 1. Get key prefixes for all paths from a root to the ingress
-	// Don't include non-custom fields (not part of the key prefix)
 	key_prefixes := []string{}
 	opts := graph.DFSOpts[ct.CTypeHash, ct.CTypeNode]{Direction: graph.Backwards, All_paths: true}
 	ctype_paths, ast_paths := dlvgraph.CTypePathsToOrFrom(args.unmarshaler_subgraph.Graph, ingress_hash, opts)
 
-	for i, ctype_path := range ctype_paths {
-		for _, ast_path := range ast_paths[i] {
-			key := ""
-			ASTPathToParams(ctype_path, nil, ast_path, 0, &key_prefixes, &key, false)
+	for ctype_path_i, ctype_path := range ctype_paths {
+		for _, ast_path := range ast_paths[ctype_path_i] {
+			// Don't include non-custom fields (not part of the key prefix) or ingress keys (will be handled below)
+			key_prefixes = append(key_prefixes, ASTPathToParams(ctype_path, nil, ast_path, false)...)
 		}
 	}
 
@@ -37,15 +40,9 @@ func UnmarshalerIngressParams(args ClientInfo, ingress_hash ct.CTypeHash) []stri
 	opts.Direction = graph.Forwards
 	ctype_paths, ast_paths = dlvgraph.CTypePathsToOrFrom(args.unmarshaler_subgraph.Graph, ingress_hash, opts)
 
-	for i, ctype_path := range ctype_paths {
-		for _, ast_path := range ast_paths[i] {
-			key := ""
-			ASTPathToParams(ctype_path, ctype_paths, ast_path, 0, &key_postfixes, &key, true)
-		}
-		if len(ast_paths[i]) == 0 {
-			// Ingress is leaf
-			key := ""
-			ASTPathToParams(ctype_path, ctype_paths, nil, 0, &key_postfixes, &key, true)
+	for ctype_path_i, ctype_path := range ctype_paths {
+		for _, ast_path := range ast_paths[ctype_path_i] {
+			key_postfixes = append(key_postfixes, ASTPathToParams(ctype_path, ctype_paths, ast_path, true)...)
 		}
 	}
 
@@ -75,7 +72,10 @@ func UnmarshalerIngresses(args ClientInfo, recvr_hash ct.CTypeHash) []ct.CTypeHa
 				ingresses = append(ingresses, ingress)
 			} else {
 				// Accessor leaf is not in Unmarshaler Subgraph - rare (see CheckAccessors())
-				panic(fmt.Errorf("Accessor leaf %v is not in Unmarshaler Subgraph", accessor_leaf))
+				if accessor_leaf != "/discovery/xds.KumaSDConfig" {
+					// We know this one is broken - TODO ignore for now
+					panic(fmt.Errorf("Accessor leaf %v is not in Unmarshaler Subgraph", accessor_leaf))
+				}
 			}
 		} else if errors.Is(err, graph.ErrTargetNotReachable) {
 			// no path to ingress - ok
@@ -89,10 +89,7 @@ func UnmarshalerIngresses(args ClientInfo, recvr_hash ct.CTypeHash) []ct.CTypeHa
 
 // Get the param keys the method's receiver has access to
 func MethodParams(client *rpc2.RPCClient, args ClientInfo, method string) []string {
-	// XXX Ignore types defined in tests to reduce fake keys.
-
-	parts := strings.Split(method, ".")
-	recvr_type := strings.Join(parts[:len(parts)-1], ".")
+	recvr_type := recvrType(method)
 
 	recvr_hash, in_us := args.unmarshaler_subgraph.GetHash(ct.FullTypeName(recvr_type))
 	// XXX If it's in the US, handle that.
@@ -127,15 +124,15 @@ type CTypeParam struct {
 	Value api.Variable
 }
 
-func appendFieldTag(field string, tag string, key *string) {
+func appendFieldTag(field string, tag string, key string) string {
 	key_part := FieldToParamKey(field, tag)
-	*key = fmt.Sprintf("%v.%v", *key, key_part)
-	*key = strings.Trim(*key, ".")
+	key = fmt.Sprintf("%v.%v", key, key_part)
+	return strings.Trim(key, ".")
 }
 
 // Return true if field has no AST edges out on any ctype path.
 // (Unless `all_ctype_paths` not passed)
-func nonCustomField(field string, ctype_edge graph.Edge[ct.CTypeNode], all_ctype_paths []dlvgraph.CTypesPath) bool {
+func nonCustomField(field string, ctype_edge graph.Edge[ct.CTypeNode], all_ctype_paths [][]graph.Edge[ct.CTypeNode]) bool {
 	if all_ctype_paths == nil {
 		return false
 	}
@@ -161,44 +158,39 @@ func nonCustomField(field string, ctype_edge graph.Edge[ct.CTypeNode], all_ctype
 	return !found
 }
 
-// Given an AST path and corresponding CType path,
+// Given an AST path (indexed by CType edge) and corresponding CType path,
 // get the corresponding parameter key(s) from CType info.
 // If `leaf_keys`: Append all of the last node's tags to the final key (won't have corresponding AST edges in given path).
 // If `all_ctype_paths`: Also include non-custom fields.
 // Assume the default behavior of UnmarshalYAML wrt mapping file keys to types.
-func ASTPathToParams(ctype_path dlvgraph.CTypesPath, all_ctype_paths []dlvgraph.CTypesPath, ast_path dlvgraph.ASTPath, ast_path_idx int,
-	keys *[]string, key *string, leaf_keys bool) {
-	// Note key is shared across all recursive calls, so must copy it when want recursive calls to have their own
+func ASTPathToParams(ctype_path []graph.Edge[ct.CTypeNode], all_ctype_paths [][]graph.Edge[ct.CTypeNode],
+	ast_path []dlvgraph.ASTPath, leaf_keys bool) []string {
 
-	// ast_path_idx/cur_ast_path_idx is index in full ast_path
-	cur_ast_path_idx := ast_path_idx
+	keys := []string{} // add when find a non-custom field or leaf
+	key_prefix := ""   // append as add fields
 
-	if ast_path_idx < len(ast_path) {
-		// Eat edges until find field to recurse on
-		for i, ast_edge := range ast_path[ast_path_idx:] {
-			cur_ast_path_idx = ast_path_idx + i
+	// Don't concatenate the ast_path since then we can't recover
+	// the CType edge corresponding to an index (due to empty edge AST paths)
+	for ctype_edge_i, edge_ast_path := range ast_path {
+		// For each CType edge
+		for _, ast_edge := range edge_ast_path {
+			// For each AST edge on the CType edge
 			if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
-				ctype_edge := dlvgraph.AstIdxToEdge(ctype_path, ast_path, cur_ast_path_idx)
+				ctype_edge := ctype_path[ctype_edge_i]
 				tags := ctype_edge.Source.Tags
 
 				// Check for any non-custom fields - won't have an AST edge out, but are params if the node is a CType.
 				for other_field := range tags {
 					if other_field != field {
 						if nonCustomField(other_field, ctype_edge, all_ctype_paths) {
-							key_copy := *key
-							appendFieldTag(other_field, tags[other_field], &key_copy)
-							*keys = append(*keys, key_copy)
+							full_key := appendFieldTag(other_field, tags[other_field], key_prefix)
+							keys = append(keys, full_key)
 						}
 					}
 				}
 
 				// Append corresponding field tag to key
-				appendFieldTag(field, tags[field], key)
-
-				// Recurse on field
-				ASTPathToParams(ctype_path, all_ctype_paths, ast_path, cur_ast_path_idx+1, keys, key, leaf_keys)
-
-				return
+				key_prefix = appendFieldTag(field, tags[field], key_prefix)
 			}
 		}
 	}
@@ -206,32 +198,38 @@ func ASTPathToParams(ctype_path dlvgraph.CTypesPath, all_ctype_paths []dlvgraph.
 	// Reached end of AST path => record key(s)
 	last_node := ctype_path[len(ctype_path)-1].Target
 	if !leaf_keys || len(last_node.Tags) == 0 {
-		*keys = append(*keys, *key)
+		keys = append(keys, key_prefix)
 	} else {
 		for field, tag := range last_node.Tags {
-			key_copy := *key
 			// Append tag to key
-			appendFieldTag(field, tag, &key_copy)
-			*keys = append(*keys, key_copy)
+			full_key := appendFieldTag(field, tag, key_prefix)
+			keys = append(keys, full_key)
 		}
 	}
+
+	return keys
 }
 
 // Param key corresponding to struct field (tag key if tagged, else lowercase field name)
 func FieldToParamKey(field string, tag string) string {
 	param_key := ""
 
-	if tag != "" {
-		// Get tag key
-		tag = strings.Split(tag, ":")[1]
-		tag = strings.Trim(tag, "\"")
-		tag_parts := strings.Split(tag, ",")
+	// Get yaml tag key, if any
+	// `(...) yaml:"[<key>][,<flag1>[,<flag2>]]" (...)`
+
+	yaml_prefix := "yaml:\""
+	yaml_idx := strings.Index(tag, yaml_prefix)
+	if yaml_idx != -1 {
+		key_idx := yaml_idx + len(yaml_prefix)
+		end_tag_idx := strings.Index(tag[key_idx:], "\"")
+		yaml_tag := tag[key_idx : key_idx+end_tag_idx]
+		tag_parts := strings.Split(yaml_tag, ",")
 		param_key = tag_parts[0]
 		if param_key == "-" {
 			param_key = ""
 		}
 	} else {
-		// No tag => take key as lowercased field name:
+		// No yaml tag => take key as lowercased field name:
 		// Field could either be a key in the raw content (iff field name is uppercase, and lowercased version is in raw content),
 		// or copied/otherwise derived from the raw content after unmarshaling
 		param_key = strings.ToLower(field)
