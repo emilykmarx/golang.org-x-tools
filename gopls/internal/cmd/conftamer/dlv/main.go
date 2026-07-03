@@ -19,7 +19,7 @@ import (
 func main() {
 	var dlv_port int
 	var msg_send_funcs arrayFlags
-	var test_pkg, test_name, unmarshaler_subgraph, accessors, module_prefix string
+	var test_pkg, test_name, unmarshaler_subgraph, accessors, module_prefix, outfile string
 	flag.IntVar(&dlv_port, "dlv-port", 4040, "Listening port for dlv")
 	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
 	flag.StringVar(&test_pkg, "test-pkg", "", "Package of test to run, relative to module with leading slash "+
@@ -28,9 +28,10 @@ func main() {
 	flag.StringVar(&unmarshaler_subgraph, "unmarshaler-subgraph", "", "File containing serialized unmarshaler subgraph")
 	flag.StringVar(&accessors, "accessors", "", "File containing serialized Accessors graph")
 	flag.Var(&msg_send_funcs, "send-funcs", "Functions that send messages (format: --send-funcs='f1' --send-funcs='f2'")
+	flag.StringVar(&outfile, "outfile", "", "Filename for final output")
 	flag.Parse()
 
-	if module_prefix == "" || unmarshaler_subgraph == "" || accessors == "" || len(msg_send_funcs) == 0 {
+	if module_prefix == "" || unmarshaler_subgraph == "" || accessors == "" || len(msg_send_funcs) == 0 || outfile == "" {
 		flag.Usage()
 		log.Fatalf("Missing mandatory argument")
 	}
@@ -40,7 +41,7 @@ func main() {
 		log.Fatalf("test package missing leading /")
 	}
 
-	Run(dlv_port, module_prefix, test_pkg, test_name, unmarshaler_subgraph, accessors, msg_send_funcs)
+	Run(dlv_port, module_prefix, test_pkg, test_name, unmarshaler_subgraph, accessors, msg_send_funcs, outfile)
 }
 
 // Allow array CLI arg
@@ -67,7 +68,7 @@ type ClientInfo struct {
 }
 
 func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
-	unmarshaler_subgraph_file string, accessors_file string, msg_send_funcs []string) {
+	unmarshaler_subgraph_file string, accessors_file string, msg_send_funcs []string, outfile string) {
 
 	// 1. Load the CTypes graphs
 	g, m := ct.Deserialize(unmarshaler_subgraph_file)
@@ -110,6 +111,10 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
 			}
 		}
 	}
+
+	err = msg_taint.Dump(outfile)
+	ct.CheckErr(err)
+
 }
 
 // Terminology note: "CType" = in Unmarshal Subgraph and/or Accessors
@@ -186,6 +191,11 @@ func sanitizeMethod(method *string, module_prefix string) {
 	*method = short_method
 }
 
+func recvrType(method string) string {
+	parts := strings.Split(method, ".")
+	return strings.Join(parts[:len(parts)-1], ".")
+}
+
 func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoint, send_goroutine int64) {
 	msgID, err := modulemsginfo.GetMessageInfo(client, bp, send_goroutine)
 	ct.CheckErr(err)
@@ -213,7 +223,7 @@ func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoi
 				// CTypes method in stack of any goroutine
 				fmt.Printf("CF METHOD: %v\n", fn)
 				param_keys := MethodParams(client, args, fn)
-				args.msg_taint.AddCTypeMethodCall(*msgID, param_keys, fn) // TODO get test name
+				args.msg_taint.AddCTypeMethodCall(*msgID, param_keys, recvrType(fn)) // TODO get test name
 
 				if goroutine.ID == send_goroutine && send_method == "" {
 					// DF:
