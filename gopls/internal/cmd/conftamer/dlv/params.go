@@ -53,6 +53,8 @@ func UnmarshalerIngressParams(args ClientInfo, ingress_hash ct.CTypeHash) []stri
 		for _, key_postfix := range key_postfixes {
 			final_key := strings.Trim(key_prefix+"."+key_postfix, ".")
 			final_keys = append(final_keys, final_key)
+			// TODO we sometimes find e.g. alerting.alertmanagers as a complete key even though it's not a leaf
+			// (e.g. for ingress /discovery.Config)
 		}
 	}
 
@@ -72,10 +74,8 @@ func UnmarshalerIngresses(args ClientInfo, recvr_hash ct.CTypeHash) []ct.CTypeHa
 				ingresses = append(ingresses, ingress)
 			} else {
 				// Accessor leaf is not in Unmarshaler Subgraph - rare (see CheckAccessors())
-				if accessor_leaf != "/discovery/xds.KumaSDConfig" {
-					// We know this one is broken - TODO ignore for now
-					panic(fmt.Errorf("Accessor leaf %v is not in Unmarshaler Subgraph", accessor_leaf))
-				}
+				// TODO ignore for now
+				fmt.Printf("Accessor leaf %v is not in Unmarshaler Subgraph - skipping\n", accessor_leaf)
 			}
 		} else if errors.Is(err, graph.ErrTargetNotReachable) {
 			// no path to ingress - ok
@@ -103,6 +103,7 @@ func MethodParams(client *rpc2.RPCClient, args ClientInfo, method string) []stri
 		panic(fmt.Errorf("Receiver %v not in Accessors", recvr_type))
 	}
 	ingresses := UnmarshalerIngresses(args, recvr_hash)
+	fmt.Printf("%v INGRESSES: %v\n", method, ingresses)
 	param_keys := []string{}
 
 	for _, ingress_hash := range ingresses {
@@ -113,7 +114,6 @@ func MethodParams(client *rpc2.RPCClient, args ClientInfo, method string) []stri
 	slices.Sort(param_keys)
 	param_keys = slices.Compact(param_keys)
 
-	fmt.Printf("METHOD %v: keys %v\n", method, param_keys)
 	return param_keys
 }
 

@@ -9,11 +9,11 @@ import (
 
 	"github.com/dominikbraun/graph"
 	"github.com/emilykmarx/conftamer/parsetests"
+	modulemsginfo "github.com/emilykmarx/conftamer/pkg/apimessages/http"
 	dlv "github.com/emilykmarx/conftamer/utils"
 	"github.com/go-delve/delve/service/api"
 	"github.com/go-delve/delve/service/rpc2"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
-	modulemsginfo "k8s.io/client-go/testing"
 )
 
 func main() {
@@ -22,8 +22,7 @@ func main() {
 	var test_pkg, test_name, unmarshaler_subgraph, accessors, module_prefix, outfile string
 	flag.IntVar(&dlv_port, "dlv-port", 4040, "Listening port for dlv")
 	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
-	flag.StringVar(&test_pkg, "test-pkg", "", "Package of test to run, relative to module with leading slash "+
-		" (optional - defaults to all packages in module)")
+	flag.StringVar(&test_pkg, "test-pkg", "", "Package of test to run (full name)")
 	flag.StringVar(&test_name, "test-name", "", "Name of test to run (optional - defaults to all tests in package)")
 	flag.StringVar(&unmarshaler_subgraph, "unmarshaler-subgraph", "", "File containing serialized unmarshaler subgraph")
 	flag.StringVar(&accessors, "accessors", "", "File containing serialized Accessors graph")
@@ -31,14 +30,9 @@ func main() {
 	flag.StringVar(&outfile, "outfile", "", "Filename for final output")
 	flag.Parse()
 
-	if module_prefix == "" || unmarshaler_subgraph == "" || accessors == "" || len(msg_send_funcs) == 0 || outfile == "" {
+	if module_prefix == "" || test_pkg == "" || unmarshaler_subgraph == "" || accessors == "" || len(msg_send_funcs) == 0 || outfile == "" {
 		flag.Usage()
 		log.Fatalf("Missing mandatory argument")
-	}
-
-	_, ok := strings.CutPrefix(test_pkg, "/")
-	if test_pkg != "" && !ok {
-		log.Fatalf("test package missing leading /")
 	}
 
 	Run(dlv_port, module_prefix, test_pkg, test_name, unmarshaler_subgraph, accessors, msg_send_funcs, outfile)
@@ -77,12 +71,11 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
 	accessors := ct.CTypes{Graph: g, List: m.List}
 
 	// 2. Parse info from CTypes graphs
-	pkgs := make(map[string]struct{})
 	methods := make(map[string]struct{})
 	for _, g := range []ct.CTypeGraph{unmarshaler_subgraph.Graph, accessors.Graph} {
-		GetCTypesInfo(g, module_prefix, test_pkg, pkgs, methods)
-		if len(pkgs) == 0 {
-			panic("no ctypes found - bad package name?")
+		GetCTypesInfo(g, module_prefix, methods)
+		if len(methods) == 0 {
+			panic("no ctypes found") // sanity check
 		}
 	}
 
@@ -90,37 +83,22 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
 	ct.CheckErr(err)
 	msg_taint := make(parsetests.AllTaint)
 
-	// 3. For each package:
-	// Connect to dlv server and run tests
+	// 3. Connect to dlv server and run tests
 	// (dlv can only run tests in one package at a time)
-	for pkg := range pkgs {
-		client_info := ClientInfo{module_prefix: module_prefix, unmarshaler_subgraph: unmarshaler_subgraph,
-			accessors: accessors, accessor_leaves: accessor_leaves,
-			methods: methods, pkg: pkg, msg_send_funcs: msg_send_funcs, msg_taint: msg_taint}
+	client_info := ClientInfo{module_prefix: module_prefix, unmarshaler_subgraph: unmarshaler_subgraph,
+		accessors: accessors, accessor_leaves: accessor_leaves,
+		methods: methods, pkg: test_pkg, msg_send_funcs: msg_send_funcs, msg_taint: msg_taint}
 
-		if err := dlv.Run(dlv_port, module_prefix+pkg, test_name, client_info, RunDlvClient); err != nil {
-			if _, ok := err.(*dlv.ErrNoTests); ok {
-				if test_pkg != "" {
-					// Presumably user thought package had tests
-					panic(err)
-				} else {
-					// No tests in this package
-				}
-			} else {
-				panic(err)
-			}
-		}
-	}
+	err = dlv.Run(dlv_port, test_pkg, test_name, client_info, RunDlvClient)
+	ct.CheckErr(err)
 
 	err = msg_taint.Dump(outfile)
 	ct.CheckErr(err)
-
 }
 
 // Terminology note: "CType" = in Unmarshal Subgraph and/or Accessors
-// Get all packages in the module that define CTypes, and all CTypes methods (both with module prefix removed).
-// package format: "/<path after module prefix>"
-func GetCTypesInfo(g ct.CTypeGraph, module_prefix string, test_pkg string, pkgs map[string]struct{}, methods map[string]struct{}) {
+// Get all CTypes methods (with module prefix removed).
+func GetCTypesInfo(g ct.CTypeGraph, module_prefix string, methods map[string]struct{}) {
 	nodes, err := g.Vertices()
 	ct.CheckErr(err)
 	for _, node := range nodes {
@@ -135,9 +113,6 @@ func GetCTypesInfo(g ct.CTypeGraph, module_prefix string, test_pkg string, pkgs 
 				// e.g. records github.com/prometheus/prometheus/storage_test, not github.com/prometheus/prometheus/storage/storage_test
 				// They're the only package names with "_", maybe that confuses it??
 				continue
-			}
-			if test_pkg == "" || pkg == test_pkg {
-				pkgs[pkg] = struct{}{}
 			}
 		}
 		for _, orig_method := range node.Methods {
