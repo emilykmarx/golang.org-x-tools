@@ -382,9 +382,11 @@ func (c *conftamer) CheckAccessors(unmarshaler_subnodes []ct.CTypeNode) {
 func (c *conftamer) skipUnmarshalerSubnode(unmarshaler_subnode ct.CTypeNode) bool {
 	module_repo := filepath.Dir(c.ModulePrefix)
 
-	// Skip nodes not defined in the repo containing the module (e.g. github.com/prometheus)
-	if _, ok := ct.IsModuleNode(ct.CTypeNodeHash(unmarshaler_subnode), module_repo, c.unmarshaler_subgraph.Graph); !ok {
-		return true
+	// Skip nodes with any name not defined in the repo containing the module (e.g. github.com/prometheus)
+	for _, name := range unmarshaler_subnode.Names {
+		if _, in_repo := strings.CutPrefix(string(name), module_repo); !in_repo {
+			return true
+		}
 	}
 	// NOTE if we change this policy, may want to update key-finding accordingly
 	return false
