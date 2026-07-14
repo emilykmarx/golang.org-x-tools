@@ -8,7 +8,6 @@ import (
 
 	"github.com/dominikbraun/graph"
 	"github.com/go-delve/delve/service/api"
-	"github.com/go-delve/delve/service/rpc2"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
 	dlvgraph "golang.org/x/tools/gopls/internal/cmd/conftamer/dlv/graph"
 	"golang.org/x/tools/gopls/internal/golang"
@@ -87,14 +86,13 @@ func UnmarshalerIngresses(args ClientInfo, recvr_hash ct.CTypeHash) []ct.CTypeHa
 	return ingresses
 }
 
-// Get the param keys the method's receiver has access to
-func MethodParams(client *rpc2.RPCClient, args ClientInfo, method string) []string {
-	recvr_type := recvrType(method)
-
+// Get the param keys the CType has access to
+func ParamKeys(args ClientInfo, recvr_type string, us_ok bool) []string {
 	recvr_hash, in_us := args.unmarshaler_subgraph.GetHash(ct.FullTypeName(recvr_type))
 	// XXX If it's in the US, handle that.
-	if in_us {
-		panic(fmt.Errorf("Receiver %v is in Unmarshaler Subgraph - not handled yet", recvr_type))
+	if in_us && !us_ok {
+		fmt.Printf("Receiver %v is in Unmarshaler Subgraph - not handled yet\n", recvr_type)
+		return nil
 	}
 
 	recvr_hash, in_accessors := args.accessors.GetHash(ct.FullTypeName(recvr_type))
@@ -103,7 +101,7 @@ func MethodParams(client *rpc2.RPCClient, args ClientInfo, method string) []stri
 		panic(fmt.Errorf("Receiver %v not in Accessors", recvr_type))
 	}
 	ingresses := UnmarshalerIngresses(args, recvr_hash)
-	fmt.Printf("%v INGRESSES: %v\n", method, ingresses)
+	fmt.Printf("%v INGRESSES: %v\n", recvr_type, ingresses) // XXX this is helpful enough to be in the csv
 	param_keys := []string{}
 
 	for _, ingress_hash := range ingresses {

@@ -19,7 +19,7 @@ import (
 func main() {
 	var dlv_port int
 	var msg_send_funcs arrayFlags
-	var test_pkg, test_name, unmarshaler_subgraph, accessors, module_prefix, outfile string
+	var test_pkg, test_name, unmarshaler_subgraph, accessors, module_prefix, outfile, dump_params string
 	flag.IntVar(&dlv_port, "dlv-port", 4040, "Listening port for dlv")
 	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
 	flag.StringVar(&test_pkg, "test-pkg", "", "Package of test to run (full name)")
@@ -27,6 +27,7 @@ func main() {
 	flag.StringVar(&unmarshaler_subgraph, "unmarshaler-subgraph", "", "File containing serialized unmarshaler subgraph")
 	flag.StringVar(&accessors, "accessors", "", "File containing serialized Accessors graph")
 	flag.Var(&msg_send_funcs, "send-funcs", "Functions that send messages (format: --send-funcs='f1' --send-funcs='f2'")
+	flag.StringVar(&dump_params, "dump-params", "", "Whether to just dump all params reachable from the given type, rather than tracking sends")
 	flag.StringVar(&outfile, "outfile", "", "Filename for final output")
 	flag.Parse()
 
@@ -35,7 +36,7 @@ func main() {
 		log.Fatalf("Missing mandatory argument")
 	}
 
-	Run(dlv_port, module_prefix, test_pkg, test_name, unmarshaler_subgraph, accessors, msg_send_funcs, outfile)
+	Run(dlv_port, module_prefix, test_pkg, test_name, unmarshaler_subgraph, accessors, msg_send_funcs, outfile, dump_params)
 }
 
 // Allow array CLI arg
@@ -62,7 +63,7 @@ type ClientInfo struct {
 }
 
 func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
-	unmarshaler_subgraph_file string, accessors_file string, msg_send_funcs []string, outfile string) {
+	unmarshaler_subgraph_file string, accessors_file string, msg_send_funcs []string, outfile string, dump_params string) {
 
 	// 1. Load the CTypes graphs
 	g, m := ct.Deserialize(unmarshaler_subgraph_file)
@@ -82,15 +83,20 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
 	_, accessor_leaves, err := graph.RootsLeaves(accessors.Graph)
 	ct.CheckErr(err)
 	msg_taint := make(parsetests.AllTaint)
-
-	// 3. Connect to dlv server and run tests
-	// (dlv can only run tests in one package at a time)
 	client_info := ClientInfo{module_prefix: module_prefix, unmarshaler_subgraph: unmarshaler_subgraph,
 		accessors: accessors, accessor_leaves: accessor_leaves,
 		methods: methods, pkg: test_pkg, msg_send_funcs: msg_send_funcs, msg_taint: msg_taint}
 
-	err = dlv.Run(dlv_port, test_pkg, test_name, client_info, RunDlvClient)
-	ct.CheckErr(err)
+	if dump_params != "" {
+		// 3. Just dump the params
+		param_keys := ParamKeys(client_info, dump_params, true)
+		msg_taint.AddCTypeMethodCall(apimessages.APICallID{API: "fake"}, param_keys, dump_params)
+	} else {
+		// 3. Connect to dlv server and run tests
+		// (dlv can only run tests in one package at a time)
+		err = dlv.Run(dlv_port, test_pkg, test_name, client_info, RunDlvClient)
+		ct.CheckErr(err)
+	}
 
 	err = msg_taint.Dump(outfile)
 	ct.CheckErr(err)
@@ -197,7 +203,7 @@ func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoi
 				// CF:
 				// CTypes method in stack of any goroutine
 				fmt.Printf("CF METHOD: %v\n", fn)
-				param_keys := MethodParams(client, args, fn)
+				param_keys := ParamKeys(args, recvrType(fn), false)
 				args.msg_taint.AddCTypeMethodCall(*msgID, param_keys, recvrType(fn)) // TODO get test name
 
 				if goroutine.ID == send_goroutine && send_method == "" {
