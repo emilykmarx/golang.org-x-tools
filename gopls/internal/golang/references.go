@@ -734,7 +734,7 @@ func argToRetType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector.
 		ret_typeinfo, err := cursorToTypeInfo(ret_node, *retvals_cursor, pkg)
 		if err != nil {
 			// Not a type name
-			// TODO (conftamer) (minor) Some of these errors may be actual errors
+			// TODO(CT) (minor) Some of these errors may be actual errors
 			return true
 		}
 

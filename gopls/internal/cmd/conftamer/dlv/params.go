@@ -52,7 +52,7 @@ func UnmarshalerIngressParams(args ClientInfo, ingress_hash ct.CTypeHash) []stri
 		for _, key_postfix := range key_postfixes {
 			final_key := strings.Trim(key_prefix+"."+key_postfix, ".")
 			final_keys = append(final_keys, final_key)
-			// TODO we sometimes find e.g. alerting.alertmanagers as a complete key even though it's not a leaf
+			// TODO(CT) we sometimes find e.g. alerting.alertmanagers as a complete key even though it's not a leaf
 			// (e.g. for ingress /discovery.Config)
 		}
 	}
@@ -73,7 +73,7 @@ func UnmarshalerIngresses(args ClientInfo, recvr_hash ct.CTypeHash) []ct.CTypeHa
 				ingresses = append(ingresses, ingress)
 			} else {
 				// Accessor leaf is not in Unmarshaler Subgraph - rare (see CheckAccessors())
-				// TODO ignore for now
+				// TODO(CT) ignore for now
 				fmt.Printf("Accessor leaf %v is not in Unmarshaler Subgraph - skipping\n", accessor_leaf)
 			}
 		} else if errors.Is(err, graph.ErrTargetNotReachable) {

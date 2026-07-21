@@ -235,7 +235,7 @@ func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_info *NeighInfo) (TypeNameE
 	new_ctype := CTypeNode{TypeInfo: typ.TypeInfo.Type(), Names: []FullTypeName{TypeName(typ.TypeInfo)},
 		GoplsInfo: []golang.TypeInfo{typ}}
 
-	// TODO if we combine nodes, do we need to add the methods of the new type?
+	// TODO(CT) if we combine nodes, do we need to add the methods of the new type?
 	CopyMethods(&new_ctype)
 	err := c.Graph.AddVertex(new_ctype, func(vp *graph.VertexProperties) {})
 	// Shouldn't have existed - checked that above

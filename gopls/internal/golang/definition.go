@@ -270,7 +270,7 @@ func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name p
 		child_typeinfo, err := cursorToTypeInfo(child_node, parent_cursor.Parent(), pkg)
 		if err != nil {
 			// Not a type name
-			// TODO (conftamer) (minor) Some of these errors may be actual errors
+			// TODO(CT) (minor) Some of these errors may be actual errors
 			return true
 		}
 

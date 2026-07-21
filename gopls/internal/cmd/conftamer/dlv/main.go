@@ -110,11 +110,11 @@ func GetCTypesInfo(g ct.CTypeGraph, module_prefix string, methods map[string]str
 	for _, node := range nodes {
 		_, contains_prefix := ct.IsModuleNode(ct.CTypeNodeHash(node), "/", g)
 		if contains_prefix {
-			// TODO See comment in AddCType - if a node has multiple names, we may be missing some methods
+			// TODO(CT) See comment in AddCType - if a node has multiple names, we may be missing some methods
 			// Should check that - for now, assume all methods are in same package
 			pkg := strings.Split(string(node.Names[0]), ".")[0] // assumes package name minus module prefix contains no "."
 			if pkg == "/storage_test" || pkg == "/promql_test" {
-				// TODO (minor) gopls skips the last directory in the path for these packages
+				// TODO(CT)(minor) gopls skips the last directory in the path for these packages
 				// (both in recording the type name and methods)
 				// e.g. records github.com/prometheus/prometheus/storage_test, not github.com/prometheus/prometheus/storage/storage_test
 				// They're the only package names with "_", maybe that confuses it??
@@ -148,7 +148,7 @@ func SetMessageSendBreakpoints(client *rpc2.RPCClient, send_funcs []string) {
 
 Thus:
   - Msg is CF-tainted by all in-scope params, across all goroutines
-    -- TODO: should limit to the goroutines in the sending one's spawn tree - need to track spawning for that
+    -- TODO(CT): should limit to the goroutines in the sending one's spawn tree - need to track spawning for that
   - Check DF from the CType method that sent the msg
 */
 
@@ -189,7 +189,7 @@ func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoi
 
 	send_method := "" // The most recent CTypes method in the sending goroutine's stack (if any)
 	for _, goroutine := range goroutines {
-		// TODO check for partially loaded, and hitting max depth (see how PrintStack() in dlv does it)
+		// TODO(CT) check for partially loaded, and hitting max depth (see how PrintStack() in dlv does it)
 		stack, err := client.Stacktrace(goroutine.ID, 100, -1, api.StacktraceSimple, &api.LoadConfig{})
 		ct.CheckErr(err)
 
@@ -198,13 +198,13 @@ func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoi
 			sanitizeMethod(&fn, args.module_prefix)
 
 			if _, ok := args.methods[fn]; ok {
-				// TODO ignore the same types in the Unmarshaler Subgraph that we do when finding Accessors
+				// TODO(CT) ignore the same types in the Unmarshaler Subgraph that we do when finding Accessors
 
 				// CF:
 				// CTypes method in stack of any goroutine
 				fmt.Printf("CF METHOD: %v\n", fn)
 				param_keys := ParamKeys(args, recvrType(fn), false)
-				args.msg_taint.AddCTypeMethodCall(*msgID, param_keys, recvrType(fn)) // TODO get test name
+				args.msg_taint.AddCTypeMethodCall(*msgID, param_keys, recvrType(fn)) // TODO(CT) get test name
 
 				if goroutine.ID == send_goroutine && send_method == "" {
 					// DF:

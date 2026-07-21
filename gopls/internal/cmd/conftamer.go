@@ -47,7 +47,7 @@ func (c *conftamer) graph() *ct.CTypes {
 }
 
 const (
-	// TODO find definition of UnmarshalYAML properly
+	// TODO(CT) find definition of UnmarshalYAML properly
 	DEFAULT_UNMARSHAL_DEFN = "/home/emily/go/pkg/mod/gopkg.in/yaml.v2@v2.4.0/yaml.go:32:6"
 )
 
@@ -172,7 +172,7 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 			// we found descendants in same way as ancestors, but we don't, hence this happens in a few cases:
 			// - Edge from US => Accessor has an AST edge that US excludes
 			// - Accessor finds a node the US doesn't, due to two things we may want to fix:
-			// Embedded fields and discovery/xds.KumaSDConfig - TODO for both
+			// Embedded fields and discovery/xds.KumaSDConfig - TODO(CT) for both
 			if _, ok := c.unmarshaler_subgraph.GetHash(cur_name); ok {
 				if depth != 1 {
 					graph.Logf(c.log, slog.LevelInfo, "Accessors would have edge out of Unmarshaler Subgraph: %v => %v\n", cur_name, neigh_info.Name)
@@ -312,7 +312,7 @@ func (c *conftamer) FindUnmarshalerSubgraph() {
 	c.unmarshaler_subgraph = ct.New(c.log)
 
 	// 1. Find "Unmarshalers": Types that implement UnmarshalYAML
-	// TODO also find all types passed as 2nd arg to yaml.Unmarshal - for any that don't impl Unmarshal, record their params
+	// TODO(CT) also find all types passed as 2nd arg to yaml.Unmarshal - for any that don't impl Unmarshal, record their params
 	graph.Logf(c.log, slog.LevelInfo, "Finding Unmarshalers: Types implementing UnmarshalYAML")
 	unmarshalImpls, err := c.getInterfaceImpls([]string{c.UnmarshalDefn}, true)
 	ct.CheckErr(err)
