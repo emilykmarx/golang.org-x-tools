@@ -4,8 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/dominikbraun/graph"
 	"github.com/emilykmarx/conftamer/parsetests"
@@ -21,7 +23,7 @@ func main() {
 	var dlv_port int
 	var msg_send_funcs arrayFlags
 	var test_pkg, test_name, unmarshaler_subgraph, accessors, module_prefix, outfile, dump_params string
-	flag.IntVar(&dlv_port, "dlv-port", 4040, "Listening port for dlv")
+	flag.IntVar(&dlv_port, "dlv-port", 4040, "Listening port for dlv - if multiple tests running, will increment for each")
 	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
 	flag.StringVar(&test_pkg, "test-pkg", "", "Package of test to run (full name)")
 	flag.StringVar(&test_name, "test-name", "", "Name of test to run (optional - defaults to all tests in package)")
@@ -58,12 +60,13 @@ type ClientInfo struct {
 	accessors            ct.CTypes
 	accessor_leaves      []ct.CTypeHash
 	methods              map[string]struct{}
-	pkg                  string
+	test_pkg             string
+	test_name            string
 	msg_send_funcs       []string
 	msg_taint            parsetests.AllTaint
 }
 
-func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
+func Run(dlv_port int, module_prefix string, test_pkg string, test_name_arg string,
 	unmarshaler_subgraph_file string, accessors_file string, msg_send_funcs []string, outfile string, dump_params string) {
 
 	// 1. Load the CTypes graphs
@@ -83,23 +86,52 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name string,
 
 	_, accessor_leaves, err := graph.RootsLeaves(accessors.Graph)
 	ct.CheckErr(err)
-	msg_taint := make(parsetests.AllTaint)
+	msg_taints := []parsetests.AllTaint{}
 	client_info := ClientInfo{module_prefix: module_prefix, unmarshaler_subgraph: unmarshaler_subgraph,
 		accessors: accessors, accessor_leaves: accessor_leaves,
-		methods: methods, pkg: test_pkg, msg_send_funcs: msg_send_funcs, msg_taint: msg_taint}
+		methods: methods, test_pkg: test_pkg, msg_send_funcs: msg_send_funcs, msg_taint: make(parsetests.AllTaint)}
 
 	if dump_params != "" {
 		// 3. Just dump the params
 		param_keys := ParamKeys(client_info, dump_params, true)
-		msg_taint.AddCTypeMethodCall(apimessages.APICallID{API: "fake"}, param_keys, dump_params)
+		msg_taints = append(msg_taints, client_info.msg_taint)
+		client_info.msg_taint.AddCTypeMethodCall(apimessages.APICallID{API: "fake"}, param_keys, dump_params)
 	} else {
 		// 3. Connect to dlv server and run tests
-		// (dlv can only run tests in one package at a time)
-		err = dlv.Run(dlv_port, test_pkg, test_name, client_info, RunDlvClient)
-		ct.CheckErr(err)
+		// Run an instance of dlv per test, since otherwise a breakpoint hit in one test stops all
+		test_names := []string{test_name_arg}
+		if test_name_arg == "" {
+			cmd := exec.Command("go", "test", test_pkg+"/...", "-list=.")
+			out, err := cmd.CombinedOutput()
+			ct.CheckErr(err)
+			test_names = strings.Split(string(out), "\n")
+		}
+		var wg sync.WaitGroup
+		for i, test_name := range test_names {
+			if test_name_arg == "" && !strings.HasPrefix(test_name, "Test") {
+				continue // e.g. ok or ?
+			}
+			msg_taint := make(parsetests.AllTaint)
+			msg_taints = append(msg_taints, msg_taint)
+			client_info.msg_taint = msg_taint
+			client_info.test_name = test_name
+			if test_name_arg == "" {
+				client_info.test_name = "^" + test_name + "$" // exact match
+			}
+			wg.Add(1)
+
+			go func(client_info ClientInfo, i int) {
+				err = dlv.Run(dlv_port+i, client_info.test_pkg, client_info.test_name, client_info, RunDlvClient)
+				ct.CheckErr(err)
+				wg.Done()
+			}(client_info, i) // don't share msg_taint across tests
+		}
+		wg.Wait()
 	}
 
-	err = msg_taint.Dump(outfile)
+	// 4. Combine info from all tests, dump to same file
+	all_msg_taint := parsetests.CombineTaints(msg_taints)
+	err = all_msg_taint.Dump(outfile)
 	ct.CheckErr(err)
 }
 
@@ -205,7 +237,7 @@ func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoi
 				// CTypes method in stack of any goroutine
 				fmt.Printf("CF METHOD: %v\n", fn)
 				param_keys := ParamKeys(args, recvrType(fn), false)
-				args.msg_taint.AddCTypeMethodCall(*msgID, param_keys, recvrType(fn)) // TODO(CT) get test name
+				args.msg_taint.AddCTypeMethodCall(*msgID, param_keys, recvrType(fn))
 
 				if goroutine.ID == send_goroutine && send_method == "" {
 					// DF:
