@@ -9,6 +9,7 @@ import (
 
 	"github.com/dominikbraun/graph"
 	"github.com/emilykmarx/conftamer/parsetests"
+	"github.com/emilykmarx/conftamer/pkg/apimessages"
 	modulemsginfo "github.com/emilykmarx/conftamer/pkg/apimessages/http"
 	dlv "github.com/emilykmarx/conftamer/utils"
 	"github.com/go-delve/delve/service/api"
