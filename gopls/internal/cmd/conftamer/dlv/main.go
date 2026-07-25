@@ -262,6 +262,7 @@ func RunDlvClient(dlv_endpoint string, info any) error {
 
 	client := rpc2.NewClient(dlv_endpoint)
 	SetMessageSendBreakpoints(client, args.msg_send_funcs)
+	// TODO(Patrick) set goroutine breakpoints here (with a name so they can be checked easily below)
 
 	state := <-client.Continue()
 
@@ -274,6 +275,7 @@ func RunDlvClient(dlv_endpoint string, info any) error {
 			hit_bp := thread.Breakpoint
 			if hit_bp != nil {
 				HandleMessageSend(client, args, hit_bp, thread.GoroutineID)
+				// TODO(Patrick) check for and handle goroutine breakpoints here
 			}
 		}
 	}
