@@ -54,17 +54,11 @@ func References(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, r
 	return locations, nil
 }
 
-// returned []Locations is the references, []TypeInfo is the parent types (each reference may have 0,1,or multiple)
-func ReferencesMoreInfo(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range, includeDeclaration bool) ([]protocol.Location, []TypeInfo, error) {
-	references, parent_types, err := references(ctx, snapshot, fh, rng, includeDeclaration)
-	if err != nil {
-		return nil, nil, err
-	}
-	locations := make([]protocol.Location, len(references))
-	for i, ref := range references {
-		locations[i] = ref.location
-	}
-	return locations, parent_types, nil
+// "Parent" types of the passed-in type, e.g.
+// if passed-in type is used in a struct field: Info on that struct
+func ParentTypes(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range, includeDeclaration bool) ([]TypeInfo, error) {
+	_, parent_types, err := references(ctx, snapshot, fh, rng, includeDeclaration)
+	return parent_types, err
 }
 
 // A reference describes an identifier that refers to the same

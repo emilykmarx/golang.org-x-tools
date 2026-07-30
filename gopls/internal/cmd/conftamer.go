@@ -75,7 +75,7 @@ func (c *conftamer) getParentCTypes(defn_locs []string) ([]golang.TypeInfo, erro
 		ct.CheckErr(err)
 
 		// Check CType's references for other types
-		_, enclosing_types, err := c.local_server.ReferencesMoreInfo(c.ctx, p)
+		enclosing_types, err := c.local_server.ParentTypes(c.ctx, p)
 		ct.CheckErr(err)
 
 		parent_ctypes = append(parent_ctypes, enclosing_types...)
@@ -141,7 +141,6 @@ type NeighFind struct {
 
 // Add all CTypes reachable from this one via neigh_find, stopping on reaching one we've already found
 // neigh_info is info about the neighbor we found this obj via (if any)
-// defn_locs is of the obj (the 1-indexed format, which is what the gopls functions take but not what they return)
 func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind, neigh_info *ct.NeighInfo, depth int) error {
 	// Ignore types not declared in package scope
 	if typ.TypeInfo.Parent() == nil || typ.TypeInfo.Parent().Parent() != types.Universe {
@@ -395,7 +394,7 @@ func (c *conftamer) skipUnmarshalerSubnode(unmarshaler_subnode ct.CTypeNode) boo
 func (c *conftamer) FindAccessors() {
 	start := time.Now()
 
-	// 3. Find "Accessors": Ancestors of Unmarshaler Subgraph, via type definition only.
+	// 3. Find "Accessors": Ancestors of Unmarshaler Subgraph, via type definition and configurable rules.
 	// Each leaf is a copy of the ingress node in the Unmarshaler Subgraph (generally - see CheckAccessors) -
 	// the rest of the path is outside the Unmarshaler Subgraph.
 

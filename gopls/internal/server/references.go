@@ -42,9 +42,7 @@ func (s *Server) References(ctx context.Context, params *protocol.ReferenceParam
 	return nil, nil // empty result
 }
 
-// References, plus for any of them that represent a use as a struct field: Info on that struct
-// XXX rename and fix comment on implementer
-func (s *Server) ReferencesMoreInfo(ctx context.Context, params *protocol.ReferenceParams) (_ []protocol.Location, _ []golang.TypeInfo, rerr error) {
+func (s *Server) ParentTypes(ctx context.Context, params *protocol.ReferenceParams) (_ []golang.TypeInfo, rerr error) {
 	recordLatency := telemetry.StartLatencyTimer("references")
 	defer func() {
 		recordLatency(ctx, rerr)
@@ -55,18 +53,12 @@ func (s *Server) ReferencesMoreInfo(ctx context.Context, params *protocol.Refere
 
 	fh, snapshot, release, err := s.session.FileOf(ctx, params.TextDocument.URI)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer release()
 	switch snapshot.FileKind(fh) {
-	case file.Tmpl:
-		refs, err := template.References(ctx, snapshot, fh, params)
-		return refs, nil, err
 	case file.Go:
-		return golang.ReferencesMoreInfo(ctx, snapshot, fh, params.Range, params.Context.IncludeDeclaration)
-	case file.Mod:
-		refs, err := mod.References(ctx, snapshot, fh, params)
-		return refs, nil, err
+		return golang.ParentTypes(ctx, snapshot, fh, params.Range, params.Context.IncludeDeclaration)
 	}
-	return nil, nil, nil // empty result
+	return nil, nil // empty result
 }
