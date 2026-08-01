@@ -47,8 +47,8 @@ func (c *conftamer) graph() *ct.CTypes {
 }
 
 const (
-	// TODO(CT) find definition of UnmarshalYAML properly
-	DEFAULT_UNMARSHAL_DEFN = "/home/emily/go/pkg/mod/gopkg.in/yaml.v2@v2.4.0/yaml.go:32:6"
+	// TODO(CT) find this properly
+	DEFAULT_UNMARSHAL_DEFN = "/home/emily/go/pkg/mod/gopkg.in/yaml.v2@v2.4.0/yaml.go:88:6"
 )
 
 func (c *conftamer) Name() string      { return "conftamer" }
@@ -84,7 +84,7 @@ func (c *conftamer) getParentCTypes(defn_locs []string) ([]golang.TypeInfo, erro
 	return parent_ctypes, nil
 }
 
-// Get types enclosed in this CType (which is defined at defn_locs)
+// Get types enclosed in this CType
 func (c *conftamer) getChildCTypes(defn_locs []string) ([]golang.TypeInfo, error) {
 	child_ctypes := []golang.TypeInfo{}
 
@@ -310,23 +310,24 @@ func (c *conftamer) FindUnmarshalerSubgraph() {
 	start := time.Now()
 	c.unmarshaler_subgraph = ct.New(c.log)
 
-	// 1. Find "Unmarshalers": Types that implement UnmarshalYAML
-	// TODO(CT) also find all types passed as 2nd arg to yaml.Unmarshal - for any that don't impl Unmarshal, record their params
-	graph.Logf(c.log, slog.LevelInfo, "Finding Unmarshalers: Types implementing UnmarshalYAML")
-	unmarshalImpls, err := c.getInterfaceImpls([]string{c.UnmarshalDefn}, true)
+	// 1. Find "Unmarshalers": Types passed to yaml.Unmarshal()
+	graph.Logf(c.log, slog.LevelInfo, "Finding Unmarshalers: Types passed to yaml.Unmarshal")
+	p, err := locStrToRefParams(c.ctx, c.UnmarshalDefn, c.cli, false)
+	ct.CheckErr(err)
+	unmarshalers, err := c.local_server.FuncArgType(c.ctx, p)
 	ct.CheckErr(err)
 
 	graph.Logf(c.log, slog.LevelInfo, "Finding rest of Unmarshaler Subgraph: Types contained in Unmarshalers")
 	// 2. Find "Unmarshaler Subgraph": Descendants of Unmarshalers, via type definition and interface implementation.
 	// Ignore descendant if AST path includes a function call (Unmarshal won't populate function arg/retval)
-	for _, unmarshalImpl := range unmarshalImpls {
-		graph.Logf(c.log, slog.LevelInfo, "Finding descendants of %v", ct.TypeName(unmarshalImpl.TypeInfo))
+	for _, unmarshaler := range unmarshalers {
+		graph.Logf(c.log, slog.LevelInfo, "Finding descendants of %v", ct.TypeName(unmarshaler.TypeInfo))
 
 		unmarshaler_subgraph_find := NeighFind{children: true, parents: false, iface_impls: true,
 			ignore_unmarshaler_subnodes: false,
 			excluded_ast_edges:          []string{"FuncType.Params", "FuncType.Results"}}
 
-		err = c.addReachableCTypes(unmarshalImpl, unmarshaler_subgraph_find, nil, 0)
+		err = c.addReachableCTypes(unmarshaler, unmarshaler_subgraph_find, nil, 0)
 		ct.CheckErr(err)
 	}
 
