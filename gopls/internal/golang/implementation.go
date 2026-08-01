@@ -110,6 +110,7 @@ const (
 )
 
 type TypeInfo struct {
+	// A location of the type name
 	Loc protocol.Location
 
 	// Info about the type

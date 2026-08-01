@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -43,7 +44,7 @@ import (
 // definitions before uses) to the object denoted by the identifier at
 // the given file/position, searching the entire workspace.
 func References(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range, includeDeclaration bool) ([]protocol.Location, error) {
-	references, _, err := references(ctx, snapshot, fh, rng, includeDeclaration)
+	references, _, err := references(ctx, snapshot, fh, rng, referencesCfg{includeDeclaration: includeDeclaration})
 	if err != nil {
 		return nil, err
 	}
@@ -57,8 +58,19 @@ func References(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, r
 // "Parent" types of the passed-in type, e.g.
 // if passed-in type is used in a struct field: Info on that struct
 func ParentTypes(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range, includeDeclaration bool) ([]TypeInfo, error) {
-	_, parent_types, err := references(ctx, snapshot, fh, rng, includeDeclaration)
+	_, parent_types, err := references(ctx, snapshot, fh, rng, referencesCfg{includeDeclaration: includeDeclaration})
 	return parent_types, err
+}
+
+// Find the types of the 2nd argument to any calls to the passed-in function,
+// for global calls only (i.e. calls in a different package from func defn).
+// If expr is e.g. `&x` where x is a []*T, return T.
+func FuncArgType(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]TypeInfo, error) {
+	_, types, err := references(ctx, snapshot, fh, rng, referencesCfg{funcArgType: true})
+	if err != nil {
+		return nil, err
+	}
+	return types, nil
 }
 
 // A reference describes an identifier that refers to the same
@@ -69,10 +81,15 @@ type reference struct {
 	pkgPath       PackagePath // of declaring package (same for all elements of the slice)
 }
 
+type referencesCfg struct {
+	includeDeclaration bool
+	funcArgType        bool // call FuncArgType
+}
+
 // references returns a list of all references (sorted with
 // definitions before uses) to the object denoted by the identifier at
 // the given file/position, searching the entire workspace.
-func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rng protocol.Range, includeDeclaration bool) ([]reference, []TypeInfo, error) {
+func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rng protocol.Range, cfg referencesCfg) ([]reference, []TypeInfo, error) {
 	ctx, done := event.Start(ctx, "golang.references")
 	defer done()
 
@@ -87,7 +104,7 @@ func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rn
 	if inPackageName {
 		refs, err = packageReferences(ctx, snapshot, f.URI())
 	} else {
-		refs, parent_types, err = ordinaryReferences(ctx, snapshot, f.URI(), rng)
+		refs, parent_types, err = ordinaryReferences(ctx, snapshot, f.URI(), rng, cfg)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -100,11 +117,15 @@ func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rn
 		}
 		return protocol.CompareLocation(x.location, y.location) < 0
 	})
+	sort.Slice(parent_types, func(i, j int) bool {
+		x, y := parent_types[i], parent_types[j]
+		return protocol.CompareLocation(x.Loc, y.Loc) < 0
+	})
 
 	// De-duplicate by location, and optionally remove declarations.
 	out := refs[:0]
 	for _, ref := range refs {
-		if !includeDeclaration && ref.isDeclaration {
+		if !cfg.includeDeclaration && ref.isDeclaration {
 			continue
 		}
 		if len(out) == 0 || out[len(out)-1].location != ref.location {
@@ -112,6 +133,8 @@ func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rn
 		}
 	}
 	refs = out
+
+	parent_types = slices.CompactFunc(parent_types, func(a TypeInfo, b TypeInfo) bool { return a.Loc == b.Loc })
 
 	return refs, parent_types, nil
 }
@@ -223,7 +246,7 @@ func packageReferences(ctx context.Context, snapshot *cache.Snapshot, uri protoc
 }
 
 // ordinaryReferences computes references for all ordinary objects (not package declarations).
-func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, rng protocol.Range) ([]reference, []TypeInfo, error) {
+func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri protocol.DocumentURI, rng protocol.Range, cfg referencesCfg) ([]reference, []TypeInfo, error) {
 	// Strategy: use the reference information computed by the
 	// type checker to find the declaration. First type-check this
 	// package to find the declaration, then type check the
@@ -504,7 +527,12 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 				if err != nil {
 					return err
 				}
-				parent_types, err := parentTypes(ref_pkg, ref_pgf, *ref_cursor)
+				parent_types := []TypeInfo{}
+				if cfg.funcArgType {
+					parent_types, err = callToArgType(snapshot, ref_pkg, ref_pgf, *ref_cursor)
+				} else {
+					parent_types, err = parentTypes(ref_pkg, ref_pgf, *ref_cursor)
+				}
 				if err != nil {
 					return err
 				}
@@ -683,6 +711,31 @@ func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspo
 	return nil
 }
 
+// child_cursor is the identifier of the func name in a call expr.
+// Find the type of the second argument.
+func callToArgType(snapshot *cache.Snapshot,
+	pkg *cache.Package, pgf *parsego.File, child_cursor inspector.Cursor) ([]TypeInfo, error) {
+
+	// 1. Find the variable name
+	var arg inspector.Cursor
+	for parent_cursor := range child_cursor.Enclosing() {
+		node := parent_cursor.Node()
+		if _, ok := node.(*ast.CallExpr); ok {
+			arg = parent_cursor.ChildAt(edge.CallExpr_Args, 1)
+			break
+		}
+	}
+
+	// 2. Find the type of the variable
+	// For pointer args, this gives type of target whether arg expr is &x, or x where x is a pointer
+	types, err := TypeDefinitionInternal(context.Background(), snapshot, pkg, arg)
+	if err != nil {
+		loc := mustLocation(pgf, child_cursor.Node())
+		return nil, fmt.Errorf("no type for node %+v for call at %+v: %v\n", arg.Node(), loc, err)
+	}
+	return types, nil
+}
+
 // child_cursor is an identifier in a reference.
 // If reference is part of a function argument, find the returned types, if any
 func argToRetType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector.Cursor) ([]TypeInfo, error) {
@@ -732,11 +785,6 @@ func argToRetType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector.
 			return true
 		}
 
-		ret_type := ret_typeinfo.Type()
-		if _, ok := ret_type.(*types.Basic); ok {
-			// ignore built-in types
-			return true
-		}
 		ret_type_loc := mustLocation(pgf, ret_node)
 		retvals = append(retvals, TypeInfo{Loc: ret_type_loc, TypeInfo: ret_typeinfo,
 			ASTPath: nil, TypeSource: ArgToRet}) // no AST path from an argument to its ret

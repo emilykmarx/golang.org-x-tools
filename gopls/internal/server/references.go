@@ -62,3 +62,24 @@ func (s *Server) ParentTypes(ctx context.Context, params *protocol.ReferencePara
 	}
 	return nil, nil // empty result
 }
+
+func (s *Server) FuncArgType(ctx context.Context, params *protocol.ReferenceParams) (_ []golang.TypeInfo, rerr error) {
+	recordLatency := telemetry.StartLatencyTimer("references")
+	defer func() {
+		recordLatency(ctx, rerr)
+	}()
+
+	ctx, done := event.Start(ctx, "server.References", label.URI.Of(params.TextDocument.URI))
+	defer done()
+
+	fh, snapshot, release, err := s.session.FileOf(ctx, params.TextDocument.URI)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	switch snapshot.FileKind(fh) {
+	case file.Go:
+		return golang.FuncArgType(ctx, snapshot, fh, params.Range)
+	}
+	return nil, nil // empty result
+}

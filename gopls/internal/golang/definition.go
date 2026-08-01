@@ -274,12 +274,6 @@ func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name p
 			return true
 		}
 
-		child_type := child_typeinfo.Type()
-		if _, ok := child_type.(*types.Basic); ok {
-			// ignore built-in types
-			return true
-		}
-
 		edges := ASTPath(child_cursor, parent_cursor.Parent())
 
 		child_type_loc := mustLocation(pgf, child_node)

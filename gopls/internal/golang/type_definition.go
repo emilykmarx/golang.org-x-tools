@@ -11,6 +11,7 @@ import (
 	"go/types"
 
 	"golang.org/x/tools/go/ast/edge"
+	"golang.org/x/tools/go/ast/inspector"
 	"golang.org/x/tools/gopls/internal/cache"
 	"golang.org/x/tools/gopls/internal/file"
 	"golang.org/x/tools/gopls/internal/protocol"
@@ -32,7 +33,18 @@ func TypeDefinition(ctx context.Context, snapshot *cache.Snapshot, fh file.Handl
 		return nil, err
 	}
 	cur, _, _, _ := astutil.Select(pgf.Cursor(), start, end) // can't fail (start, end are within File)
+	types, err := TypeDefinitionInternal(ctx, snapshot, pkg, cur)
+	if err != nil {
+		return nil, err
+	}
+	locs := []protocol.Location{}
+	for _, typ := range types {
+		locs = append(locs, typ.Loc)
+	}
+	return locs, nil
+}
 
+func TypeDefinitionInternal(ctx context.Context, snapshot *cache.Snapshot, pkg *cache.Package, cur inspector.Cursor) ([]TypeInfo, error) {
 	// Find innermost enclosing expression that has a type.
 	// It needn't be an identifier.
 	var (
@@ -71,14 +83,14 @@ func TypeDefinition(ctx context.Context, snapshot *cache.Snapshot, fh file.Handl
 		return nil, fmt.Errorf("cannot find type name(s) from type %s", t)
 	}
 
-	var locs []protocol.Location
+	types := []TypeInfo{}
 	for _, t := range tnames {
 		loc, err := ObjectLocation(ctx, pkg.FileSet(), snapshot, t)
 		if err != nil {
 			return nil, err
 		}
-		locs = append(locs, loc)
+		types = append(types, TypeInfo{Loc: loc, TypeInfo: t})
 	}
 
-	return locs, nil
+	return types, nil
 }
