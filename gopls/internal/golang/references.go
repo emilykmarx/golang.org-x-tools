@@ -100,11 +100,11 @@ func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rn
 	}
 
 	var refs []reference
-	var parent_types []TypeInfo
+	var raw_parent_types, parent_types []TypeInfo
 	if inPackageName {
 		refs, err = packageReferences(ctx, snapshot, f.URI())
 	} else {
-		refs, parent_types, err = ordinaryReferences(ctx, snapshot, f.URI(), rng, cfg)
+		refs, raw_parent_types, err = ordinaryReferences(ctx, snapshot, f.URI(), rng, cfg)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -117,12 +117,8 @@ func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rn
 		}
 		return protocol.CompareLocation(x.location, y.location) < 0
 	})
-	sort.Slice(parent_types, func(i, j int) bool {
-		x, y := parent_types[i], parent_types[j]
-		return protocol.CompareLocation(x.Loc, y.Loc) < 0
-	})
 
-	// De-duplicate by location, and optionally remove declarations.
+	// De-duplicate refs by location, and optionally remove declarations.
 	out := refs[:0]
 	for _, ref := range refs {
 		if !cfg.includeDeclaration && ref.isDeclaration {
@@ -133,6 +129,26 @@ func references(ctx context.Context, snapshot *cache.Snapshot, f file.Handle, rn
 		}
 	}
 	refs = out
+
+	// De-duplicate parent types by location, combining unmarshal locations
+	for _, parent := range raw_parent_types {
+		unmarshal_locs := []protocol.Location{}
+		for _, other_parent := range raw_parent_types {
+			if other_parent.Loc == parent.Loc {
+				// each one currently only has one UnmarshalLoc
+				unmarshal_loc := other_parent.UnmarshalLocs[0]
+				if !slices.ContainsFunc(unmarshal_locs, func(u protocol.Location) bool { return protocol.CompareLocation(u, unmarshal_loc) == 0 }) {
+					unmarshal_locs = append(unmarshal_locs, other_parent.UnmarshalLocs[0])
+				}
+			}
+		}
+		parent.UnmarshalLocs = unmarshal_locs
+		parent_types = append(parent_types, parent)
+	}
+	sort.Slice(parent_types, func(i, j int) bool {
+		x, y := parent_types[i], parent_types[j]
+		return protocol.CompareLocation(x.Loc, y.Loc) < 0
+	})
 
 	parent_types = slices.CompactFunc(parent_types, func(a TypeInfo, b TypeInfo) bool { return a.Loc == b.Loc })
 
@@ -529,7 +545,7 @@ func ordinaryReferences(ctx context.Context, snapshot *cache.Snapshot, uri proto
 				}
 				parent_types := []TypeInfo{}
 				if cfg.funcArgType {
-					parent_types, err = callToArgType(snapshot, ref_pkg, ref_pgf, *ref_cursor)
+					parent_types = callToArgType(snapshot, ref_pkg, ref_pgf, *ref_cursor)
 				} else {
 					parent_types, err = parentTypes(ref_pkg, ref_pgf, *ref_cursor)
 				}
@@ -713,8 +729,9 @@ func localReferences(pkg *cache.Package, targets map[types.Object]bool, correspo
 
 // child_cursor is the identifier of the func name in a call expr.
 // Find the type of the second argument.
+// If can't find type, put error in TypeInfo for caller to handle
 func callToArgType(snapshot *cache.Snapshot,
-	pkg *cache.Package, pgf *parsego.File, child_cursor inspector.Cursor) ([]TypeInfo, error) {
+	pkg *cache.Package, pgf *parsego.File, child_cursor inspector.Cursor) []TypeInfo {
 
 	// 1. Find the variable name
 	var arg inspector.Cursor
@@ -727,13 +744,22 @@ func callToArgType(snapshot *cache.Snapshot,
 	}
 
 	// 2. Find the type of the variable
+	call_loc := mustLocation(pgf, child_cursor.Node())
 	// For pointer args, this gives type of target whether arg expr is &x, or x where x is a pointer
-	types, err := TypeDefinitionInternal(context.Background(), snapshot, pkg, arg)
-	if err != nil {
-		loc := mustLocation(pgf, child_cursor.Node())
-		return nil, fmt.Errorf("no type for node %+v for call at %+v: %v\n", arg.Node(), loc, err)
+	raw_type, err := TypeDefinitionInternal(context.Background(), snapshot, pkg, arg)
+	ret := []TypeInfo{}
+	if err == nil {
+		for _, typ := range raw_type {
+			// Unsure if we should do anything special if there are multiple
+			typ.TypeSource = Unmarshaler
+			typ.UnmarshalLocs = []protocol.Location{call_loc}
+			ret = append(ret, typ)
+		}
+	} else {
+		// Record error and location of function call
+		ret = append(ret, TypeInfo{TypeSource: TypeSourceError, UnmarshalLocs: []protocol.Location{call_loc}})
 	}
-	return types, nil
+	return ret
 }
 
 // child_cursor is an identifier in a reference.

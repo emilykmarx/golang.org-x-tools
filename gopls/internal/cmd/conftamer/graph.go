@@ -211,6 +211,7 @@ type NeighInfo struct {
 // If found via enclosure, combine with the corresponding existing node if any.
 // Return whether existed
 func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_info *NeighInfo) (TypeNameExistence, error) {
+	// TODO(CT) currently we don't combine any Unmarshalers (since no neigh_info) - should we do a pass to check?
 	if (typ.TypeSource == golang.Enclosed || typ.TypeSource == golang.Enclosing) && neigh_info != nil {
 		// Found via a neighbor we may need to combine with
 		combine := len(neigh_info.Typ.ASTPath) == 0 || slices.Compare(neigh_info.Typ.ASTPath, []string{"SelectorExpr.Sel"}) == 0

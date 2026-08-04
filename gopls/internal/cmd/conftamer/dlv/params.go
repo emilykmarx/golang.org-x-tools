@@ -18,7 +18,7 @@ import (
 // Get all param keys the given Unmarshaler Subgraph node has access to
 // PERF cache the results for other method calls with same receiver (or precompute and persist with graph)
 func UnmarshalerIngressParams(args ClientInfo, ingress_hash ct.CTypeHash) []string {
-	// XXX Ignore types only defined in tests to reduce fake keys
+	// XXX(CT) Ignore types only defined in tests to reduce fake keys
 	// (need conftamer to record the defn loc in TypeInfo, which it currently doesn't)
 
 	// 1. Get key prefixes for all paths from a root to the ingress
@@ -89,7 +89,7 @@ func UnmarshalerIngresses(args ClientInfo, recvr_hash ct.CTypeHash) []ct.CTypeHa
 // Get the param keys the CType has access to
 func ParamKeys(args ClientInfo, recvr_type string, us_ok bool) []string {
 	recvr_hash, in_us := args.unmarshaler_subgraph.GetHash(ct.FullTypeName(recvr_type))
-	// XXX If it's in the US, handle that.
+	// XXX(CT) If it's in the US, handle that.
 	if in_us && !us_ok {
 		fmt.Printf("Receiver %v is in Unmarshaler Subgraph - not handled yet\n", recvr_type)
 		return nil
@@ -101,7 +101,7 @@ func ParamKeys(args ClientInfo, recvr_type string, us_ok bool) []string {
 		panic(fmt.Errorf("Receiver %v not in Accessors", recvr_type))
 	}
 	ingresses := UnmarshalerIngresses(args, recvr_hash)
-	fmt.Printf("%v INGRESSES: %v\n", recvr_type, ingresses) // XXX this is helpful enough to be in the csv
+	fmt.Printf("%v INGRESSES: %v\n", recvr_type, ingresses) // XXX(CT) this is helpful enough to be in the csv
 	param_keys := []string{}
 
 	for _, ingress_hash := range ingresses {

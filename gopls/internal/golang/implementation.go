@@ -103,10 +103,12 @@ const (
 type TypeSource string
 
 const (
-	Enclosed    TypeSource = "enclosed"
-	Enclosing   TypeSource = "enclosing"
-	ArgToRet    TypeSource = "function arg => ret"
-	Implementer TypeSource = "implementation"
+	Enclosed        TypeSource = "enclosed"
+	Enclosing       TypeSource = "enclosing"
+	ArgToRet        TypeSource = "function arg => ret"
+	Implementer     TypeSource = "implementation"
+	Unmarshaler     TypeSource = "passed as arg to a function (generally Unmarshal)"
+	TypeSourceError TypeSource = "type not found"
 )
 
 type TypeInfo struct {
@@ -120,6 +122,9 @@ type TypeInfo struct {
 
 	// How this type was found
 	TypeSource TypeSource
+
+	// For Unmarshalers: the location(s) of the corresponding Unmarshal call (not of the type definition, which is in Loc)
+	UnmarshalLocs []protocol.Location
 }
 
 func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]TypeInfo, error) {

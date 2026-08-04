@@ -142,8 +142,9 @@ type NeighFind struct {
 // Add all CTypes reachable from this one via neigh_find, stopping on reaching one we've already found
 // neigh_info is info about the neighbor we found this obj via (if any)
 func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind, neigh_info *ct.NeighInfo, depth int) error {
-	// Ignore types not declared in package scope
-	if typ.TypeInfo.Parent() == nil || typ.TypeInfo.Parent().Parent() != types.Universe {
+	// Ignore types not declared in package scope, and basic types
+	_, basic_type := typ.TypeInfo.Type().(*types.Basic)
+	if typ.TypeInfo.Parent() == nil || typ.TypeInfo.Parent().Parent() != types.Universe || basic_type {
 		// e.g. function-local types, or `error`
 		// Can cause TypeName to segfault - don't call it here
 		graph.Logf(c.log, slog.LevelDebug, "Ignoring non-package-scope type %v", ct.TypeNameSafe(typ.TypeInfo))
@@ -151,6 +152,12 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 	}
 
 	cur_name := ct.TypeName(typ.TypeInfo)
+
+	// Ignore Logger for now...TODO(CT) check if ignoring anything without a struct tag works well
+	if cur_name == "github.com/grafana/grafana/pkg/infra/log.Logger" {
+		graph.Logf(c.log, slog.LevelWarn, "Ignoring infra/log.Logger")
+		return nil
+	}
 
 	if neigh_info != nil {
 		// Ignore type if AST path to it has an excluded edge
@@ -306,6 +313,33 @@ func (c *conftamer) LogGraphStats(start time.Time) {
 	graph.Logf(c.log, slog.LevelInfo, "%v leaves", len(leaves))
 }
 
+func (c *conftamer) locInTest(loc protocol.Location, log bool) bool {
+	// Assume if Unmarshal call is in a file whose path or filename contains "test", the call is during a test
+	if strings.Contains(loc.URI.Path(), "test") {
+		if strings.HasSuffix(loc.URI.Base(), "_test.go") {
+			// Definitely a test file
+		} else {
+			// Probably a test file
+			if log {
+				graph.Logf(c.log, slog.LevelInfo, "Ignoring Unmarshal call assumed to be in test: 0-indexed call loc %v", loc)
+			}
+		}
+		return true
+	}
+	// Not a test file
+	return false
+}
+
+// Type was only passed to unmarshal during tests
+func (c *conftamer) testOnlyUnmarshal(unmarshaler golang.TypeInfo) bool {
+	for _, unmarshal_loc := range unmarshaler.UnmarshalLocs {
+		if !c.locInTest(unmarshal_loc, true) {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *conftamer) FindUnmarshalerSubgraph() {
 	start := time.Now()
 	c.unmarshaler_subgraph = ct.New(c.log)
@@ -318,17 +352,31 @@ func (c *conftamer) FindUnmarshalerSubgraph() {
 	ct.CheckErr(err)
 
 	graph.Logf(c.log, slog.LevelInfo, "Finding rest of Unmarshaler Subgraph: Types contained in Unmarshalers")
+
 	// 2. Find "Unmarshaler Subgraph": Descendants of Unmarshalers, via type definition and interface implementation.
-	// Ignore descendant if AST path includes a function call (Unmarshal won't populate function arg/retval)
 	for _, unmarshaler := range unmarshalers {
-		graph.Logf(c.log, slog.LevelInfo, "Finding descendants of %v", ct.TypeName(unmarshaler.TypeInfo))
+		if c.testOnlyUnmarshal(unmarshaler) {
+			// Unmarshal was only called on this type during tests => ignore
+		} else if unmarshaler.TypeSource == golang.TypeSourceError {
+			// Failed to find type that Unmarshal was called on outside tests => warn about all non-test calls
+			// (all calls where type not found are grouped together)
+			for _, unmarshal_loc := range unmarshaler.UnmarshalLocs {
+				if !c.locInTest(unmarshal_loc, false) {
+					graph.Logf(c.log, slog.LevelWarn, "Type passed to Unmarshal call not found: 0-indexed call loc %v", unmarshal_loc)
+				}
+			}
+		} else {
+			graph.Logf(c.log, slog.LevelInfo, "Finding descendants of Unmarshaler %v (0-indexed call locs %v)",
+				ct.TypeName(unmarshaler.TypeInfo), unmarshaler.UnmarshalLocs)
 
-		unmarshaler_subgraph_find := NeighFind{children: true, parents: false, iface_impls: true,
-			ignore_unmarshaler_subnodes: false,
-			excluded_ast_edges:          []string{"FuncType.Params", "FuncType.Results"}}
+			unmarshaler_subgraph_find := NeighFind{children: true, parents: false, iface_impls: true,
+				ignore_unmarshaler_subnodes: false,
+				// Ignore descendant if AST path includes a function call (Unmarshal won't populate function arg/retval)
+				excluded_ast_edges: []string{"FuncType.Params", "FuncType.Results"}}
 
-		err = c.addReachableCTypes(unmarshaler, unmarshaler_subgraph_find, nil, 0)
-		ct.CheckErr(err)
+			err = c.addReachableCTypes(unmarshaler, unmarshaler_subgraph_find, nil, 0)
+			ct.CheckErr(err)
+		}
 	}
 
 	c.LogGraphStats(start)

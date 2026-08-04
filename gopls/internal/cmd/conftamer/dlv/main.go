@@ -278,6 +278,7 @@ func RunDlvClient(dlv_endpoint string, info any) error {
 		}
 	}
 
+	// TODO (CT) flag test failures
 	fmt.Printf("Target exited with status %v\n", state.ExitStatus)
 
 	client.Detach(false)
