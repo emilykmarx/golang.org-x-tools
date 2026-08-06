@@ -64,6 +64,7 @@ type ClientInfo struct {
 	test_name            string
 	msg_send_funcs       []string
 	msg_taint            parsetests.AllTaint
+	goroutine_parents    map[int64][]goroutineInfo // child goroutine ID -> parent stack frames
 }
 
 func Run(dlv_port int, module_prefix string, test_pkg string, test_name_arg string,
@@ -89,7 +90,8 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name_arg stri
 	msg_taints := []parsetests.AllTaint{}
 	client_info := ClientInfo{module_prefix: module_prefix, unmarshaler_subgraph: unmarshaler_subgraph,
 		accessors: accessors, accessor_leaves: accessor_leaves,
-		methods: methods, test_pkg: test_pkg, msg_send_funcs: msg_send_funcs, msg_taint: make(parsetests.AllTaint)}
+		methods: methods, test_pkg: test_pkg, msg_send_funcs: msg_send_funcs, msg_taint: make(parsetests.AllTaint),
+		goroutine_parents: make(map[int64][]goroutineInfo)}
 
 	if dump_params != "" {
 		// 3. Just dump the params
@@ -255,6 +257,16 @@ func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoi
 	}
 }
 
+const (
+	testEntryBreakpointName    = "testEntryFunc"
+	newGoroutineBreakpointName = "newGoroutine"
+)
+
+type goroutineInfo struct {
+	ID          int64
+	stackFrames []api.Stackframe
+}
+
 func RunDlvClient(dlv_endpoint string, info any) error {
 	fmt.Printf("Connecting to dlv on %v\n", dlv_endpoint)
 
@@ -262,7 +274,24 @@ func RunDlvClient(dlv_endpoint string, info any) error {
 
 	client := rpc2.NewClient(dlv_endpoint)
 	SetMessageSendBreakpoints(client, args.msg_send_funcs)
-	// TODO(Patrick) set goroutine breakpoints here (with a name so they can be checked easily below)
+	funcs, err := client.ListFunctions(args.test_name, 0)
+	if err != nil {
+		return fmt.Errorf("searching for function %v: %w", args.test_name, err)
+	}
+
+	switch len(funcs) {
+	case 0:
+		return fmt.Errorf("function %v not found", args.test_name)
+	case 1:
+		_, err := client.CreateBreakpoint(&api.Breakpoint{
+			Name: testEntryBreakpointName, FunctionName: funcs[0],
+		})
+		if err != nil {
+			return fmt.Errorf("creating test-entry breakpoint: %w", err)
+		}
+	default:
+		return fmt.Errorf("more than one function %v found: %v", args.test_name, funcs)
+	}
 
 	state := <-client.Continue()
 
@@ -273,9 +302,114 @@ func RunDlvClient(dlv_endpoint string, info any) error {
 
 		for _, thread := range state.Threads {
 			hit_bp := thread.Breakpoint
-			if hit_bp != nil {
+			if hit_bp == nil {
+				continue
+			}
+			switch hit_bp.Name {
+			case testEntryBreakpointName:
+				_, err := client.CreateBreakpoint(&api.Breakpoint{
+					Name:         newGoroutineBreakpointName,
+					FunctionName: "runtime.newproc",
+				})
+				if err != nil {
+					return fmt.Errorf("creating goroutine breakpoint: %w", err)
+				}
+
+				if _, err := client.ClearBreakpointByName(testEntryBreakpointName); err != nil {
+					return fmt.Errorf("clearing test-entry breakpoint: %w", err)
+				}
+
+			case newGoroutineBreakpointName:
+				// capture list of user goroutines
+				filter := api.ListGoroutinesFilter{Kind: api.GoroutineUser}
+				before, _, _, _, err := client.ListGoroutinesWithFilter(
+					0, 0, []api.ListGoroutinesFilter{filter}, nil, nil,
+				)
+				if err != nil {
+					return fmt.Errorf("getting list of user goroutines: %w", err)
+				}
+
+				// skip if current goroutine is runtime goroutine
+				var isUser bool
+				for _, g := range before {
+					if g.ID == thread.GoroutineID {
+						isUser = true
+					}
+				}
+				if !isUser {
+					continue
+				}
+
+				// get stack trace
+				frames, err := client.Stacktrace(thread.GoroutineID, 10, 0, 0, nil)
+				if err != nil {
+					return fmt.Errorf(
+						"getting stacktrace for goroutine ID %v: %w", thread.GoroutineID, err,
+					)
+				}
+
+				// stepout
+				if _, err := client.SwitchGoroutine(thread.GoroutineID); err != nil {
+					return fmt.Errorf("switching to goroutine %d: %w", thread.GoroutineID, err)
+				}
+				state, err = client.StepOut()
+				if err != nil {
+					return fmt.Errorf("error stepping out: %w", err)
+				}
+
+				// if stepout was interrupted by another breakpoint, ignore the new bp for now.
+				for state.NextInProgress {
+					fmt.Println("NextInProgress")
+					for next := range client.DirectionCongruentContinue() {
+						if next.Err != nil {
+							return fmt.Errorf("continuing step-out: %w", next.Err)
+						}
+						state = next
+					}
+				}
+
+				// get new list of user goroutines
+				after, _, _, _, err := client.ListGoroutinesWithFilter(
+					0, 0, []api.ListGoroutinesFilter{filter}, nil, nil,
+				)
+				if err != nil {
+					return fmt.Errorf("getting list of user goroutines: %w", err)
+				}
+
+				// diff old and new list of user goroutines and find the new one
+				beforeIDs := make(map[int64]bool)
+				for _, g := range before {
+					beforeIDs[g.ID] = true
+				}
+
+				var newGoroutines []int64
+				for _, g := range after {
+					if !beforeIDs[g.ID] {
+						newGoroutines = append(newGoroutines, g.ID)
+					}
+				}
+
+				// FIXME: clean up print debugging
+				for _, v := range newGoroutines {
+					fmt.Printf("parent goroutine: %d\n", thread.GoroutineID)
+					fmt.Printf("new goroutine: %d\n", v)
+					for _, frame := range frames {
+						fmt.Printf("%s at %s:%d\n",
+							frame.Function.Name(),
+							frame.File,
+							frame.Line,
+						)
+					}
+
+					// Save Parent ID/stack + Child ID
+					info.(ClientInfo).goroutine_parents[v] = append(
+						info.(ClientInfo).goroutine_parents[v],
+						goroutineInfo{ID: thread.GoroutineID, stackFrames: frames},
+					)
+				}
+
+			default:
 				HandleMessageSend(client, args, hit_bp, thread.GoroutineID)
-				// TODO(Patrick) check for and handle goroutine breakpoints here
 			}
 		}
 	}
