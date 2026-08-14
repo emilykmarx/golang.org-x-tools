@@ -80,19 +80,10 @@ func ImplementationMoreInfo(ctx context.Context, snapshot *cache.Snapshot, f fil
 	if err != nil {
 		return nil, err
 	}
-	slices.SortFunc(impls, func(a TypeInfo, b TypeInfo) int { return protocol.CompareLocation(a.Loc, b.Loc) })
 	// de-duplicate by type and location: if type U implements it,
 	// type T that embeds U will be returned with the same location.
 	// Which is correct, since T inherits U's implementation.
-	impls = slices.CompactFunc(impls, func(a TypeInfo, b TypeInfo) bool {
-		// Don't compare TypeInfo directly - has pointers
-		same_type := (a.TypeInfo == nil && b.TypeInfo == nil) ||
-			(a.TypeInfo.Pkg().Path()+"."+a.TypeInfo.Name() ==
-				b.TypeInfo.Pkg().Path()+"."+b.TypeInfo.Name())
-
-		return (a.Loc == b.Loc) && same_type
-	})
-	return impls, nil
+	return DedupTypeInfos(impls), nil
 }
 
 // Prefix for fields in TypeInfo.ASTPath
@@ -125,6 +116,21 @@ type TypeInfo struct {
 
 	// For Unmarshalers: the location(s) of the corresponding Unmarshal call (not of the type definition, which is in Loc)
 	UnmarshalLocs []protocol.Location
+}
+
+// de-duplicate by type and location
+func DedupTypeInfos(orig []TypeInfo) []TypeInfo {
+	slices.SortFunc(orig, func(a TypeInfo, b TypeInfo) int { return protocol.CompareLocation(a.Loc, b.Loc) })
+	orig = slices.CompactFunc(orig, func(a TypeInfo, b TypeInfo) bool {
+		// Don't compare TypeInfo directly - has pointers
+		same_type := (a.TypeInfo == nil && b.TypeInfo == nil) ||
+			(a.TypeInfo.Pkg().Path()+"."+a.TypeInfo.Name() ==
+				b.TypeInfo.Pkg().Path()+"."+b.TypeInfo.Name())
+
+		return (a.Loc == b.Loc) && same_type
+	})
+
+	return orig
 }
 
 func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]TypeInfo, error) {

@@ -39,3 +39,27 @@ func (s *Server) Symbol(ctx context.Context, params *protocol.WorkspaceSymbolPar
 	}
 	return golang.WorkspaceSymbols(ctx, snapshots, params.Query, golang.WorkspaceSymbolsOptions{Matcher: matcher, Style: style})
 }
+
+func (s *Server) TaggedTypes(ctx context.Context) (_ []golang.TypeInfo, rerr error) {
+	recordLatency := telemetry.StartLatencyTimer("symbol")
+	defer func() {
+		recordLatency(ctx, rerr)
+	}()
+
+	ctx, done := event.Start(ctx, "server.TaggedTypes")
+	defer done()
+
+	views := s.session.Views()
+
+	var snapshots []*cache.Snapshot
+	for _, v := range views {
+		snapshot, release, err := v.Snapshot()
+		if err != nil {
+			continue // snapshot is shutting down
+		}
+		// If err is non-nil, the snapshot is shutting down. Skip it.
+		defer release()
+		snapshots = append(snapshots, snapshot)
+	}
+	return golang.TaggedTypes(ctx, snapshots)
+}

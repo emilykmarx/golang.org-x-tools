@@ -8,6 +8,8 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"go/ast"
+	"go/types"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -21,6 +23,7 @@ import (
 	"golang.org/x/tools/gopls/internal/fuzzy"
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/settings"
+	"golang.org/x/tools/internal/astutil"
 	"golang.org/x/tools/internal/event"
 )
 
@@ -81,6 +84,72 @@ func WorkspaceSymbols(ctx context.Context, snapshots []*cache.Snapshot, query st
 	}
 
 	return collectSymbols(ctx, snapshots, query, opts)
+}
+
+// Get all types in the workspace packages that have any struct tags
+func TaggedTypes(ctx context.Context, snapshots []*cache.Snapshot) ([]TypeInfo, error) {
+	tagged_types := []TypeInfo{}
+
+	for _, snapshot := range snapshots {
+		workspacePackages := snapshot.WorkspacePackages()
+
+		for pkgID := range workspacePackages.All() {
+			// This is just pkgs in the workspace itself (i.e. not the pkgs outside the workspace they import)
+			// May not need to TypeCheck here - if so, could speed this up
+			pkgs, err := snapshot.TypeCheck(ctx, pkgID)
+			if err != nil {
+				return nil, err
+			}
+			for _, pkg := range pkgs {
+				info := pkg.TypesInfo()
+				pkgTypes := info.Types
+				for node, typ := range pkgTypes {
+					structinfo, is_struct := node.(*ast.StructType)
+					if is_struct {
+						styp, ok := typ.Type.(*types.Struct)
+						if !ok {
+							return nil, fmt.Errorf("node %+v is a struct but not the corresponding type?", structinfo)
+						}
+						is_tagged := false
+						for i := 0; i < styp.NumFields(); i++ {
+							tag := styp.Tag(i)
+							if tag != "" {
+								is_tagged = true
+								break
+							}
+						}
+
+						if is_tagged {
+							// typeToObjects returns nothing for typ.Type => get the type from the node
+							pgf, err := pkg.FileEnclosing(node.Pos())
+							if err != nil {
+								return nil, err
+							}
+							cur, _, _, err := astutil.Select(pgf.Cursor(), node.Pos(), node.End())
+							if err != nil {
+								return nil, err
+							}
+							typeInfo, err := enclosingType(pkg, pgf, cur)
+							if err != nil {
+								return nil, err
+							}
+							if typeInfo == nil {
+								loc := mustLocation(pgf, node)
+								// e.g. anonymous struct
+								fmt.Printf("nil typeInfo for node at %+v\n", loc)
+								continue
+							}
+
+							tagged_types = append(tagged_types, *typeInfo)
+						}
+					}
+				}
+			}
+		}
+	}
+	tagged_types = DedupTypeInfos(tagged_types)
+	fmt.Printf("TAGGED TYPES %+v\n", len(tagged_types))
+	return tagged_types, nil
 }
 
 // A matcherFunc returns the index and score of a symbol match.

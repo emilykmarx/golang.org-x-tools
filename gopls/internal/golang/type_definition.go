@@ -75,6 +75,11 @@ func TypeDefinitionInternal(ctx context.Context, snapshot *cache.Snapshot, pkg *
 			break
 		}
 	}
+
+	return TypeToTypeInfo(ctx, t, snapshot, pkg)
+}
+
+func TypeToTypeInfo(ctx context.Context, t types.Type, snapshot *cache.Snapshot, pkg *cache.Package) ([]TypeInfo, error) {
 	if t == nil {
 		return nil, fmt.Errorf("no enclosing expression has a type")
 	}
