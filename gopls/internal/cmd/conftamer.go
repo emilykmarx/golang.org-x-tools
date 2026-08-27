@@ -23,17 +23,22 @@ import (
 
 // conftamer implements the conftamer verb for gopls
 type conftamer struct {
-	app                     *Application
-	ctx                     context.Context
-	cli                     *client
-	local_server            *server.Server
-	unmarshaler_subgraph    *ct.CTypes
-	accessors               *ct.CTypes
-	log                     *slog.Logger
-	UnmarshalDefn           string `flag:"u-defn,unmarshal_defn" help:"Location of the unmarshal interface definition (optional - defaults to DEFAULT_UNMARSHAL_DEFN)"`
-	ModulePrefix            string `flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print and possibly ignore unmarshaler subgraph nodes)"`
-	UnmarshalerSubgraphFile string `flag:"u-out,unmarshaler_subgraph" help:"Unmarshaler subgraph outfile (mandatory)"`
-	AccessorsFile           string `flag:"a-out,accessors" help:"Accessor subgraph outfile (optional - will find accessors iff passed)"`
+	app                  *Application
+	ctx                  context.Context
+	cli                  *client
+	local_server         *server.Server
+	unmarshaler_subgraph *ct.CTypes
+	accessors            *ct.CTypes
+	log                  *slog.Logger
+
+	// Flags about module code
+	ModulePrefix       string `flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print and possibly ignore unmarshaler subgraph nodes)"`
+	UnmarshalFuncDefn  string `flag:"u-fn,unmarshal_fn" help:"Location of the unmarshal function definition (optional - if passed, will find unmarshalers passed to unmarshal calls)"`
+	UnmarshalIfaceDefn string `flag:"u-iface,unmarshal_iface" help:"Location of the unmarshal interface definition (optional - if passed, will find unmarshalers that override unmarshal)"`
+
+	// Flags customizing the tool
+	OutputPath          string `flag:"out,output_path" help:"Output path for graph files"`
+	ShouldFindAccessors bool   `flag:"a,find_accessors" help:"Whether to find the accessors too (not just the unmarshaler subgraph)"`
 }
 
 func (c *conftamer) graph() *ct.CTypes {
@@ -46,11 +51,6 @@ func (c *conftamer) graph() *ct.CTypes {
 	return g
 }
 
-const (
-	// TODO(CT) find this properly
-	DEFAULT_UNMARSHAL_DEFN = "/home/emily/go/pkg/mod/gopkg.in/yaml.v2@v2.4.0/yaml.go:88:6"
-)
-
 func (c *conftamer) Name() string      { return "conftamer" }
 func (c *conftamer) Parent() string    { return c.app.Name() }
 func (c *conftamer) Usage() string     { return "[conftamer-flags]" }
@@ -58,12 +58,10 @@ func (c *conftamer) ShortHelp() string { return "Finds the CTypes graph" }
 func (c *conftamer) DetailedHelp(f *flag.FlagSet) {
 	fmt.Fprint(f.Output(), `
 	Find Unmarshaler Subgraph and/or Accessors.
+	Strategy to find US defaults to struct tags, but if u-fn or u-iface is passed, will use that.
 
 	conftamer-flags:`)
 	printFlagDefaults(f)
-	fmt.Fprintf(f.Output(), `
-	Default: %[1]v
-`, DEFAULT_UNMARSHAL_DEFN) // unsure how to put this in the struct tag for the flag
 }
 
 // Get types that enclose this CType (which is defined at defn_locs)
@@ -330,8 +328,13 @@ func (c *conftamer) locInTest(loc protocol.Location, log bool) bool {
 	return false
 }
 
-// Type was only passed to unmarshal during tests
+// Type was only passed to Unmarshal() during tests, if type was found that way
 func (c *conftamer) testOnlyUnmarshal(unmarshaler golang.TypeInfo) bool {
+	if len(unmarshaler.UnmarshalLocs) == 0 {
+		// Type not found via call to Unmarshal()
+		return false
+	}
+
 	for _, unmarshal_loc := range unmarshaler.UnmarshalLocs {
 		if !c.locInTest(unmarshal_loc, true) {
 			return false
@@ -340,20 +343,35 @@ func (c *conftamer) testOnlyUnmarshal(unmarshaler golang.TypeInfo) bool {
 	return true
 }
 
+// Find Unmarshalers and their descendants
 func (c *conftamer) FindUnmarshalerSubgraph() {
 	start := time.Now()
 	c.unmarshaler_subgraph = ct.New(c.log)
 
-	// 1. Find "Unmarshalers": Types passed to yaml.Unmarshal()
-	graph.Logf(c.log, slog.LevelInfo, "Finding Unmarshalers: Types passed to yaml.Unmarshal")
-	p, err := locStrToRefParams(c.ctx, c.UnmarshalDefn, c.cli, false)
-	ct.CheckErr(err)
-	unmarshalers, err := c.local_server.FuncArgType(c.ctx, p)
-	ct.CheckErr(err)
+	// 1. Find "Unmarshalers" by configured strategy
+	graph.Logf(c.log, slog.LevelInfo, "Finding Unmarshalers: Types likely populated by Unmarshal")
 
-	graph.Logf(c.log, slog.LevelInfo, "Finding rest of Unmarshaler Subgraph: Types contained in Unmarshalers")
+	unmarshalers := []golang.TypeInfo{}
+	var err error
+
+	if c.UnmarshalFuncDefn != "" {
+		// Strategy: Type is passed to an Unmarshal call, and can be inferred from the calling line
+		p, err := locStrToRefParams(c.ctx, c.UnmarshalFuncDefn, c.cli, false)
+		ct.CheckErr(err)
+		unmarshalers, err = c.local_server.FuncArgType(c.ctx, p)
+		ct.CheckErr(err)
+	} else if c.UnmarshalIfaceDefn != "" {
+		// Strategy: Type implements the Unmarshal interface
+		unmarshalers, err = c.getInterfaceImpls([]string{c.UnmarshalIfaceDefn}, true)
+		ct.CheckErr(err)
+	} else {
+		// Strategy: Type has struct tags
+		unmarshalers, err = c.local_server.TaggedTypes(c.ctx)
+		ct.CheckErr(err)
+	}
 
 	// 2. Find "Unmarshaler Subgraph": Descendants of Unmarshalers, via type definition and interface implementation.
+	graph.Logf(c.log, slog.LevelInfo, "Finding rest of Unmarshaler Subgraph: Types contained in Unmarshalers")
 	for _, unmarshaler := range unmarshalers {
 		if c.testOnlyUnmarshal(unmarshaler) {
 			// Unmarshal was only called on this type during tests => ignore
@@ -381,7 +399,7 @@ func (c *conftamer) FindUnmarshalerSubgraph() {
 
 	c.LogGraphStats(start)
 	graph.Logf(c.log, slog.LevelInfo, "Serializing")
-	c.graph().Serialize(c.UnmarshalerSubgraphFile, c.ModulePrefix, true)
+	c.graph().Serialize(filepath.Join(c.OutputPath, "unmarshaler_subgraph.text"), c.ModulePrefix, true)
 	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
 }
 
@@ -474,7 +492,7 @@ func (c *conftamer) FindAccessors() {
 
 	c.LogGraphStats(start)
 	graph.Logf(c.log, slog.LevelInfo, "Serializing")
-	c.graph().Serialize(c.AccessorsFile, c.ModulePrefix, true)
+	c.graph().Serialize(filepath.Join(c.OutputPath, "accessors.text"), c.ModulePrefix, true)
 	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
 
 	c.CheckAccessors(unmarshaler_subnodes)
@@ -484,8 +502,8 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 	if len(args) != 0 {
 		return tool.CommandLineErrorf("conftamer expects no arguments (but flags are ok)")
 	}
-	if c.UnmarshalDefn == "" {
-		c.UnmarshalDefn = DEFAULT_UNMARSHAL_DEFN
+	if c.UnmarshalFuncDefn != "" && c.UnmarshalIfaceDefn != "" {
+		return tool.CommandLineErrorf("Specify neither or one flag about unmarshal")
 	}
 	if c.ModulePrefix == "" {
 		if _, trailing_slash := strings.CutSuffix(c.ModulePrefix, "/"); trailing_slash {
@@ -495,8 +513,8 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		}
 		graph.Logf(c.log, slog.LevelWarn, "Module prefix not set")
 	}
-	if c.UnmarshalerSubgraphFile == "" {
-		return tool.CommandLineErrorf("unmarshaler subgraph not set")
+	if c.OutputPath == "" {
+		return tool.CommandLineErrorf("output dir not set")
 	}
 
 	cli, _, err := c.app.connect(ctx)
@@ -520,7 +538,7 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 		}}))
 
 	c.FindUnmarshalerSubgraph()
-	if c.AccessorsFile != "" {
+	if c.ShouldFindAccessors {
 		c.FindAccessors()
 	}
 

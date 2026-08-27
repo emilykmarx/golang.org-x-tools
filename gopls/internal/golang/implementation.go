@@ -98,7 +98,8 @@ const (
 	Enclosing       TypeSource = "enclosing"
 	ArgToRet        TypeSource = "function arg => ret"
 	Implementer     TypeSource = "implementation"
-	Unmarshaler     TypeSource = "passed as arg to a function (generally Unmarshal)"
+	UnmarshalArg    TypeSource = "passed as arg to a function (generally Unmarshal)"
+	StructTags      TypeSource = "has struct tags"
 	TypeSourceError TypeSource = "type not found"
 )
 
@@ -118,19 +119,20 @@ type TypeInfo struct {
 	UnmarshalLocs []protocol.Location
 }
 
-// de-duplicate by type and location
+// Compare by fully-qualified name
+func CompareTypeInfos(a TypeInfo, b TypeInfo) int {
+	// Don't compare TypeInfo directly - has pointers
+	return strings.Compare(a.TypeInfo.Pkg().Path()+"."+a.TypeInfo.Name(),
+		b.TypeInfo.Pkg().Path()+"."+b.TypeInfo.Name())
+}
+
+// de-duplicate by type
 func DedupTypeInfos(orig []TypeInfo) []TypeInfo {
-	slices.SortFunc(orig, func(a TypeInfo, b TypeInfo) int { return protocol.CompareLocation(a.Loc, b.Loc) })
-	orig = slices.CompactFunc(orig, func(a TypeInfo, b TypeInfo) bool {
-		// Don't compare TypeInfo directly - has pointers
-		same_type := (a.TypeInfo == nil && b.TypeInfo == nil) ||
-			(a.TypeInfo.Pkg().Path()+"."+a.TypeInfo.Name() ==
-				b.TypeInfo.Pkg().Path()+"."+b.TypeInfo.Name())
-
-		return (a.Loc == b.Loc) && same_type
+	slices.SortFunc(orig, CompareTypeInfos)
+	return slices.CompactFunc(orig, func(a TypeInfo, b TypeInfo) bool {
+		cmp := CompareTypeInfos(a, b)
+		return cmp == 0
 	})
-
-	return orig
 }
 
 func implementations(ctx context.Context, snapshot *cache.Snapshot, fh file.Handle, rng protocol.Range) ([]TypeInfo, error) {

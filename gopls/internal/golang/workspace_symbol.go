@@ -140,6 +140,7 @@ func TaggedTypes(ctx context.Context, snapshots []*cache.Snapshot) ([]TypeInfo, 
 								continue
 							}
 
+							typeInfo.TypeSource = StructTags
 							tagged_types = append(tagged_types, *typeInfo)
 						}
 					}

@@ -751,7 +751,7 @@ func callToArgType(snapshot *cache.Snapshot,
 	if err == nil {
 		for _, typ := range raw_type {
 			// Unsure if we should do anything special if there are multiple
-			typ.TypeSource = Unmarshaler
+			typ.TypeSource = UnmarshalArg
 			typ.UnmarshalLocs = []protocol.Location{call_loc}
 			ret = append(ret, typ)
 		}
