@@ -22,7 +22,7 @@ import (
 func main() {
 	var dlv_port int
 	var msg_send_funcs arrayFlags
-	var test_pkg, test_name, unmarshaler_subgraph, accessors, module_prefix, outfile, dump_params string
+	var test_pkg, test_name, unmarshaler_subgraph, accessors, module_prefix, output_path, dump_params string
 	flag.IntVar(&dlv_port, "dlv-port", 4040, "Listening port for dlv - if multiple tests running, will increment for each")
 	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
 	flag.StringVar(&test_pkg, "test-pkg", "", "Package of test to run (full name)")
@@ -31,15 +31,16 @@ func main() {
 	flag.StringVar(&accessors, "accessors", "", "File containing serialized Accessors graph")
 	flag.Var(&msg_send_funcs, "send-funcs", "Functions that send messages (format: --send-funcs='f1' --send-funcs='f2'")
 	flag.StringVar(&dump_params, "dump-params", "", "Whether to just dump all params reachable from the given type, rather than tracking sends")
-	flag.StringVar(&outfile, "outfile", "", "Filename for final output")
+	flag.StringVar(&output_path, "output-path", "", "Filename for final output")
 	flag.Parse()
 
-	if module_prefix == "" || test_pkg == "" || unmarshaler_subgraph == "" || accessors == "" || len(msg_send_funcs) == 0 || outfile == "" {
+	if module_prefix == "" || unmarshaler_subgraph == "" || output_path == "" || // always used
+		(dump_params == "" && (test_pkg == "" || accessors == "" || len(msg_send_funcs) == 0)) { // used if not dumping
 		flag.Usage()
 		log.Fatalf("Missing mandatory argument")
 	}
 
-	Run(dlv_port, module_prefix, test_pkg, test_name, unmarshaler_subgraph, accessors, msg_send_funcs, outfile, dump_params)
+	Run(dlv_port, module_prefix, test_pkg, test_name, unmarshaler_subgraph, accessors, msg_send_funcs, output_path, dump_params)
 }
 
 // Allow array CLI arg
@@ -67,13 +68,15 @@ type ClientInfo struct {
 }
 
 func Run(dlv_port int, module_prefix string, test_pkg string, test_name_arg string,
-	unmarshaler_subgraph_file string, accessors_file string, msg_send_funcs []string, outfile string, dump_params string) {
+	unmarshaler_subgraph_file string, accessors_file string, msg_send_funcs []string, output_path string, dump_params string) {
 
 	// 1. Load the CTypes graphs
 	g, m := ct.Deserialize(unmarshaler_subgraph_file)
 	unmarshaler_subgraph := ct.CTypes{Graph: g, List: m.List}
-	g, m = ct.Deserialize(accessors_file)
-	accessors := ct.CTypes{Graph: g, List: m.List}
+	if accessors_file != "" {
+		g, m = ct.Deserialize(accessors_file)
+	}
+	accessors := ct.CTypes{Graph: g, List: m.List} // if dump_params, will reuse the US which is fine
 
 	// 2. Parse info from CTypes graphs
 	methods := make(map[string]struct{})
@@ -95,7 +98,7 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name_arg stri
 		// 3. Just dump the params
 		param_keys := ParamKeys(client_info, dump_params, true)
 		msg_taints = append(msg_taints, client_info.msg_taint)
-		client_info.msg_taint.AddCTypeMethodCall(apimessages.APICallID{API: "fake"}, param_keys, dump_params)
+		client_info.msg_taint.AddCTypeMethodCall(apimessages.APICallID{API: parsetests.FAKE_API}, param_keys, dump_params)
 	} else {
 		// 3. Connect to dlv server and run tests
 		// Run an instance of dlv per test, since otherwise a breakpoint hit in one test stops all
@@ -131,7 +134,7 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name_arg stri
 
 	// 4. Combine info from all tests, dump to same file
 	all_msg_taint := parsetests.CombineTaints(msg_taints)
-	err = all_msg_taint.Dump(outfile)
+	err = all_msg_taint.Dump(output_path)
 	ct.CheckErr(err)
 }
 

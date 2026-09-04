@@ -52,8 +52,6 @@ func UnmarshalerIngressParams(args ClientInfo, ingress_hash ct.CTypeHash) []stri
 		for _, key_postfix := range key_postfixes {
 			final_key := strings.Trim(key_prefix+"."+key_postfix, ".")
 			final_keys = append(final_keys, final_key)
-			// TODO(CT) we sometimes find e.g. alerting.alertmanagers as a complete key even though it's not a leaf
-			// (e.g. for ingress /discovery.Config)
 		}
 	}
 
@@ -64,7 +62,7 @@ func UnmarshalerIngressParams(args ClientInfo, ingress_hash ct.CTypeHash) []stri
 func UnmarshalerIngresses(args ClientInfo, recvr_hash ct.CTypeHash) []ct.CTypeHash {
 	ingresses := []ct.CTypeHash{}
 	// Just get the leaf, not all paths to it (we don't need them, and has big perf impact for big graphs -
-	// AllPaths is much slower than ShortestPath)
+	// AllPaths is much slower than ShortestPath. Later note: Actually this may be a hang due to a bug in graph lib)
 	for _, accessor_leaf := range args.accessor_leaves {
 		_, err := graph.ShortestPath(args.accessors.Graph, recvr_hash, accessor_leaf)
 		if err == nil {
@@ -87,20 +85,35 @@ func UnmarshalerIngresses(args ClientInfo, recvr_hash ct.CTypeHash) []ct.CTypeHa
 }
 
 // Get the param keys the CType has access to
+// If us_ok, type should be in US - else, should be in accessors
 func ParamKeys(args ClientInfo, recvr_type string, us_ok bool) []string {
+	var ingresses []ct.CTypeHash
+
 	recvr_hash, in_us := args.unmarshaler_subgraph.GetHash(ct.FullTypeName(recvr_type))
-	// XXX(CT) If it's in the US, handle that.
-	if in_us && !us_ok {
-		fmt.Printf("Receiver %v is in Unmarshaler Subgraph - not handled yet\n", recvr_type)
-		return nil
+	if us_ok {
+		// Should be in US
+		if !in_us {
+			panic(fmt.Errorf("Receiver %v not in Unmarshaler Subgraph", recvr_type))
+		}
+
+		ingresses = []ct.CTypeHash{recvr_hash}
+	} else {
+		// Should be in Accessors and not US
+		if in_us {
+			// XXX(CT) If it's in the US, handle that.
+			fmt.Printf("Receiver %v is in Unmarshaler Subgraph - not handled yet\n", recvr_type)
+			return nil
+		}
+
+		var in_accessors bool
+		recvr_hash, in_accessors = args.accessors.GetHash(ct.FullTypeName(recvr_type))
+		if !in_accessors {
+			panic(fmt.Errorf("Receiver %v not in Accessors", recvr_type))
+		}
+
+		ingresses = UnmarshalerIngresses(args, recvr_hash)
 	}
 
-	recvr_hash, in_accessors := args.accessors.GetHash(ct.FullTypeName(recvr_type))
-	if !in_accessors {
-		// Shouldn't happen
-		panic(fmt.Errorf("Receiver %v not in Accessors", recvr_type))
-	}
-	ingresses := UnmarshalerIngresses(args, recvr_hash)
 	fmt.Printf("%v INGRESSES: %v\n", recvr_type, ingresses) // XXX(CT) this is helpful enough to be in the csv
 	param_keys := []string{}
 
