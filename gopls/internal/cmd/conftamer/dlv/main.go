@@ -9,11 +9,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/dominikbraun/graph"
 	"github.com/emilykmarx/conftamer/parsetests"
 	"github.com/emilykmarx/conftamer/pkg/apimessages"
 	modulemsginfo "github.com/emilykmarx/conftamer/pkg/apimessages/http"
 	dlv "github.com/emilykmarx/conftamer/utils"
+	graph "github.com/emilykmarx/dominikbraun-graph"
 	"github.com/go-delve/delve/service/api"
 	"github.com/go-delve/delve/service/rpc2"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"

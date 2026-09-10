@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dominikbraun/graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
+	graph	"github.com/emilykmarx/dominikbraun-graph"
 )
 
 type ASTPath []string

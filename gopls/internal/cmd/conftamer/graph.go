@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dominikbraun/graph"
+	graph "github.com/emilykmarx/dominikbraun-graph"
 	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/telemetry"
 )

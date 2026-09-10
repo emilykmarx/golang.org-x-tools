@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/dominikbraun/graph"
+	graph "github.com/emilykmarx/dominikbraun-graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
 )
 

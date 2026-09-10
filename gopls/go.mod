@@ -3,6 +3,8 @@ module golang.org/x/tools/gopls
 go 1.26.0
 
 require (
+	github.com/emilykmarx/conftamer v0.0.0-20260909235902-222c9b63285f
+	github.com/emilykmarx/dominikbraun-graph v0.23.1-0.20260910002307-065940f018a4
 	github.com/fatih/gomodifytags v1.17.1-0.20250423142747-f3939df9aa3c
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/google/go-cmp v0.7.0
@@ -50,8 +52,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/dominikbraun/graph v0.23.0 // indirect
-	github.com/emilykmarx/conftamer v0.0.0-20260617004325-2ff9b67458d3 // indirect
 	github.com/fatih/camelcase v1.0.0 // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -81,6 +81,7 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.15 // indirect
 	github.com/googleapis/gax-go/v2 v2.22.0 // indirect
 	github.com/grafana/regexp v0.0.0-20250905093917-f7b3be9d1853 // indirect
+	github.com/h8gi/go-igraph v0.3.0 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
@@ -143,9 +144,3 @@ require (
 )
 
 replace golang.org/x/tools => ..
-
-replace github.com/dominikbraun/graph => ../../graph
-
-replace github.com/emilykmarx/conftamer => ../../conftamer
-
-replace k8s.io/client-go => ../../k8s-client-go

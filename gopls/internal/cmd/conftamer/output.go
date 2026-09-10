@@ -9,8 +9,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dominikbraun/graph"
-	"github.com/dominikbraun/graph/draw"
+	graph "github.com/emilykmarx/dominikbraun-graph"
+	"github.com/emilykmarx/dominikbraun-graph/draw"
 )
 
 /* Utilities for printing and parsing the output of the CTypes finder */

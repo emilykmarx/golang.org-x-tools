@@ -9,8 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/dominikbraun/graph"
 	util "github.com/emilykmarx/conftamer/paramtrack/util"
+	graph "github.com/emilykmarx/dominikbraun-graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
 )
 

@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/dominikbraun/graph"
+	graph "github.com/emilykmarx/dominikbraun-graph"
 	"github.com/go-delve/delve/service/api"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
 	dlvgraph "golang.org/x/tools/gopls/internal/cmd/conftamer/dlv/graph"
