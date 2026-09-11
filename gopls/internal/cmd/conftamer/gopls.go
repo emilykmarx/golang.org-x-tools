@@ -7,7 +7,7 @@ import (
 
 /* Utilities for interacting with info from gopls */
 
-// Methods the type implements
+// Populate methods the type implements
 func CopyMethods(node *CTypeNode) {
 	methods := []FullTypeName{}
 	var method_typ *types.Named
@@ -30,6 +30,22 @@ func CopyMethods(node *CTypeNode) {
 		}
 	}
 	node.Methods = methods
+}
+
+// If n is a struct, populate its field tags
+func CopyTags(node *CTypeNode) {
+	struct_info := IsStruct(node.TypeInfo)
+	if struct_info == nil {
+		// not a struct
+		return
+	}
+	tags := make(map[string]string)
+
+	for i := range struct_info.NumFields() {
+		tags[struct_info.Field(i).Name()] = struct_info.Tag(i)
+	}
+
+	node.Tags = tags
 }
 
 func TypeNameSafe(type_info *types.TypeName) FullTypeName {

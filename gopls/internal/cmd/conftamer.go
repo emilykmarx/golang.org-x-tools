@@ -41,10 +41,14 @@ type conftamer struct {
 	ShouldFindAccessors bool   `flag:"a,find_accessors" help:"Whether to find the accessors too (not just the unmarshaler subgraph)"`
 }
 
+func (c *conftamer) findingAccessors() bool {
+	return c.accessors != nil
+}
+
 func (c *conftamer) graph() *ct.CTypes {
 	// Edit Unmarshaler Subgraph if Accessors isn't populated, else Accessors
 	g := c.unmarshaler_subgraph
-	if c.accessors != nil {
+	if c.findingAccessors() {
 		g = c.accessors
 	}
 
@@ -137,6 +141,69 @@ type NeighFind struct {
 	excluded_sources   []golang.TypeSource
 }
 
+// Whether to ignore the CType
+func (c *conftamer) ignoreCType(typ golang.TypeInfo, neigh_find NeighFind, neigh_info *ct.NeighInfo, depth int) bool {
+	cur_name := ct.TypeName(typ.TypeInfo)
+
+	if neigh_info != nil {
+		neigh_hash, ok := c.graph().GetHash(neigh_info.Name)
+		if !ok {
+			err := fmt.Errorf("neighbor %v doesn't exist", neigh_hash)
+			ct.CheckErr(err)
+		}
+		neigh_node, err := c.graph().Graph.Vertex(neigh_hash)
+		if err != nil {
+			err := fmt.Errorf("neighbor %v doesn't exist", neigh_hash)
+			ct.CheckErr(err)
+		}
+
+		// Ignore type if AST path to it has an excluded edge, or
+		// for Unmarshaler Subgraph an untagged field
+		for _, ast_edge := range neigh_info.Typ.ASTPath {
+			if slices.Contains(neigh_find.excluded_ast_edges, ast_edge) {
+				// excluded edge
+				return true
+			}
+			if !c.findingAccessors() {
+				if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
+					tag, ok := neigh_node.Tags[field]
+					if !ok {
+						// field not found in parent node => ok if e.g. AST path is via interface implementation
+					} else if tag == "" {
+						graph.Logf(c.log, slog.LevelInfo, "Ignoring child since corresponding parent field is untagged: %v => %v", neigh_hash, cur_name)
+						// untagged field => ignore
+						return true
+					} else {
+						// tagged field => don't ignore
+					}
+				}
+			}
+		}
+
+		// Ignore type if found via an excluded source
+		if slices.Contains(neigh_find.excluded_sources, neigh_info.Typ.TypeSource) {
+			return true
+		}
+
+		if neigh_find.ignore_unmarshaler_subnodes {
+			// When finding initial edges from Unmarshaler Subgraph to Accessors, don't take edges to US nodes.
+			// When finding edges from Accessors, stop if find one back into US - this wouldn't happen if
+			// we found descendants in same way as ancestors, but we don't, hence this happens in a few cases:
+			// - Edge from US => Accessor has an AST edge that US excludes
+			// - Accessor finds a node the US doesn't, due to two things we may want to fix:
+			// Embedded fields and discovery/xds.KumaSDConfig - TODO(CT) for both
+			if _, ok := c.unmarshaler_subgraph.GetHash(cur_name); ok {
+				if depth != 1 {
+					graph.Logf(c.log, slog.LevelInfo, "Accessors would have edge out of Unmarshaler Subgraph: %v => %v\n", cur_name, neigh_info.Name)
+				}
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // Add all CTypes reachable from this one via neigh_find, stopping on reaching one we've already found
 // neigh_info is info about the neighbor we found this obj via (if any)
 func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind, neigh_info *ct.NeighInfo, depth int) error {
@@ -151,39 +218,8 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 
 	cur_name := ct.TypeName(typ.TypeInfo)
 
-	// Ignore Logger for now...TODO(CT) check if ignoring anything without a struct tag works well
-	if cur_name == "github.com/grafana/grafana/pkg/infra/log.Logger" {
-		graph.Logf(c.log, slog.LevelWarn, "Ignoring infra/log.Logger")
+	if c.ignoreCType(typ, neigh_find, neigh_info, depth) {
 		return nil
-	}
-
-	if neigh_info != nil {
-		// Ignore type if AST path to it has an excluded edge
-		for _, ast_edge := range neigh_info.Typ.ASTPath {
-			if slices.Contains(neigh_find.excluded_ast_edges, ast_edge) {
-				return nil
-			}
-		}
-
-		// Ignore type if found via an excluded source
-		if slices.Contains(neigh_find.excluded_sources, neigh_info.Typ.TypeSource) {
-			return nil
-		}
-
-		if neigh_find.ignore_unmarshaler_subnodes {
-			// When finding initial edges from Unmarshaler Subgraph to Accessors, don't take edges to US nodes.
-			// When finding edges from Accessors, stop if find one back into US - this wouldn't happen if
-			// we found descendants in same way as ancestors, but we don't, hence this happens in a few cases:
-			// - Edge from US => Accessor has an AST edge that US excludes
-			// - Accessor finds a node the US doesn't, due to two things we may want to fix:
-			// Embedded fields and discovery/xds.KumaSDConfig - TODO(CT) for both
-			if _, ok := c.unmarshaler_subgraph.GetHash(cur_name); ok {
-				if depth != 1 {
-					graph.Logf(c.log, slog.LevelInfo, "Accessors would have edge out of Unmarshaler Subgraph: %v => %v\n", cur_name, neigh_info.Name)
-				}
-				return nil
-			}
-		}
 	}
 
 	// 1. Add the CType to the graph, combining with neighbor node if they're the same type.
@@ -343,13 +379,8 @@ func (c *conftamer) testOnlyUnmarshal(unmarshaler golang.TypeInfo) bool {
 	return true
 }
 
-// Find Unmarshalers and their descendants
-func (c *conftamer) FindUnmarshalerSubgraph() {
-	start := time.Now()
-	c.unmarshaler_subgraph = ct.New(c.log)
-
-	// 1. Find "Unmarshalers" by configured strategy
-	graph.Logf(c.log, slog.LevelInfo, "Finding Unmarshalers: Types likely populated by Unmarshal")
+func (c *conftamer) FindUnmarshalers() []golang.TypeInfo {
+	log := "Finding Unmarshalers: Types likely populated by Unmarshal (via "
 
 	unmarshalers := []golang.TypeInfo{}
 	var err error
@@ -360,15 +391,32 @@ func (c *conftamer) FindUnmarshalerSubgraph() {
 		ct.CheckErr(err)
 		unmarshalers, err = c.local_server.FuncArgType(c.ctx, p)
 		ct.CheckErr(err)
+		log += "Unmarshal calls"
 	} else if c.UnmarshalIfaceDefn != "" {
 		// Strategy: Type implements the Unmarshal interface
 		unmarshalers, err = c.getInterfaceImpls([]string{c.UnmarshalIfaceDefn}, true)
 		ct.CheckErr(err)
+		log += "Unmarshal interface"
 	} else {
 		// Strategy: Type has struct tags
 		unmarshalers, err = c.local_server.TaggedTypes(c.ctx)
 		ct.CheckErr(err)
+		log += "struct tags"
 	}
+
+	// Exclude the specified types, if any (useful to see which types each strategy contributes)
+	graph.Logf(c.log, slog.LevelInfo, log+")")
+
+	return unmarshalers
+}
+
+// Find Unmarshalers and their descendants
+func (c *conftamer) FindUnmarshalerSubgraph() {
+	start := time.Now()
+	c.unmarshaler_subgraph = ct.New(c.log)
+
+	// 1. Find "Unmarshalers" by configured strategy
+	unmarshalers := c.FindUnmarshalers()
 
 	// 2. Find "Unmarshaler Subgraph": Descendants of Unmarshalers, via type definition and interface implementation.
 	graph.Logf(c.log, slog.LevelInfo, "Finding rest of Unmarshaler Subgraph: Types contained in Unmarshalers")
@@ -392,7 +440,7 @@ func (c *conftamer) FindUnmarshalerSubgraph() {
 				// Ignore descendant if AST path includes a function call (Unmarshal won't populate function arg/retval)
 				excluded_ast_edges: []string{"FuncType.Params", "FuncType.Results"}}
 
-			err = c.addReachableCTypes(unmarshaler, unmarshaler_subgraph_find, nil, 0)
+			err := c.addReachableCTypes(unmarshaler, unmarshaler_subgraph_find, nil, 0)
 			ct.CheckErr(err)
 		}
 	}

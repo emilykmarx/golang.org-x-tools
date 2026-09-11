@@ -49,29 +49,8 @@ type MarshalableNode struct {
 	Tags    map[string]string // Field name => tag (populated if struct)
 }
 
-// If n is a struct, get its field tags
-func getTags(n *CTypeNode) map[string]string {
-	if n.TypeInfo == nil {
-		// E.g. if marshaling a subgraph created by querying - tags are already populated
-		return n.Tags
-	}
-
-	struct_info := IsStruct(n.TypeInfo)
-	if struct_info == nil {
-		// not a struct
-		return nil
-	}
-	tags := make(map[string]string)
-
-	for i := range struct_info.NumFields() {
-		tags[struct_info.Field(i).Name()] = struct_info.Tag(i)
-	}
-
-	return tags
-}
-
 func (n *CTypeNode) MarshalJSON() ([]byte, error) {
-	m := MarshalableNode{Names: n.Names, Methods: n.Methods, Tags: getTags(n)}
+	m := MarshalableNode{Names: n.Names, Methods: n.Methods, Tags: n.Tags}
 	return json.Marshal(m)
 
 	// marshal without error to empty string (probably bc interesting fields aren't exported): types.Type, *types.Named, types.Named
@@ -97,8 +76,6 @@ type Marshalable struct {
 }
 
 // Cut prefix from both vertex names and edge hashes.
-// Vertices are marshaled as in MarshalJSON() override above.
-// Edges are marshaled with default MarshalJSON, which includes src/target and edge data.
 func Marshal(g CTypeGraph, l CTypeList, cutprefix string) ([]byte, Marshalable) {
 	// Edges
 	all := Marshalable{}
