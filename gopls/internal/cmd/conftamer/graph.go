@@ -81,6 +81,8 @@ type CTypeNode struct {
 	Indent int
 }
 
+type ASTPath []string
+
 func NodeSort(a, b CTypeNode) int {
 	return cmp.Compare(string(CTypeNodeHash(a)), string(CTypeNodeHash(b)))
 }
@@ -250,18 +252,93 @@ func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_info *NeighInfo) (TypeNameE
 	return TypeNameNotExists, nil
 }
 
+type EdgeAttrKey string
+
+const (
+	Field EdgeAttrKey = "Field"
+)
+
+// Param key corresponding to struct field:
+// tag key if `tag` contains a yaml tag, else lowercase field name.
+func FieldToParamKey(field string, tag string) string {
+	param_key := ""
+
+	// Get yaml tag key, if any
+	// `(...) yaml:"[<key>][,<flag1>[,<flag2>]]" (...)`
+
+	yaml_prefix := "yaml:\""
+	yaml_idx := strings.Index(tag, yaml_prefix)
+	if yaml_idx != -1 {
+		key_idx := yaml_idx + len(yaml_prefix)
+		end_tag_idx := strings.Index(tag[key_idx:], "\"")
+		yaml_tag := tag[key_idx : key_idx+end_tag_idx]
+		tag_parts := strings.Split(yaml_tag, ",")
+		param_key = tag_parts[0]
+		if param_key == "-" {
+			param_key = ""
+		}
+	} else {
+		// No yaml tag => take key as lowercased field name:
+		// Field could either be a key in the raw content (iff field name is uppercase, and lowercased version is in raw content),
+		// or copied/otherwise derived from the raw content after unmarshaling
+		param_key = strings.ToLower(field)
+	}
+	return param_key
+}
+
+func AppendFieldTag(field string, tag string, key string) string {
+	key_part := FieldToParamKey(field, tag)
+	key = fmt.Sprintf("%v.%v", key, key_part)
+	return strings.Trim(key, ".")
+}
+
+// Convert edge data (any type) to DOT attributes (map[string]string)
+func (c *CTypes) edgeDataToAttributes(edge graph.Edge[CTypeHash]) map[string]string {
+	edge_attrs := make(map[string]string)
+	edge_data := edge.Properties.Data.([]ASTPath)
+	all_tags := []string{}
+	parent_node, err := c.Graph.Vertex(edge.Source)
+	CheckErr(err)
+
+	for _, edge_ast_path := range edge_data {
+		// For each possible AST path from one CType to another: get field name(s)
+		ast_path_tags := ""
+		for _, ast_edge := range edge_ast_path {
+			if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
+				tag := parent_node.Tags[field]
+				if tag != "" {
+					// Is it possible to have multiple fields in same AST path? Concatenate them all for now
+					ast_path_tags = AppendFieldTag(field, tag, ast_path_tags)
+				} else {
+					// Check for empty tag already done when adding node - ignore
+				}
+			}
+			if ast_path_tags != "" {
+				all_tags = append(all_tags, ast_path_tags)
+			}
+		}
+	}
+
+	// dedup
+	slices.Sort(all_tags)
+	all_tags = slices.Compact(all_tags)
+	edge_attrs[string(Field)] = strings.Join(all_tags, ",")
+	return edge_attrs
+}
+
 // Add edge from enclosing CType (parent) to enclosed CType (child).
 // Annotate edge with info on how parent type can access child type name:
 // e.g. via fields (possibly multiple), or slice indexing.
-func (c *CTypes) AddCTypeEdge(parent_hash CTypeHash, child_name FullTypeName, neigh_ast_path []string) error {
+func (c *CTypes) AddCTypeEdge(parent_hash CTypeHash, child_name FullTypeName, neigh_ast_path ASTPath) error {
 	child_hash, ok := c.GetHash(child_name)
 	if !ok {
 		err := fmt.Errorf("AddCTypeEdge - child %v does not exist\n", child_name)
 		CheckErr(err)
 	}
 
-	edge_data := [][]string{neigh_ast_path}
-	err := c.Graph.AddEdge(parent_hash, child_hash, graph.EdgeData(edge_data))
+	edge_data := []ASTPath{neigh_ast_path}
+	// Set edge weight to 1, else gephi will ignore it
+	err := c.Graph.AddEdge(parent_hash, child_hash, graph.EdgeWeight(1), graph.EdgeData(edge_data))
 	if err != nil {
 		if !errors.Is(err, graph.ErrEdgeAlreadyExists) {
 			CheckErr(err)
@@ -270,8 +347,8 @@ func (c *CTypes) AddCTypeEdge(parent_hash CTypeHash, child_name FullTypeName, ne
 			edge, err := c.Graph.Edge(parent_hash, child_hash)
 			CheckErr(err)
 			if edge.Properties.Data != nil {
-				existing_edge_data := edge.Properties.Data.([][]string)
-				dup := slices.ContainsFunc(existing_edge_data, func(existing_path []string) bool {
+				existing_edge_data := edge.Properties.Data.([]ASTPath)
+				dup := slices.ContainsFunc(existing_edge_data, func(existing_path ASTPath) bool {
 					return reflect.DeepEqual(existing_path, neigh_ast_path)
 				})
 				if !dup {

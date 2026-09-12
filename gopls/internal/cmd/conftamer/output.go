@@ -76,13 +76,22 @@ type Marshalable struct {
 }
 
 // Cut prefix from both vertex names and edge hashes.
-func Marshal(g CTypeGraph, l CTypeList, cutprefix string) ([]byte, Marshalable) {
+// Convert vertex and edge data to attributes, which will appear in the DOT
+func (c *CTypes) Marshal(cutprefix string) ([]byte, Marshalable) {
 	// Edges
 	all := Marshalable{}
-	edges, err := g.Edges()
+	edges, err := c.Graph.Edges()
 	CheckErr(err)
 	short_edges := []graph.Edge[CTypeHash]{}
 	for _, edge := range edges {
+		// 1. Get attrs
+		if edge.Properties.Data != nil {
+			edge_attrs := c.edgeDataToAttributes(edge)
+			err := c.Graph.UpdateEdge(edge.Source, edge.Target, graph.EdgeAttributes(edge_attrs))
+			CheckErr(err)
+		}
+
+		// 2. Cut prefix
 		short_src, _ := strings.CutPrefix(string(edge.Source), cutprefix)
 		short_target, _ := strings.CutPrefix(string(edge.Target), cutprefix)
 		edge.Source = CTypeHash(short_src)
@@ -92,7 +101,7 @@ func Marshal(g CTypeGraph, l CTypeList, cutprefix string) ([]byte, Marshalable) 
 	all.Edges = short_edges
 
 	// Vertices
-	vertices, err := g.Vertices()
+	vertices, err := c.Graph.Vertices()
 	CheckErr(err)
 	short_vertices := []CTypeNode{}
 	for _, node := range vertices {
@@ -108,7 +117,7 @@ func Marshal(g CTypeGraph, l CTypeList, cutprefix string) ([]byte, Marshalable) 
 
 	// List
 	short_list := make(CTypeList)
-	for k, v := range l {
+	for k, v := range c.List {
 		short_k, _ := strings.CutPrefix(string(k), cutprefix)
 		short_v, _ := strings.CutPrefix(string(v), cutprefix)
 		short_list[FullTypeName(short_k)] = CTypeHash(short_v)
@@ -124,7 +133,7 @@ func Marshal(g CTypeGraph, l CTypeList, cutprefix string) ([]byte, Marshalable) 
 // If draw_dot, also write DOT file which can be drawn - module prefix is not cut.
 // DOT filename is <filename prefix>.gv
 func (c *CTypes) Serialize(filename string, cutprefix string, draw_dot bool) {
-	marshaled, _ := Marshal(c.Graph, c.List, cutprefix)
+	marshaled, _ := c.Marshal(cutprefix)
 	WriteTestFile(marshaled, filename)
 
 	if draw_dot {

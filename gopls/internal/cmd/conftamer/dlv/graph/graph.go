@@ -1,15 +1,12 @@
 package graph
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
+	graph "github.com/emilykmarx/dominikbraun-graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
-	graph	"github.com/emilykmarx/dominikbraun-graph"
 )
-
-type ASTPath []string
 
 func printEdgePath(p []graph.Edge[ct.CTypeNode]) {
 	s := ""
@@ -20,13 +17,13 @@ func printEdgePath(p []graph.Edge[ct.CTypeNode]) {
 }
 
 // If edge has no AST paths, return an array with len 1 (containing an empty array)
-func EdgeASTPaths(edgeProperties graph.EdgeProperties) []ASTPath {
-	ast_paths := []ASTPath{}
+func EdgeASTPaths(edgeProperties graph.EdgeProperties) []ct.ASTPath {
+	ast_paths := []ct.ASTPath{}
 	// Edge data marshals annoyingly by default
 	if edgeProperties.Data != nil {
 		ast_paths_raw := edgeProperties.Data.([]interface{})
 		for _, ast_path_raw := range ast_paths_raw { // range over [][]string
-			ast_path := ASTPath{}
+			ast_path := ct.ASTPath{}
 			if ast_path_raw != nil {
 				for _, ast_edge_raw := range ast_path_raw.([]interface{}) { // range over []string
 					ast_edge := ast_edge_raw.(string)
@@ -37,22 +34,22 @@ func EdgeASTPaths(edgeProperties graph.EdgeProperties) []ASTPath {
 		}
 	}
 	if len(ast_paths) == 0 {
-		ast_paths = append(ast_paths, ASTPath{})
+		ast_paths = append(ast_paths, ct.ASTPath{})
 	}
 	return ast_paths
 }
 
 // Given a CType path, find all possible AST paths on it indexed by edge
-func CTypePathASTPaths(ctype_path []graph.Edge[ct.CTypeNode]) [][]ASTPath {
+func CTypePathASTPaths(ctype_path []graph.Edge[ct.CTypeNode]) [][]ct.ASTPath {
 	// If CType path has no AST paths, return an array with len 1 (containing an empty array)
-	all_ast_paths := [][]ASTPath{} // each element: a possible path (indexed by edge) - len = # ctype edges thus far
+	all_ast_paths := [][]ct.ASTPath{} // each element: a possible path (indexed by edge) - len = # ctype edges thus far
 	for ctype_edge_i, edge := range ctype_path {
 		edge_ast_paths := EdgeASTPaths(edge.Properties)
-		new_ast_paths := [][]ASTPath{} // each element is an array with one AST path per edge thus far
+		new_ast_paths := [][]ct.ASTPath{} // each element is an array with one AST path per edge thus far
 
 		if ctype_edge_i == 0 {
 			for _, cur_edge_ast_path := range edge_ast_paths {
-				new_ast_paths = append(new_ast_paths, []ASTPath{cur_edge_ast_path})
+				new_ast_paths = append(new_ast_paths, []ct.ASTPath{cur_edge_ast_path})
 			}
 		} else {
 			for _, cur_edge_ast_path := range edge_ast_paths {
@@ -105,9 +102,9 @@ func hashPathToEdgePath(g ct.CTypeGraph, hash_path []ct.CTypeHash) []graph.Edge[
 // (An edge can have multiple AST paths - get all combos of AST paths across all edges).
 // Assumes g has been marshaled (which changes the type of the edge data).
 // If hash is a root(Backwards)/leaf(Forwards), make a fake path with a self-edge
-func CTypePathsToOrFrom(g ct.CTypeGraph, hash ct.CTypeHash, opts graph.DFSOpts[ct.CTypeHash, ct.CTypeNode]) ([][]graph.Edge[ct.CTypeNode], [][][]ASTPath) {
+func CTypePathsToOrFrom(g ct.CTypeGraph, hash ct.CTypeHash, opts graph.DFSOpts[ct.CTypeHash, ct.CTypeNode]) ([][]graph.Edge[ct.CTypeNode], [][][]ct.ASTPath) {
 	all_ctypes_paths := [][]graph.Edge[ct.CTypeNode]{}
-	all_ast_paths := [][][]ASTPath{}
+	all_ast_paths := [][][]ct.ASTPath{}
 
 	roots, leaves, err := graph.RootsLeaves(g)
 	ct.CheckErr(err)
@@ -116,37 +113,27 @@ func CTypePathsToOrFrom(g ct.CTypeGraph, hash ct.CTypeHash, opts graph.DFSOpts[c
 		others = leaves
 	}
 
+	/*
+		if !opts.All_paths {
+			panic("!all_paths not supported in CTypePathsToOrFrom")
+		}
+	*/
+
+	// PERF if no paths are possible (to root, or from leaf), no need to call graph lib
 	for _, other := range others {
 		// PERF: Recomputes the adjacency map on every call to AllPathsBetween.
-		var hash_paths [][]ct.CTypeHash
-		var shortest_path []ct.CTypeHash
+		var all_paths [][]ct.CTypeHash
 		var err error
 		if opts.Direction == graph.Forwards {
-			if opts.All_paths {
-				hash_paths, err = graph.AllPathsBetween(g, hash, other)
-			} else {
-				shortest_path, err = graph.ShortestPath(g, hash, other)
-			}
+			all_paths, err = graph.AllPathsBetween(g, hash, other)
 		} else {
-			if opts.All_paths {
-				hash_paths, err = graph.AllPathsBetween(g, other, hash)
-			} else {
-				shortest_path, err = graph.ShortestPath(g, other, hash)
-			}
+			all_paths, err = graph.AllPathsBetween(g, other, hash)
 		}
 
-		if opts.All_paths {
-			// if unreachable, returns nil
-			ct.CheckErr(err)
-		} else {
-			// if unreachable, returns err (but should ignore)
-			if !errors.Is(err, graph.ErrTargetNotReachable) {
-				ct.CheckErr(err)
-			}
-			hash_paths[0] = shortest_path
-		}
+		// if unreachable, returns nil
+		ct.CheckErr(err)
 
-		for _, hash_path := range hash_paths {
+		for _, hash_path := range all_paths {
 			edge_path := hashPathToEdgePath(g, hash_path)
 			ast_paths := CTypePathASTPaths(edge_path)
 

@@ -135,12 +135,6 @@ type CTypeParam struct {
 	Value api.Variable
 }
 
-func appendFieldTag(field string, tag string, key string) string {
-	key_part := FieldToParamKey(field, tag)
-	key = fmt.Sprintf("%v.%v", key, key_part)
-	return strings.Trim(key, ".")
-}
-
 // Return true if field has no AST edges out on any ctype path.
 // (Unless `all_ctype_paths` not passed)
 func nonCustomField(field string, ctype_edge graph.Edge[ct.CTypeNode], all_ctype_paths [][]graph.Edge[ct.CTypeNode]) bool {
@@ -175,7 +169,7 @@ func nonCustomField(field string, ctype_edge graph.Edge[ct.CTypeNode], all_ctype
 // If `all_ctype_paths`: Also include non-custom fields.
 // Assume the default behavior of UnmarshalYAML wrt mapping file keys to types.
 func ASTPathToParams(ctype_path []graph.Edge[ct.CTypeNode], all_ctype_paths [][]graph.Edge[ct.CTypeNode],
-	ast_path []dlvgraph.ASTPath, leaf_keys bool) []string {
+	ast_path []ct.ASTPath, leaf_keys bool) []string {
 
 	keys := []string{} // add when find a non-custom field or leaf
 	key_prefix := ""   // append as add fields
@@ -194,14 +188,14 @@ func ASTPathToParams(ctype_path []graph.Edge[ct.CTypeNode], all_ctype_paths [][]
 				for other_field := range tags {
 					if other_field != field {
 						if nonCustomField(other_field, ctype_edge, all_ctype_paths) {
-							full_key := appendFieldTag(other_field, tags[other_field], key_prefix)
+							full_key := ct.AppendFieldTag(other_field, tags[other_field], key_prefix)
 							keys = append(keys, full_key)
 						}
 					}
 				}
 
 				// Append corresponding field tag to key
-				key_prefix = appendFieldTag(field, tags[field], key_prefix)
+				key_prefix = ct.AppendFieldTag(field, tags[field], key_prefix)
 			}
 		}
 	}
@@ -213,37 +207,10 @@ func ASTPathToParams(ctype_path []graph.Edge[ct.CTypeNode], all_ctype_paths [][]
 	} else {
 		for field, tag := range last_node.Tags {
 			// Append tag to key
-			full_key := appendFieldTag(field, tag, key_prefix)
+			full_key := ct.AppendFieldTag(field, tag, key_prefix)
 			keys = append(keys, full_key)
 		}
 	}
 
 	return keys
-}
-
-// Param key corresponding to struct field (tag key if tagged, else lowercase field name)
-func FieldToParamKey(field string, tag string) string {
-	param_key := ""
-
-	// Get yaml tag key, if any
-	// `(...) yaml:"[<key>][,<flag1>[,<flag2>]]" (...)`
-
-	yaml_prefix := "yaml:\""
-	yaml_idx := strings.Index(tag, yaml_prefix)
-	if yaml_idx != -1 {
-		key_idx := yaml_idx + len(yaml_prefix)
-		end_tag_idx := strings.Index(tag[key_idx:], "\"")
-		yaml_tag := tag[key_idx : key_idx+end_tag_idx]
-		tag_parts := strings.Split(yaml_tag, ",")
-		param_key = tag_parts[0]
-		if param_key == "-" {
-			param_key = ""
-		}
-	} else {
-		// No yaml tag => take key as lowercased field name:
-		// Field could either be a key in the raw content (iff field name is uppercase, and lowercased version is in raw content),
-		// or copied/otherwise derived from the raw content after unmarshaling
-		param_key = strings.ToLower(field)
-	}
-	return param_key
 }
