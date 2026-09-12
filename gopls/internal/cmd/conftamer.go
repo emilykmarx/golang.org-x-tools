@@ -164,17 +164,21 @@ func (c *conftamer) ignoreCType(typ golang.TypeInfo, neigh_find NeighFind, neigh
 				// excluded edge
 				return true
 			}
-			if !c.findingAccessors() {
+			if !c.findingAccessors() && len(neigh_node.Tags) > 0 {
+				// neigh_node.Tags may be empty when AST path still has a field, e.g. when parent is interface
+				// (see Prometheus /discovery.Config => /discovery.DiscovererOptions)
 				if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
 					tag, ok := neigh_node.Tags[field]
 					if !ok {
-						// field not found in parent node => ok if e.g. AST path is via interface implementation
+						// parent has fields, but no entry for this field - shouldn't happen
+						ct.CheckErr(fmt.Errorf("Child field %v not in tags %v: %v => %v",
+							field, neigh_node.Tags, neigh_hash, cur_name))
 					} else if tag == "" {
 						graph.Logf(c.log, slog.LevelInfo, "Ignoring child since corresponding parent field is untagged: %v => %v", neigh_hash, cur_name)
-						// untagged field => ignore
+						// untagged field => ignore type
 						return true
 					} else {
-						// tagged field => don't ignore
+						// tagged field => don't ignore type
 					}
 				}
 			}
