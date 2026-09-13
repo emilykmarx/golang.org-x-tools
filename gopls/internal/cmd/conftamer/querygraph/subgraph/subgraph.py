@@ -1,31 +1,33 @@
 import argparse
+import json
 from collections.abc import Iterable
 from typing import Literal
 
 import igraph as ig
-import json
 
 
 def influence_subgraph(
   graph: ig.Graph,
-  vertices: Iterable[int],
+  vertices: Iterable[str],
   *,
   direction: Literal["ancestors", "descendants", "both"],
 ) -> ig.Graph:
+  """Return the subgraph containing the vertices"""
+
   if direction not in {"ancestors", "descendants", "both"}:
     raise ValueError(f"unknown influence direction {direction!r}")
 
-  selected = set(vertices)
-  reached = set(selected)
+  subgraph_vertices = set()
   modes = {
     "ancestors": ("in",),
     "descendants": ("out",),
     "both": ("in", "out"),
   }
-  for vertex in selected:
+  for vertex in vertices:
     for mode in modes[direction]:
-      reached.update(graph.subcomponent(vertex, mode=mode))
-  return graph.induced_subgraph(sorted(reached))
+      subgraph_vertices.update(graph.subcomponent(vertex, mode=mode))
+
+  return graph.induced_subgraph(subgraph_vertices)
 
 def getHash(type, loaded_list):
   return loaded_list["List"][type]
@@ -43,10 +45,9 @@ def main():
     start_hash = getHash(args.start_type, loaded_list)
 
   print("Querying for subgraph containing", args.start_type)
-  print("Jk not really, query ID is hardcoded")
   g: ig.Graph = ig.Graph.Read(args.graph)
-  start_id=1 # TODO get this from start_hash or start_type
-  subgraph = influence_subgraph(g, [start_id], direction="both")
+
+  subgraph = influence_subgraph(g, [start_hash], direction="both")
   subgraph.write_graphml(args.outfile)
 
 if __name__ == "__main__":

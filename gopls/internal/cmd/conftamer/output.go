@@ -75,8 +75,8 @@ type Marshalable struct {
 	List     CTypeList
 }
 
-// Cut prefix from both vertex names and edge hashes.
-// Convert vertex and edge data to attributes, which will appear in the DOT
+// Cut prefix from Marshalable's vertex names and edge hashes, but not from CTypes.
+// Convert edge data to attributes, which will appear in the DOT
 func (c *CTypes) Marshal(cutprefix string) ([]byte, Marshalable) {
 	// Edges
 	all := Marshalable{}
@@ -116,13 +116,7 @@ func (c *CTypes) Marshal(cutprefix string) ([]byte, Marshalable) {
 	all.Vertices = short_vertices
 
 	// List
-	short_list := make(CTypeList)
-	for k, v := range c.List {
-		short_k, _ := strings.CutPrefix(string(k), cutprefix)
-		short_v, _ := strings.CutPrefix(string(v), cutprefix)
-		short_list[FullTypeName(short_k)] = CTypeHash(short_v)
-	}
-	all.List = short_list
+	all.List = c.List
 
 	marshaled, err := json.Marshal(all)
 	CheckErr(err)
