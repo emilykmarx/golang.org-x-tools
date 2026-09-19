@@ -766,7 +766,6 @@ func callToArgType(snapshot *cache.Snapshot,
 // If reference is part of a function argument, find the returned types, if any
 func argToRetType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector.Cursor) ([]TypeInfo, error) {
 	found_param := false
-	retvals := []TypeInfo{}
 	var retvals_cursor *inspector.Cursor
 
 	// Check if child_cursor is in function arg
@@ -798,15 +797,21 @@ func argToRetType(pkg *cache.Package, pgf *parsego.File, child_cursor inspector.
 	}
 
 	// get return type(s)
+	return fieldListToTypes(pkg, pgf, retvals_cursor)
+}
+
+// Given a cursor to an *ast.FieldList node (e.g. FuncType.Params), get the types of the fields
+func fieldListToTypes(pkg *cache.Package, pgf *parsego.File, fieldlist_cur *inspector.Cursor) ([]TypeInfo, error) {
+	retvals := []TypeInfo{}
 	filter := []ast.Node{(*ast.Ident)(nil)}
 
-	retvals_cursor.Inspect(filter, func(child_cursor inspector.Cursor) bool {
+	fieldlist_cur.Inspect(filter, func(child_cursor inspector.Cursor) bool {
 		ret_node := child_cursor.Node()
 
 		// identifier - check if it's of a type name
-		ret_typeinfo, err := cursorToTypeInfo(ret_node, *retvals_cursor, pkg)
+		ret_typeinfo, err := cursorToTypeInfo(ret_node, *fieldlist_cur, pkg)
 		if err != nil {
-			// Not a type name
+			// Not a type name (e.g. a package name in `pkg.T`)
 			// TODO(CT) (minor) Some of these errors may be actual errors
 			return true
 		}

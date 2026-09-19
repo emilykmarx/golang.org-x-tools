@@ -17,6 +17,8 @@ import (
 	"strings"
 	"unicode"
 
+	"golang.org/x/tools/go/ast/edge"
+	"golang.org/x/tools/go/ast/inspector"
 	"golang.org/x/tools/gopls/internal/cache"
 	"golang.org/x/tools/gopls/internal/cache/metadata"
 	"golang.org/x/tools/gopls/internal/cache/symbols"
@@ -84,6 +86,50 @@ func WorkspaceSymbols(ctx context.Context, snapshots []*cache.Snapshot, query st
 	}
 
 	return collectSymbols(ctx, snapshots, query, opts)
+}
+
+// Given a symbol representing a function name,
+// get the types of the arguments (including receiver)
+func ArgTypes(ctx context.Context, snapshots []*cache.Snapshot, query string, opts WorkspaceSymbolsOptions) ([]TypeInfo, error) {
+	syms, err := WorkspaceSymbols(ctx, snapshots, query, opts)
+	if err != nil {
+		return nil, err
+	}
+	if len(syms) == 0 {
+		return nil, fmt.Errorf("function %v not found", query)
+	}
+	arg_types := []TypeInfo{}
+
+	for _, sym := range syms {
+		for _, snapshot := range snapshots {
+			pkg, pgf, cur, err := locToCursor(ctx, snapshot, sym.Location)
+			if err != nil {
+				return nil, err
+			}
+
+			argsCurs := []inspector.Cursor{}
+
+			for parent_cursor := range cur.Enclosing() {
+				parent := parent_cursor.Node()
+				if funcDecl, ok := parent.(*ast.FuncDecl); ok {
+					argsCurs = append(argsCurs, parent_cursor.ChildAt(edge.FuncDecl_Type, -1).ChildAt(edge.FuncType_Params, -1))
+					if funcDecl.Recv != nil {
+						argsCurs = append(argsCurs, parent_cursor.ChildAt(edge.FuncDecl_Recv, -1))
+					}
+				}
+			}
+
+			for _, cur := range argsCurs {
+				typs, err := fieldListToTypes(pkg, pgf, &cur)
+				if err != nil {
+					return nil, err
+				}
+				arg_types = append(arg_types, typs...)
+			}
+		}
+	}
+
+	return arg_types, nil
 }
 
 // Get all types in the workspace packages that have any struct tags
