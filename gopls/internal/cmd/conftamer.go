@@ -170,9 +170,9 @@ func (c *conftamer) ignoreCType(typ golang.TypeInfo, neigh_find NeighFind, neigh
 				if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
 					tag, ok := neigh_node.Tags[field]
 					if !ok {
-						// parent has fields, but no entry for this field - shouldn't happen
-						ct.CheckErr(fmt.Errorf("Child field %v not in tags %v: %v => %v",
-							field, neigh_node.Tags, neigh_hash, cur_name))
+						// parent has fields, but no entry for this field - happens in grafana and k8s
+						graph.Logf(c.log, slog.LevelWarn, "Child field %v not in tags %v: %v => %v",
+							field, neigh_node.Tags, neigh_hash, cur_name)
 					} else if tag == "" {
 						graph.Logf(c.log, slog.LevelInfo, "Ignoring child since corresponding parent field is untagged: %v => %v", neigh_hash, cur_name)
 						// untagged field => ignore type
