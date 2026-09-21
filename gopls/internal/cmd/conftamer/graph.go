@@ -388,3 +388,39 @@ func CheckErr(err error) {
 		panic(err)
 	}
 }
+
+func (c *CTypes) LogGraphStats(log *slog.Logger, start time.Time) {
+	graph.Logf(log, slog.LevelInfo, "Begin stats")
+	defer func() {
+		graph.Logf(log, slog.LevelInfo, "End stats")
+	}()
+
+	// Time
+	graph.Logf(log, slog.LevelInfo, "Total time: %v", time.Since(start))
+
+	var gopls_time time.Duration
+	for operation, time := range telemetry.GetLatencyTotals() {
+		graph.Logf(log, slog.LevelInfo, "gopls %v: %v calls, %v", operation, time.NCalls, time.TotalTime)
+		gopls_time += time.TotalTime
+	}
+	graph.Logf(log, slog.LevelInfo, "gopls total: %v", gopls_time)
+
+	var graph_time time.Duration
+	for operation, time := range c.Latency {
+		graph.Logf(log, slog.LevelInfo, "graph lib %v: %v calls, %v", operation, time.NCalls, time.TotalTime)
+		graph_time += time.TotalTime
+	}
+	graph.Logf(log, slog.LevelInfo, "graph lib total: %v", graph_time)
+
+	// Size
+	n_edges, err := c.Graph.Size()
+	CheckErr(err)
+	n_nodes, err := c.Graph.Order()
+	CheckErr(err)
+	graph.Logf(log, slog.LevelInfo, "%v nodes, %v edges", n_nodes, n_edges)
+	roots, leaves, err := graph.RootsLeaves(c.Graph)
+	CheckErr(err)
+
+	graph.Logf(log, slog.LevelInfo, "%v roots", len(roots))
+	graph.Logf(log, slog.LevelInfo, "%v leaves", len(leaves))
+}

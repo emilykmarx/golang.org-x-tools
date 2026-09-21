@@ -14,21 +14,22 @@ import (
 
 	graph "github.com/emilykmarx/dominikbraun-graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
+	parse "golang.org/x/tools/gopls/internal/cmd/conftamer/stacks"
 	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/server"
-	"golang.org/x/tools/gopls/internal/telemetry"
 	"golang.org/x/tools/internal/tool"
 )
 
-// conftamer implements the conftamer verb for gopls
-type conftamer struct {
+// Conftamer implements the Conftamer verb for gopls
+type Conftamer struct {
 	app                  *Application
 	ctx                  context.Context
 	cli                  *client
 	local_server         *server.Server
 	unmarshaler_subgraph *ct.CTypes
 	accessors            *ct.CTypes
+	sending_types        *ct.CTypes
 	log                  *slog.Logger
 
 	// Flags about module code
@@ -39,13 +40,14 @@ type conftamer struct {
 	// Flags customizing the tool
 	OutputPath          string `flag:"out,output_path" help:"Output path for graph files"`
 	ShouldFindAccessors bool   `flag:"a,find_accessors" help:"Whether to find the accessors too (not just the unmarshaler subgraph)"`
+	SendLog             string `flag:"s,send_log" help:"A log of message sends - if passed, will find sending types from the log (rather than finding the Unmarshaler Subgraph and Accessors from the module source)"`
 }
 
-func (c *conftamer) findingAccessors() bool {
+func (c *Conftamer) findingAccessors() bool {
 	return c.accessors != nil
 }
 
-func (c *conftamer) graph() *ct.CTypes {
+func (c *Conftamer) graph() *ct.CTypes {
 	// Edit Unmarshaler Subgraph if Accessors isn't populated, else Accessors
 	g := c.unmarshaler_subgraph
 	if c.findingAccessors() {
@@ -55,11 +57,11 @@ func (c *conftamer) graph() *ct.CTypes {
 	return g
 }
 
-func (c *conftamer) Name() string      { return "conftamer" }
-func (c *conftamer) Parent() string    { return c.app.Name() }
-func (c *conftamer) Usage() string     { return "[conftamer-flags]" }
-func (c *conftamer) ShortHelp() string { return "Finds the CTypes graph" }
-func (c *conftamer) DetailedHelp(f *flag.FlagSet) {
+func (c *Conftamer) Name() string      { return "conftamer" }
+func (c *Conftamer) Parent() string    { return c.app.Name() }
+func (c *Conftamer) Usage() string     { return "[conftamer-flags]" }
+func (c *Conftamer) ShortHelp() string { return "Finds the CTypes graph" }
+func (c *Conftamer) DetailedHelp(f *flag.FlagSet) {
 	fmt.Fprint(f.Output(), `
 	Find Unmarshaler Subgraph and/or Accessors.
 	Strategy to find US defaults to struct tags, but if u-fn or u-iface is passed, will use that.
@@ -69,7 +71,7 @@ func (c *conftamer) DetailedHelp(f *flag.FlagSet) {
 }
 
 // Get types that enclose this CType (which is defined at defn_locs)
-func (c *conftamer) getParentCTypes(defn_locs []string) ([]golang.TypeInfo, error) {
+func (c *Conftamer) getParentCTypes(defn_locs []string) ([]golang.TypeInfo, error) {
 	parent_ctypes := []golang.TypeInfo{}
 
 	for _, defn_loc := range defn_locs {
@@ -87,7 +89,7 @@ func (c *conftamer) getParentCTypes(defn_locs []string) ([]golang.TypeInfo, erro
 }
 
 // Get types enclosed in this CType
-func (c *conftamer) getChildCTypes(defn_locs []string) ([]golang.TypeInfo, error) {
+func (c *Conftamer) getChildCTypes(defn_locs []string) ([]golang.TypeInfo, error) {
 	child_ctypes := []golang.TypeInfo{}
 
 	for _, defn_loc := range defn_locs {
@@ -103,7 +105,7 @@ func (c *conftamer) getChildCTypes(defn_locs []string) ([]golang.TypeInfo, error
 	return child_ctypes, nil
 }
 
-func (c *conftamer) getInterfaceImpls(defn_locs []string, ignore_ifaces bool) ([]golang.TypeInfo, error) {
+func (c *Conftamer) getInterfaceImpls(defn_locs []string, ignore_ifaces bool) ([]golang.TypeInfo, error) {
 	impl_ctypes := []golang.TypeInfo{}
 
 	for _, defn_loc := range defn_locs {
@@ -141,8 +143,8 @@ type NeighFind struct {
 	excluded_sources   []golang.TypeSource
 }
 
-// Whether to ignore the CType
-func (c *conftamer) ignoreCType(typ golang.TypeInfo, neigh_find NeighFind, neigh_info *ct.NeighInfo, depth int) bool {
+// Whether to ignore the CType based on its neighbor
+func (c *Conftamer) ignoreCType(typ golang.TypeInfo, neigh_find NeighFind, neigh_info *ct.NeighInfo, depth int) bool {
 	cur_name := ct.TypeName(typ.TypeInfo)
 
 	if neigh_info != nil {
@@ -210,12 +212,8 @@ func (c *conftamer) ignoreCType(typ golang.TypeInfo, neigh_find NeighFind, neigh
 
 // Add all CTypes reachable from this one via neigh_find, stopping on reaching one we've already found
 // neigh_info is info about the neighbor we found this obj via (if any)
-func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind, neigh_info *ct.NeighInfo, depth int) error {
-	// Ignore types not declared in package scope, and basic types
-	_, basic_type := typ.TypeInfo.Type().(*types.Basic)
-	if typ.TypeInfo.Parent() == nil || typ.TypeInfo.Parent().Parent() != types.Universe || basic_type {
-		// e.g. function-local types, or `error`
-		// Can cause TypeName to segfault - don't call it here
+func (c *Conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind, neigh_info *ct.NeighInfo, depth int) error {
+	if ct.BasicType(typ) {
 		graph.Logf(c.log, slog.LevelDebug, "Ignoring non-package-scope type %v", ct.TypeNameSafe(typ.TypeInfo))
 		return nil
 	}
@@ -315,43 +313,7 @@ func (c *conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 	return nil
 }
 
-func (c *conftamer) LogGraphStats(start time.Time) {
-	graph.Logf(c.log, slog.LevelInfo, "Begin stats")
-	defer func() {
-		graph.Logf(c.log, slog.LevelInfo, "End stats")
-	}()
-
-	// Time
-	graph.Logf(c.log, slog.LevelInfo, "Total time: %v", time.Since(start))
-
-	var gopls_time time.Duration
-	for operation, time := range telemetry.GetLatencyTotals() {
-		graph.Logf(c.log, slog.LevelInfo, "gopls %v: %v calls, %v", operation, time.NCalls, time.TotalTime)
-		gopls_time += time.TotalTime
-	}
-	graph.Logf(c.log, slog.LevelInfo, "gopls total: %v", gopls_time)
-
-	var graph_time time.Duration
-	for operation, time := range c.graph().Latency {
-		graph.Logf(c.log, slog.LevelInfo, "graph lib %v: %v calls, %v", operation, time.NCalls, time.TotalTime)
-		graph_time += time.TotalTime
-	}
-	graph.Logf(c.log, slog.LevelInfo, "graph lib total: %v", graph_time)
-
-	// Size
-	n_edges, err := c.graph().Graph.Size()
-	ct.CheckErr(err)
-	n_nodes, err := c.graph().Graph.Order()
-	ct.CheckErr(err)
-	graph.Logf(c.log, slog.LevelInfo, "%v nodes, %v edges", n_nodes, n_edges)
-	roots, leaves, err := graph.RootsLeaves(c.graph().Graph)
-	ct.CheckErr(err)
-
-	graph.Logf(c.log, slog.LevelInfo, "%v roots", len(roots))
-	graph.Logf(c.log, slog.LevelInfo, "%v leaves", len(leaves))
-}
-
-func (c *conftamer) locInTest(loc protocol.Location, log bool) bool {
+func (c *Conftamer) locInTest(loc protocol.Location, log bool) bool {
 	// Assume if Unmarshal call is in a file whose path or filename contains "test", the call is during a test
 	if strings.Contains(loc.URI.Path(), "test") {
 		if strings.HasSuffix(loc.URI.Base(), "_test.go") {
@@ -369,7 +331,7 @@ func (c *conftamer) locInTest(loc protocol.Location, log bool) bool {
 }
 
 // Type was only passed to Unmarshal() during tests, if type was found that way
-func (c *conftamer) testOnlyUnmarshal(unmarshaler golang.TypeInfo) bool {
+func (c *Conftamer) testOnlyUnmarshal(unmarshaler golang.TypeInfo) bool {
 	if len(unmarshaler.UnmarshalLocs) == 0 {
 		// Type not found via call to Unmarshal()
 		return false
@@ -383,7 +345,7 @@ func (c *conftamer) testOnlyUnmarshal(unmarshaler golang.TypeInfo) bool {
 	return true
 }
 
-func (c *conftamer) FindUnmarshalers() []golang.TypeInfo {
+func (c *Conftamer) FindUnmarshalers() []golang.TypeInfo {
 	log := "Finding Unmarshalers: Types likely populated by Unmarshal (via "
 
 	unmarshalers := []golang.TypeInfo{}
@@ -415,7 +377,7 @@ func (c *conftamer) FindUnmarshalers() []golang.TypeInfo {
 }
 
 // Find Unmarshalers and their descendants
-func (c *conftamer) FindUnmarshalerSubgraph() {
+func (c *Conftamer) FindUnmarshalerSubgraph() {
 	start := time.Now()
 	c.unmarshaler_subgraph = ct.New(c.log)
 
@@ -449,14 +411,14 @@ func (c *conftamer) FindUnmarshalerSubgraph() {
 		}
 	}
 
-	c.LogGraphStats(start)
+	c.unmarshaler_subgraph.LogGraphStats(c.log, start)
 	graph.Logf(c.log, slog.LevelInfo, "Serializing")
 	c.graph().Serialize(filepath.Join(c.OutputPath, "unmarshaler_subgraph.text"), c.ModulePrefix, true)
 	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
 }
 
 // Confirm a few things about the relationship between Accessors and Unmarshaler Subgraph
-func (c *conftamer) CheckAccessors(unmarshaler_subnodes []ct.CTypeNode) {
+func (c *Conftamer) CheckAccessors(unmarshaler_subnodes []ct.CTypeNode) {
 	adjacencyMap, err := c.graph().Graph.AdjacencyMap()
 	ct.CheckErr(err)
 
@@ -497,7 +459,7 @@ func (c *conftamer) CheckAccessors(unmarshaler_subnodes []ct.CTypeNode) {
 }
 
 // Whether to skip unmarshaler subnode when finding accessors
-func (c *conftamer) skipUnmarshalerSubnode(unmarshaler_subnode ct.CTypeNode) bool {
+func (c *Conftamer) skipUnmarshalerSubnode(unmarshaler_subnode ct.CTypeNode) bool {
 	module_repo := filepath.Dir(c.ModulePrefix)
 
 	// Skip nodes with any name not defined in the repo containing the module (e.g. github.com/prometheus)
@@ -510,7 +472,7 @@ func (c *conftamer) skipUnmarshalerSubnode(unmarshaler_subnode ct.CTypeNode) boo
 	return false
 }
 
-func (c *conftamer) FindAccessors() {
+func (c *Conftamer) FindAccessors() {
 	start := time.Now()
 
 	// 3. Find "Accessors": Ancestors of Unmarshaler Subgraph, via type definition and configurable rules.
@@ -542,7 +504,7 @@ func (c *conftamer) FindAccessors() {
 		}
 	}
 
-	c.LogGraphStats(start)
+	c.accessors.LogGraphStats(c.log, start)
 	graph.Logf(c.log, slog.LevelInfo, "Serializing")
 	c.graph().Serialize(filepath.Join(c.OutputPath, "accessors.text"), c.ModulePrefix, true)
 	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
@@ -550,7 +512,20 @@ func (c *conftamer) FindAccessors() {
 	c.CheckAccessors(unmarshaler_subnodes)
 }
 
-func (c *conftamer) Run(ctx context.Context, args ...string) error {
+func (c *Conftamer) FindSendingTypes() {
+	start := time.Now()
+	graph.Logf(c.log, slog.LevelInfo, "Finding Sending Types: Types in stack of sending goroutine and its ancestors)")
+
+	c.sending_types = ct.New(c.log)
+	parse.ParseStacksLog(c.sending_types, c.SendLog, c.OutputPath, c.local_server)
+
+	c.sending_types.LogGraphStats(c.log, start)
+	graph.Logf(c.log, slog.LevelInfo, "Serializing")
+	c.sending_types.Serialize(filepath.Join(c.OutputPath, "sending_types.text"), c.ModulePrefix, true)
+	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
+}
+
+func (c *Conftamer) Run(ctx context.Context, args ...string) error {
 	if len(args) != 0 {
 		return tool.CommandLineErrorf("conftamer expects no arguments (but flags are ok)")
 	}
@@ -589,9 +564,14 @@ func (c *conftamer) Run(ctx context.Context, args ...string) error {
 			return a
 		}}))
 
-	c.FindUnmarshalerSubgraph()
-	if c.ShouldFindAccessors {
-		c.FindAccessors()
+	if c.SendLog != "" {
+		c.FindSendingTypes()
+	} else {
+		// Find unmarshaler subgraph, and optionally accessors
+		c.FindUnmarshalerSubgraph()
+		if c.ShouldFindAccessors {
+			c.FindAccessors()
+		}
 	}
 
 	graph.Logf(c.log, slog.LevelInfo, "Exit CTypes finder")

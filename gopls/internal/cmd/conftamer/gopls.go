@@ -3,9 +3,22 @@ package conftamer
 import (
 	"fmt"
 	"go/types"
+
+	"golang.org/x/tools/gopls/internal/golang"
 )
 
 /* Utilities for interacting with info from gopls */
+
+// Whether type is "basic": not declared in package scope, or basic types
+func BasicType(typ golang.TypeInfo) bool {
+	_, basic_type := typ.TypeInfo.Type().(*types.Basic)
+	if typ.TypeInfo.Parent() == nil || typ.TypeInfo.Parent().Parent() != types.Universe || basic_type {
+		// e.g. function-local types, or `error`
+		// Can cause TypeName to segfault - don't call it here
+		return true
+	}
+	return false
+}
 
 // Populate methods the type implements
 func CopyMethods(node *CTypeNode) {
