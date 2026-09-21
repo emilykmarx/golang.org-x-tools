@@ -101,6 +101,10 @@ func ArgTypes(ctx context.Context, snapshots []*cache.Snapshot, query string, op
 	arg_types := []TypeInfo{}
 
 	for _, sym := range syms {
+		if sym.Name != query {
+			// Even with Matcher:CaseSensitive, a query for e.g. github.com/emilykmarx/contextblog/google.Sear still returns github.com/emilykmarx/contextblog/google.Search
+			continue
+		}
 		for _, snapshot := range snapshots {
 			pkg, pgf, cur, err := locToCursor(ctx, snapshot, sym.Location)
 			if err != nil {

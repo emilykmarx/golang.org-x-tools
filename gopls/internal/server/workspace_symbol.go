@@ -10,6 +10,7 @@ import (
 	"golang.org/x/tools/gopls/internal/cache"
 	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/protocol"
+	"golang.org/x/tools/gopls/internal/settings"
 	"golang.org/x/tools/gopls/internal/telemetry"
 	"golang.org/x/tools/internal/event"
 )
@@ -50,8 +51,8 @@ func (s *Server) ArgTypes(ctx context.Context, params *protocol.WorkspaceSymbolP
 	defer done()
 
 	views := s.session.Views()
-	matcher := s.Options().SymbolMatcher
-	style := s.Options().SymbolStyle
+	matcher := settings.SymbolCaseSensitive
+	style := settings.DynamicSymbols
 
 	var snapshots []*cache.Snapshot
 	for _, v := range views {
