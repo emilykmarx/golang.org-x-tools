@@ -29,7 +29,6 @@ type Conftamer struct {
 	local_server         *server.Server
 	unmarshaler_subgraph *ct.CTypes
 	accessors            *ct.CTypes
-	sending_types        *ct.CTypes
 	log                  *slog.Logger
 
 	// Flags about module code
@@ -513,16 +512,7 @@ func (c *Conftamer) FindAccessors() {
 }
 
 func (c *Conftamer) FindSendingTypes() {
-	start := time.Now()
-	graph.Logf(c.log, slog.LevelInfo, "Finding Sending Types: Types in stack of sending goroutine and its ancestors)")
-
-	c.sending_types = ct.New(c.log)
-	parse.ParseStacksLog(c.sending_types, c.SendLog, c.OutputPath, c.local_server)
-
-	c.sending_types.LogGraphStats(c.log, start)
-	graph.Logf(c.log, slog.LevelInfo, "Serializing")
-	c.sending_types.Serialize(filepath.Join(c.OutputPath, "sending_types.text"), c.ModulePrefix, true)
-	graph.Logf(c.log, slog.LevelInfo, "Serialize: %v", time.Since(start))
+	parse.ParseStacksLog(c.ModulePrefix, c.log, c.SendLog, c.OutputPath, c.local_server)
 }
 
 func (c *Conftamer) Run(ctx context.Context, args ...string) error {

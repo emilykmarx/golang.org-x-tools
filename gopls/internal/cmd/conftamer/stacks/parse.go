@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	graph "github.com/emilykmarx/dominikbraun-graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
@@ -137,6 +139,7 @@ func ignoreFn(fn string) bool {
 		"net", "crypto", "google.golang.org/grpc",
 		// entrypoints
 		"testing",
+		"main.main",
 
 		/* module-specific libs*/
 		// wait
@@ -154,11 +157,17 @@ func ignoreFn(fn string) bool {
 	return false
 }
 
+type Parser struct {
+	// dst port => ancestry graph
+	ancestries map[string]*ct.CTypes
+	server     *server.Server
+	err_file   *os.File
+	log        *slog.Logger
+}
+
 // Parse the stacks of the given conn,
 // writing any frames that failed to parse to err_file
-func parseConnStacks(conn string, stacks []string, sending_types *ct.CTypes,
-	server *server.Server, err_file *os.File) {
-
+func (p *Parser) parseConnStacks(conn string, stacks []string) {
 	sending_g := 0
 	_, err := fmt.Sscanf(stacks[0], "goroutine %d", &sending_g)
 	ct.CheckErr(err)
@@ -166,7 +175,13 @@ func parseConnStacks(conn string, stacks []string, sending_types *ct.CTypes,
 	fmt.Printf("SENDING G %v\n", sending_g)
 
 	// Make a node for the message, identified by destination port
-	msg_hash := AddSentMsgNode(conn, sending_types)
+	dst_port := ParseDstPort(conn)
+	ancestry, ok := p.ancestries[dst_port]
+	if !ok {
+		ancestry = ct.New(p.log)
+		p.ancestries[dst_port] = ancestry
+	}
+	msg_hash := AddSentMsgNode(conn, ancestry)
 
 	g_header := "[originating from goroutine "
 	g := sending_g
@@ -188,11 +203,11 @@ func parseConnStacks(conn string, stacks []string, sending_types *ct.CTypes,
 			}
 
 			fmt.Printf("FN: %v\n", fn)
-			cur_fn, existed := AddSendFuncNode(fn, g, sending_types)
+			cur_fn, existed := AddSendFuncNode(fn, g, ancestry)
 			if prev_fn != cur_fn { // don't add self-edges
 				// add edge to previous frame (in parent g's stack if applicable),
 				// or to sent message (if this is the sending frame)
-				err := sending_types.Graph.AddEdge(cur_fn, prev_fn, graph.EdgeWeight(1))
+				err := ancestry.Graph.AddEdge(cur_fn, prev_fn, graph.EdgeWeight(1))
 				if err != nil {
 					if !errors.Is(err, graph.ErrEdgeAlreadyExists) {
 						ct.CheckErr(err)
@@ -211,7 +226,7 @@ func parseConnStacks(conn string, stacks []string, sending_types *ct.CTypes,
 // Parse a log of stacktraces (including ancestor goroutines) with a specific format.
 // Write parse failures to a log.
 // Run from the directory containing module source code, since gopls will analyze it
-func ParseStacksLog(sending_types *ct.CTypes, send_log string, output_path string, local_server *server.Server) {
+func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, output_path string, local_server *server.Server) {
 	send_file, err := os.Open(send_log)
 	ct.CheckErr(err)
 	defer send_file.Close()
@@ -219,14 +234,25 @@ func ParseStacksLog(sending_types *ct.CTypes, send_log string, output_path strin
 	err_file, err := os.Create(filepath.Join(output_path, "stackframe_fails.md"))
 	ct.CheckErr(err)
 	defer err_file.Close()
+	parser := Parser{ancestries: make(map[string]*ct.CTypes), server: local_server, err_file: err_file, log: log}
+
+	start := time.Now()
+	graph.Logf(log, slog.LevelInfo, "Parsing ancestry stacktrace for message sends")
 
 	scanner := bufio.NewScanner(send_file)
 	for conn, stacks := parseOneConn(scanner); conn != ""; conn, stacks = parseOneConn(scanner) {
-		parseConnStacks(conn, stacks, sending_types, local_server, err_file)
+		parser.parseConnStacks(conn, stacks)
 	}
 
 	if err := scanner.Err(); err != nil {
 		panic(err)
 	}
 
+	for dport, ancestry := range parser.ancestries {
+		ancestry.LogGraphStats(log, start)
+		out := fmt.Sprintf("dport%v_sending_types.text", dport)
+		graph.Logf(log, slog.LevelInfo, "Serializing to %v", out)
+		ancestry.Serialize(filepath.Join(output_path, out), module_prefix, true)
+		graph.Logf(log, slog.LevelInfo, "Serialize: %v", time.Since(start))
+	}
 }
