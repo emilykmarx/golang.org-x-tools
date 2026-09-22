@@ -80,21 +80,78 @@ func AddSentMsgNode(conn string, sending_types *ct.CTypes) ct.CTypeHash {
 	dst_port := ParseDstPort(conn)
 	hash := "DPORT: " + dst_port
 	new_ctype := ct.CTypeNode{Names: []ct.FullTypeName{ct.FullTypeName(hash)}}
-	_ = sending_types.Graph.AddVertex(new_ctype, func(vp *graph.VertexProperties) {}) // ok if existed
+	_ = sending_types.Graph.AddVertex(new_ctype, graph.VertexAttribute("color", "red"))
 	return ct.CTypeNodeHash(new_ctype)
 }
 
 // return hash and whether existed
-func AddSendFuncNode(fn string, sending_types *ct.CTypes) (ct.CTypeHash, bool) {
+func AddSendFuncNode(fn string, g int, sending_types *ct.CTypes) (ct.CTypeHash, bool) {
+	// This will group calls from different goroutines, so e.g. if G1 is A => B => msg X and G2 is A' => B => msg Y,
+	// it will look like both A or A' could lead to both msgs.
+	// To avoid (at the cost of more nodes), uncomment line below:
+	//hash := fmt.Sprintf("%v (%v)", fn, g)
 	hash := fn
 	new_ctype := ct.CTypeNode{Names: []ct.FullTypeName{ct.FullTypeName(hash)}}
-	existed := sending_types.Graph.AddVertex(new_ctype, func(vp *graph.VertexProperties) {}) // ok if existed
+	last_slash := strings.LastIndex(fn, "/")
+	if last_slash == -1 {
+		last_slash = 0
+	}
+	first_dot := last_slash + strings.Index(fn[last_slash:], ".") // first dot after last slash
+	pkg := fn[:first_dot]
+
+	existed := sending_types.Graph.AddVertex(new_ctype, graph.VertexAttribute("pkg", pkg))
 	if existed != nil {
 		if !errors.Is(existed, graph.ErrVertexAlreadyExists) {
 			ct.CheckErr(existed)
 		}
 	}
 	return ct.CTypeNodeHash(new_ctype), existed != nil
+}
+
+// Query gopls for the arg (and recvr) types of the fn
+func ArgTypes(fn string, server *server.Server, err_file *os.File) {
+	p := protocol.WorkspaceSymbolParams{
+		Query: fn,
+	}
+	arg_types, err := server.ArgTypes(context.Background(), &p)
+	if err != nil {
+		// Write failure to log
+		// Would be useful to print next line here too, and line as is w/o sanitize (so can search logs easier)
+		err_log := []string{fn, err.Error()}
+		_, err := err_file.WriteString(strings.Join(err_log, "\n") + "\n")
+		ct.CheckErr(err)
+		return
+	}
+	fmt.Printf("ARGS:\n")
+	for _, arg := range arg_types {
+		if !ct.BasicType(arg) {
+			fmt.Printf("%v\n", arg.TypeInfo.Name())
+		}
+	}
+}
+
+// Functions that don't need to be graphed
+func ignoreFn(fn string) bool {
+	ignore_libs := []string{
+		// generic messages
+		"net", "crypto", "google.golang.org/grpc",
+		// entrypoints
+		"testing",
+
+		/* module-specific libs*/
+		// wait
+		"k8s.io/apimachinery/pkg/util/wait",
+		// generic messages
+		"k8s.io/client-go/rest",
+		"k8s.io/client-go/transport",
+	}
+	for _, lib := range ignore_libs {
+		if strings.HasPrefix(fn, lib) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Parse the stacks of the given conn,
@@ -112,7 +169,7 @@ func parseConnStacks(conn string, stacks []string, sending_types *ct.CTypes,
 	msg_hash := AddSentMsgNode(conn, sending_types)
 
 	g_header := "[originating from goroutine "
-	g := 0
+	g := sending_g
 	prev_fn := msg_hash
 	for _, line := range stacks {
 		if strings.Contains(line, g_header) {
@@ -126,12 +183,12 @@ func parseConnStacks(conn string, stacks []string, sending_types *ct.CTypes,
 			// Assume the last ( is the beginning of the args
 			fn := line[:strings.LastIndex(line, "(")]
 			SanitizeMethod(&fn)
-			if fn == "main.main" || fn == "net.conn.log" || fn == "net.conn.Write" {
-				// Ignore logging function
+			if ignoreFn(fn) {
 				continue
 			}
+
 			fmt.Printf("FN: %v\n", fn)
-			cur_fn, existed := AddSendFuncNode(fn, sending_types)
+			cur_fn, existed := AddSendFuncNode(fn, g, sending_types)
 			if prev_fn != cur_fn { // don't add self-edges
 				// add edge to previous frame (in parent g's stack if applicable),
 				// or to sent message (if this is the sending frame)
@@ -143,25 +200,8 @@ func parseConnStacks(conn string, stacks []string, sending_types *ct.CTypes,
 				}
 				prev_fn = cur_fn
 
-				p := protocol.WorkspaceSymbolParams{
-					Query: fn,
-				}
-				if !existed { // avoid gopls call if already did it for this fn
-					arg_types, err := server.ArgTypes(context.Background(), &p)
-					if err != nil {
-						// Write failure to log
-						// Would be useful to print next line here too, and line as is w/o sanitize (so can search logs easier)
-						err_log := []string{fn, err.Error()}
-						_, err := err_file.WriteString(strings.Join(err_log, "\n") + "\n")
-						ct.CheckErr(err)
-						continue
-					}
-					fmt.Printf("ARGS:\n")
-					for _, arg := range arg_types {
-						if !ct.BasicType(arg) {
-							fmt.Printf("%v\n", arg.TypeInfo.Name())
-						}
-					}
+				if !existed { // Get arg types
+					//		ArgTypes(fn, server, err_file)
 				}
 			}
 		}
