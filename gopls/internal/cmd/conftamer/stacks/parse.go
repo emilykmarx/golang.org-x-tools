@@ -14,6 +14,7 @@ import (
 
 	graph "github.com/emilykmarx/dominikbraun-graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
+	"golang.org/x/tools/gopls/internal/cmd/conftamer/stacks/modules/k8s_api_server"
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/server"
 )
@@ -86,22 +87,41 @@ func AddSentMsgNode(conn string, sending_types *ct.CTypes) ct.CTypeHash {
 	return ct.CTypeNodeHash(new_ctype)
 }
 
+// Shorten fn
+func (p *Parser) FuncLabel(fn string, pkg string) string {
+	label, _ := strings.CutPrefix(fn, p.module_prefix) // always cut the module name
+	// module-specific shortening
+	label = k8s_api_server.FuncLabel(label, pkg, p.module_prefix)
+	return label
+}
+
+func FuncPkg(fn string) string {
+	last_slash := strings.LastIndex(fn, "/")
+	if last_slash == -1 {
+		last_slash = 0
+	}
+	first_dot := last_slash + strings.Index(fn[last_slash:], ".") // first dot after last slash
+	return fn[:first_dot]
+}
+
 // return hash and whether existed
-func AddSendFuncNode(fn string, g int, sending_types *ct.CTypes) (ct.CTypeHash, bool) {
+func (p *Parser) AddSendFuncNode(fn string, g int, sending_types *ct.CTypes) (ct.CTypeHash, bool) {
 	// This will group calls from different goroutines, so e.g. if G1 is A => B => msg X and G2 is A' => B => msg Y,
 	// it will look like both A or A' could lead to both msgs.
 	// To avoid (at the cost of more nodes), uncomment line below:
 	//hash := fmt.Sprintf("%v (%v)", fn, g)
 	hash := fn
 	new_ctype := ct.CTypeNode{Names: []ct.FullTypeName{ct.FullTypeName(hash)}}
-	last_slash := strings.LastIndex(fn, "/")
-	if last_slash == -1 {
-		last_slash = 0
-	}
-	first_dot := last_slash + strings.Index(fn[last_slash:], ".") // first dot after last slash
-	pkg := fn[:first_dot]
+	pkg := FuncPkg(fn)
 
-	existed := sending_types.Graph.AddVertex(new_ctype, graph.VertexAttribute("pkg", pkg))
+	// Hash becomes "Id" column; label is default node label
+	existed := sending_types.Graph.AddVertex(new_ctype,
+		graph.VertexAttribute("pkg", pkg),
+		graph.VertexAttribute("label", p.FuncLabel(fn, pkg)),
+		// else gephi only shows this in Data Lab, not Overview
+		graph.VertexAttribute("fn", fn),
+	)
+
 	if existed != nil {
 		if !errors.Is(existed, graph.ErrVertexAlreadyExists) {
 			ct.CheckErr(existed)
@@ -140,14 +160,11 @@ func ignoreFn(fn string) bool {
 		// entrypoints
 		"testing",
 		"main.main",
-
-		/* module-specific libs*/
-		// wait
-		"k8s.io/apimachinery/pkg/util/wait",
-		// generic messages
-		"k8s.io/client-go/rest",
-		"k8s.io/client-go/transport",
 	}
+
+	/* module-specific libs */
+	ignore_libs = append(ignore_libs, k8s_api_server.IGNORE_FNS...)
+
 	for _, lib := range ignore_libs {
 		if strings.HasPrefix(fn, lib) {
 			return true
@@ -159,10 +176,11 @@ func ignoreFn(fn string) bool {
 
 type Parser struct {
 	// dst port => ancestry graph
-	ancestries map[string]*ct.CTypes
-	server     *server.Server
-	err_file   *os.File
-	log        *slog.Logger
+	ancestries    map[string]*ct.CTypes
+	server        *server.Server
+	err_file      *os.File
+	log           *slog.Logger
+	module_prefix string
 }
 
 // Parse the stacks of the given conn,
@@ -203,7 +221,7 @@ func (p *Parser) parseConnStacks(conn string, stacks []string) {
 			}
 
 			fmt.Printf("FN: %v\n", fn)
-			cur_fn, existed := AddSendFuncNode(fn, g, ancestry)
+			cur_fn, existed := p.AddSendFuncNode(fn, g, ancestry)
 			if prev_fn != cur_fn { // don't add self-edges
 				// add edge to previous frame (in parent g's stack if applicable),
 				// or to sent message (if this is the sending frame)
@@ -234,7 +252,7 @@ func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, out
 	err_file, err := os.Create(filepath.Join(output_path, "stackframe_fails.md"))
 	ct.CheckErr(err)
 	defer err_file.Close()
-	parser := Parser{ancestries: make(map[string]*ct.CTypes), server: local_server, err_file: err_file, log: log}
+	parser := Parser{ancestries: make(map[string]*ct.CTypes), server: local_server, err_file: err_file, log: log, module_prefix: module_prefix}
 
 	start := time.Now()
 	graph.Logf(log, slog.LevelInfo, "Parsing ancestry stacktrace for message sends")
