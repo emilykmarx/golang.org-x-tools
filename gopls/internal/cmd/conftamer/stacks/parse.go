@@ -15,6 +15,7 @@ import (
 	graph "github.com/emilykmarx/dominikbraun-graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
 	"golang.org/x/tools/gopls/internal/cmd/conftamer/stacks/modules/k8s_api_server"
+	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/server"
 )
@@ -105,58 +106,75 @@ func FuncPkg(fn string) string {
 }
 
 // return hash and whether existed
-func (p *Parser) AddSendFuncNode(fn string, g int, sending_types *ct.CTypes) (ct.CTypeHash, bool) {
+func (p *Parser) AddSendFuncNode(fn string, frame []string, g int, sending_types *ct.CTypes) (ct.CTypeHash, bool) {
 	// This will group calls from different goroutines, so e.g. if G1 is A => B => msg X and G2 is A' => B => msg Y,
 	// it will look like both A or A' could lead to both msgs.
 	// To avoid (at the cost of more nodes), uncomment line below:
 	//hash := fmt.Sprintf("%v (%v)", fn, g)
-	hash := fn
+	hash := ct.CTypeHash(fn)
 	new_ctype := ct.CTypeNode{Names: []ct.FullTypeName{ct.FullTypeName(hash)}}
+	if _, err := sending_types.Graph.Vertex(hash); err == nil {
+		// avoid calling gopls
+		return hash, true
+	}
 	pkg := FuncPkg(fn)
+	attrs := map[string]string{
+		"pkg":   pkg,
+		"label": p.FuncLabel(fn, pkg),
+		// else gephi only shows this in Data Lab, not Overview
+		"fn": fn,
+	}
+
+	args := p.ArgTypes(fn, frame)
+	arg_names := []string{}
+	for _, arg := range args {
+		arg_names = append(arg_names, string(ct.TypeNameSafe(arg.TypeInfo)))
+	}
+	attrs["args"] = strings.Join(arg_names, ",")
 
 	// Hash becomes "Id" column; label is default node label
-	existed := sending_types.Graph.AddVertex(new_ctype,
-		graph.VertexAttribute("pkg", pkg),
-		graph.VertexAttribute("label", p.FuncLabel(fn, pkg)),
-		// else gephi only shows this in Data Lab, not Overview
-		graph.VertexAttribute("fn", fn),
-	)
+	err := sending_types.Graph.AddVertex(new_ctype, graph.VertexAttributes(attrs))
+	ct.CheckErr(err)
 
-	if existed != nil {
-		if !errors.Is(existed, graph.ErrVertexAlreadyExists) {
-			ct.CheckErr(existed)
-		}
-	}
-	return ct.CTypeNodeHash(new_ctype), existed != nil
+	return ct.CTypeNodeHash(new_ctype), false
 }
 
-// Query gopls for the arg (and recvr) types of the fn
-func ArgTypes(fn string, server *server.Server, err_file *os.File) {
-	p := protocol.WorkspaceSymbolParams{
+// Query gopls for the arg (and recvr) types of the fn.
+// Write query errors to err_file (frame should be the erroring frame)
+func (p *Parser) ArgTypes(fn string, frame []string) []golang.TypeInfo {
+	gopls_query := protocol.WorkspaceSymbolParams{
 		Query: fn,
 	}
-	arg_types, err := server.ArgTypes(context.Background(), &p)
+	arg_types, err := p.server.ArgTypes(context.Background(), &gopls_query)
 	if err != nil {
-		// Write failure to log
-		// Would be useful to print next line here too, and line as is w/o sanitize (so can search logs easier)
-		err_log := []string{fn, err.Error()}
-		_, err := err_file.WriteString(strings.Join(err_log, "\n") + "\n")
-		ct.CheckErr(err)
-		return
+		if _, ok := p.err_fns[fn]; !ok {
+			p.err_fns[fn] = struct{}{}
+			// Write original frame to log, unless already did
+			err_log := append(frame, err.Error())
+			_, err := p.err_file.WriteString(strings.Join(err_log, "") + "\n\n")
+			ct.CheckErr(err)
+			return nil
+		}
+	} else {
+		p.success_fns += 1
 	}
 	fmt.Printf("ARGS:\n")
+	ret := []golang.TypeInfo{}
 	for _, arg := range arg_types {
 		if !ct.BasicType(arg) {
 			fmt.Printf("%v\n", arg.TypeInfo.Name())
+			ret = append(ret, arg)
 		}
 	}
+
+	return ret
 }
 
 // Functions that don't need to be graphed
 func ignoreFn(fn string) bool {
 	ignore_libs := []string{
 		// generic messages
-		"net", "crypto", "google.golang.org/grpc",
+		"net", "crypto", "google.golang.org/grpc", "golang.org/x/net",
 		// entrypoints
 		"testing",
 		"main.main",
@@ -176,11 +194,16 @@ func ignoreFn(fn string) bool {
 
 type Parser struct {
 	// dst port => ancestry graph
-	ancestries    map[string]*ct.CTypes
+	ancestries map[string]*ct.CTypes
+
 	server        *server.Server
-	err_file      *os.File
 	log           *slog.Logger
 	module_prefix string
+
+	// Logs about gopls queries
+	err_file    *os.File
+	err_fns     map[string]struct{}
+	success_fns int
 }
 
 // Parse the stacks of the given conn,
@@ -204,7 +227,7 @@ func (p *Parser) parseConnStacks(conn string, stacks []string) {
 	g_header := "[originating from goroutine "
 	g := sending_g
 	prev_fn := msg_hash
-	for _, line := range stacks {
+	for i, line := range stacks {
 		if strings.Contains(line, g_header) {
 			_, err := fmt.Sscanf(line, g_header+"%d", &g)
 			ct.CheckErr(err)
@@ -221,7 +244,7 @@ func (p *Parser) parseConnStacks(conn string, stacks []string) {
 			}
 
 			fmt.Printf("FN: %v\n", fn)
-			cur_fn, existed := p.AddSendFuncNode(fn, g, ancestry)
+			cur_fn, _ := p.AddSendFuncNode(fn, stacks[i:i+2], g, ancestry)
 			if prev_fn != cur_fn { // don't add self-edges
 				// add edge to previous frame (in parent g's stack if applicable),
 				// or to sent message (if this is the sending frame)
@@ -232,10 +255,6 @@ func (p *Parser) parseConnStacks(conn string, stacks []string) {
 					}
 				}
 				prev_fn = cur_fn
-
-				if !existed { // Get arg types
-					//		ArgTypes(fn, server, err_file)
-				}
 			}
 		}
 	}
@@ -249,10 +268,13 @@ func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, out
 	ct.CheckErr(err)
 	defer send_file.Close()
 
-	err_file, err := os.Create(filepath.Join(output_path, "stackframe_fails.md"))
+	err_filepath := filepath.Join(output_path, "stackframe_fails.md")
+	err_file, err := os.Create(err_filepath)
 	ct.CheckErr(err)
 	defer err_file.Close()
-	parser := Parser{ancestries: make(map[string]*ct.CTypes), server: local_server, err_file: err_file, log: log, module_prefix: module_prefix}
+	parser := Parser{ancestries: make(map[string]*ct.CTypes), server: local_server,
+		err_file: err_file, err_fns: make(map[string]struct{}),
+		log: log, module_prefix: module_prefix}
 
 	start := time.Now()
 	graph.Logf(log, slog.LevelInfo, "Parsing ancestry stacktrace for message sends")
@@ -265,6 +287,9 @@ func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, out
 	if err := scanner.Err(); err != nil {
 		panic(err)
 	}
+
+	graph.Logf(log, slog.LevelInfo, "%v gopls queries failed, %v succeeded - see %v",
+		len(parser.err_fns), parser.success_fns, err_filepath)
 
 	for dport, ancestry := range parser.ancestries {
 		ancestry.LogGraphStats(log, start)
