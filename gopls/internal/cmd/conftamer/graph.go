@@ -294,6 +294,11 @@ func AppendFieldTag(field string, tag string, key string) string {
 
 // Convert edge data (any type) to DOT attributes (map[string]string)
 func (c *CTypes) edgeDataToAttributes(edge graph.Edge[CTypeHash]) map[string]string {
+	// Assume already done (e.g. serializing a graph produced by deserializing)
+	if edge.Properties.Attributes != nil {
+		return edge.Properties.Attributes
+	}
+
 	edge_attrs := make(map[string]string)
 	edge_data := edge.Properties.Data.([]ASTPath)
 	all_tags := []string{}

@@ -14,7 +14,7 @@ import (
 
 	graph "github.com/emilykmarx/dominikbraun-graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
-	"golang.org/x/tools/gopls/internal/cmd/conftamer/stacks/modules/k8s_api_server"
+	"golang.org/x/tools/gopls/internal/cmd/conftamer/parse/modules/k8s_api_server"
 	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/server"
@@ -89,20 +89,21 @@ func AddSentMsgNode(conn string, sending_types *ct.CTypes) ct.CTypeHash {
 }
 
 // Shorten fn
-func (p *Parser) FuncLabel(fn string, pkg string) string {
-	label, _ := strings.CutPrefix(fn, p.module_prefix) // always cut the module name
+func (p *Parser) ShortLabel(full string, pkg string) string {
+	label, _ := strings.CutPrefix(full, p.Module_prefix) // always cut the module name
 	// module-specific shortening
-	label = k8s_api_server.FuncLabel(label, pkg, p.module_prefix)
+	label = k8s_api_server.ShortLabel(label, pkg, p.Module_prefix)
 	return label
 }
 
-func FuncPkg(fn string) string {
-	last_slash := strings.LastIndex(fn, "/")
+// Get pkg of a fully-qualified name
+func Pkg(full string) string {
+	last_slash := strings.LastIndex(full, "/")
 	if last_slash == -1 {
 		last_slash = 0
 	}
-	first_dot := last_slash + strings.Index(fn[last_slash:], ".") // first dot after last slash
-	return fn[:first_dot]
+	first_dot := last_slash + strings.Index(full[last_slash:], ".") // first dot after last slash
+	return full[:first_dot]
 }
 
 // return hash and whether existed
@@ -117,10 +118,10 @@ func (p *Parser) AddSendFuncNode(fn string, frame []string, g int, sending_types
 		// avoid calling gopls
 		return hash, true
 	}
-	pkg := FuncPkg(fn)
+	pkg := Pkg(fn)
 	attrs := map[string]string{
 		"pkg":   pkg,
-		"label": p.FuncLabel(fn, pkg),
+		"label": p.ShortLabel(fn, pkg),
 		// else gephi only shows this in Data Lab, not Overview
 		"fn": fn,
 	}
@@ -198,7 +199,7 @@ type Parser struct {
 
 	server        *server.Server
 	log           *slog.Logger
-	module_prefix string
+	Module_prefix string
 
 	// Logs about gopls queries
 	err_file    *os.File
@@ -274,7 +275,7 @@ func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, out
 	defer err_file.Close()
 	parser := Parser{ancestries: make(map[string]*ct.CTypes), server: local_server,
 		err_file: err_file, err_fns: make(map[string]struct{}),
-		log: log, module_prefix: module_prefix}
+		log: log, Module_prefix: module_prefix}
 
 	start := time.Now()
 	graph.Logf(log, slog.LevelInfo, "Parsing ancestry stacktrace for message sends")

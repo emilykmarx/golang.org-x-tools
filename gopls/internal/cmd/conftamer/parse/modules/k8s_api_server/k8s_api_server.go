@@ -10,7 +10,7 @@ var IGNORE_FNS = []string{
 	"k8s.io/client-go/transport",
 }
 
-func FuncLabel(cut_fn string, pkg string, module_prefix string) string {
+func ShortLabel(cut_fn string, pkg string, module_prefix string) string {
 	is_module_node := strings.HasPrefix(pkg, module_prefix)
 
 	// Shortened package name

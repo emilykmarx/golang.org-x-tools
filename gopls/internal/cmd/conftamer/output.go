@@ -131,7 +131,7 @@ func (c *CTypes) Serialize(filename string, cutprefix string, draw_dot bool) {
 	WriteTestFile(marshaled, filename)
 
 	if draw_dot {
-		// TODO(CT)(minor) - would be nice to cut the module prefix
+		// TODO(CT)(minor) - also do the stuff in prettify (e.g. add pkg attributes)
 		parts := strings.Split(filename, ".")
 		if len(parts) == 1 {
 			panic("filename should have a .")
