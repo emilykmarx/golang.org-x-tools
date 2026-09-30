@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,45 +19,67 @@ import (
 	"golang.org/x/tools/gopls/internal/server"
 )
 
+type SEND_OR_RECV string
+
+const (
+	SEND SEND_OR_RECV = "send"
+	RECV SEND_OR_RECV = "recv"
+)
+
+// Info about one connection log
+type ConnLog struct {
+	conn_info    string
+	stacks       []string
+	send_or_recv SEND_OR_RECV
+}
+
 // Return info on the next conn in the scanner: the connection info, and the corresponding stacks
-func parseOneConn(scanner *bufio.Scanner) (string, []string) {
-	stacks := []string{}
+func parseOneConn(scanner *bufio.Scanner) ConnLog {
 	in_write := false // Should print without anything interleaved
-	conn_info := ""
+	conn_log := ConnLog{send_or_recv: SEND}
 	const (
-		CONN_BEGIN_HDR = "BEGIN STACKS"
-		CONN_INFO_HDR  = "CONN: "
+		CONN_BEGIN_HDR  = "conn.log ("
+		CONN_STACKS_HDR = "BEGIN STACKS"
+		CONN_INFO_HDR   = "CONN: "
 	)
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if idx := strings.Index(line, CONN_BEGIN_HDR); idx != -1 {
+		if idx := strings.Index(line, CONN_STACKS_HDR); idx != -1 {
 			in_write = true // Start saving lines of this write
-			next_char := len(CONN_BEGIN_HDR) + idx
+			s_or_r := strings.Index(line, CONN_BEGIN_HDR)
+			if s_or_r == -1 {
+				ct.CheckErr(fmt.Errorf("bad format %v", line))
+			}
+			if string(line[s_or_r+len(CONN_BEGIN_HDR)]) == "r" {
+				conn_log.send_or_recv = RECV
+			}
+			next_char := len(CONN_STACKS_HDR) + idx
 			if next_char > len(line)-1 {
 				// end of line => assume format is newline-separated (e.g. k8s integration tests)
 			} else {
 				// not end of line => assume format is msg="<whole conn log with escaped \n>" (e.g. k8s from prombench pod log)
 				stacks := strings.Split(line, "\\n")
-				conn_info, ok := strings.CutPrefix(stacks[1], CONN_INFO_HDR)
+				ok := false
+				conn_log.conn_info, ok = strings.CutPrefix(stacks[1], CONN_INFO_HDR)
 				if !ok {
 					ct.CheckErr(fmt.Errorf("bad format %v", line))
 				}
-				stacks = stacks[2 : len(stacks)-1]
-				return conn_info, stacks
+				conn_log.stacks = stacks[2 : len(stacks)-1]
+				return conn_log
 			}
 		} else if rest, ok := strings.CutPrefix(line, CONN_INFO_HDR); ok {
-			conn_info = rest
+			conn_log.conn_info = rest
 		} else if strings.Contains(line, "END STACKS") {
-			return conn_info, stacks
+			return conn_log
 		} else if in_write {
-			stacks = append(stacks, line)
+			conn_log.stacks = append(conn_log.stacks, line)
 		} else {
 			// keep scanning till enter write
 		}
 	}
 
-	return "", nil
+	return conn_log
 }
 
 func SanitizeMethod(method *string) {
@@ -90,16 +111,13 @@ func ParseConn(conn string) []string {
 	return parts
 }
 
-func ParseDstPort(conn string) string {
+func ParseDst(conn string) string {
 	parsed_conn := ParseConn(conn)
-	_, dst_port, err := net.SplitHostPort(parsed_conn[len(parsed_conn)-1])
-	ct.CheckErr(err)
-	return dst_port
+	return parsed_conn[len(parsed_conn)-1]
 }
 
-func AddSentMsgNode(conn string, sending_types *ct.CTypes) ct.CTypeHash {
-	dst_port := ParseDstPort(conn)
-	hash := "DPORT: " + dst_port
+func AddMsgNode(conn string, sending_types *ct.CTypes) ct.CTypeHash {
+	hash := ParseDst(conn)
 	new_ctype := ct.CTypeNode{Names: []ct.FullTypeName{ct.FullTypeName(hash)}}
 	_ = sending_types.Graph.AddVertex(new_ctype, graph.VertexAttribute("color", "red"))
 	return ct.CTypeNodeHash(new_ctype)
@@ -211,8 +229,8 @@ func ignoreFn(fn string) bool {
 }
 
 type Parser struct {
-	// dst port => ancestry graph
-	ancestries map[string]*ct.CTypes
+	// For each of send and recv: destination => ancestry graph
+	ancestries map[SEND_OR_RECV]map[string]*ct.CTypes
 
 	server        *server.Server
 	log           *slog.Logger
@@ -226,26 +244,26 @@ type Parser struct {
 
 // Parse the stacks of the given conn,
 // writing any frames that failed to parse to err_file
-func (p *Parser) parseConnStacks(conn string, stacks []string) {
+func (p *Parser) parseConnStacks(conn_log ConnLog) {
 	sending_g := 0
-	_, err := fmt.Sscanf(stacks[0], "goroutine %d", &sending_g)
+	_, err := fmt.Sscanf(conn_log.stacks[0], "goroutine %d", &sending_g)
 	ct.CheckErr(err)
-	fmt.Printf("%+v\n", ParseConn(conn))
+	fmt.Printf("%+v\n", ParseConn(conn_log.conn_info))
 	fmt.Printf("SENDING G %v\n", sending_g)
 
-	// Make a node for the message, identified by destination port
-	dst_port := ParseDstPort(conn)
-	ancestry, ok := p.ancestries[dst_port]
+	// Make a node for the message, identified by destination endpoint
+	dst := ParseDst(conn_log.conn_info)
+	ancestry, ok := p.ancestries[conn_log.send_or_recv][dst]
 	if !ok {
 		ancestry = ct.New(p.log)
-		p.ancestries[dst_port] = ancestry
+		p.ancestries[conn_log.send_or_recv][dst] = ancestry
 	}
-	msg_hash := AddSentMsgNode(conn, ancestry)
+	msg_hash := AddMsgNode(conn_log.conn_info, ancestry)
 
 	g_header := "[originating from goroutine "
 	g := sending_g
 	prev_fn := msg_hash
-	for i, line := range stacks {
+	for i, line := range conn_log.stacks {
 		if strings.Contains(line, g_header) {
 			_, err := fmt.Sscanf(line, g_header+"%d", &g)
 			ct.CheckErr(err)
@@ -262,7 +280,7 @@ func (p *Parser) parseConnStacks(conn string, stacks []string) {
 			}
 
 			fmt.Printf("FN: %v\n", fn)
-			cur_fn, _ := p.AddSendFuncNode(fn, stacks[i:i+2], g, ancestry)
+			cur_fn, _ := p.AddSendFuncNode(fn, conn_log.stacks[i:i+2], g, ancestry)
 			if prev_fn != cur_fn { // don't add self-edges
 				// add edge to previous frame (in parent g's stack if applicable),
 				// or to sent message (if this is the sending frame)
@@ -279,18 +297,27 @@ func (p *Parser) parseConnStacks(conn string, stacks []string) {
 }
 
 // Parse a log of stacktraces (including ancestor goroutines) with a specific format.
+// Separate resulting sends and recvs into two directories, each with a file for each dst endpoint.
 // Write parse failures to a log.
-// Run from the directory containing module source code, since gopls will analyze it
+// Run from the directory containing module source code, since gopls will analyze it.
 func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, output_path string, local_server *server.Server) {
 	send_file, err := os.Open(send_log)
 	ct.CheckErr(err)
 	defer send_file.Close()
+	for _, send_or_recv := range []SEND_OR_RECV{SEND, RECV} {
+		ct.CheckErr(os.MkdirAll(filepath.Join(output_path, string(send_or_recv)), 0777))
+	}
 
 	err_filepath := filepath.Join(output_path, "stackframe_fails.md")
 	err_file, err := os.Create(err_filepath)
 	ct.CheckErr(err)
 	defer err_file.Close()
-	parser := Parser{ancestries: make(map[string]*ct.CTypes), server: local_server,
+	ancestries := map[SEND_OR_RECV]map[string]*ct.CTypes{
+		SEND: make(map[string]*ct.CTypes),
+		RECV: make(map[string]*ct.CTypes),
+	}
+	parser := Parser{ancestries: ancestries,
+		server:   local_server,
 		err_file: err_file, err_fns: make(map[string]struct{}),
 		log: log, Module_prefix: module_prefix}
 
@@ -298,14 +325,14 @@ func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, out
 	graph.Logf(log, slog.LevelInfo, "Parsing ancestry stacktrace for message sends")
 
 	scanner := bufio.NewScanner(send_file)
-	for conn, stacks := parseOneConn(scanner); conn != ""; conn, stacks = parseOneConn(scanner) {
-		parser.parseConnStacks(conn, stacks)
+	for conn_log := parseOneConn(scanner); conn_log.conn_info != ""; conn_log = parseOneConn(scanner) {
+		parser.parseConnStacks(conn_log)
 	}
 
 	if err := scanner.Err(); err != nil {
 		panic(err)
 	}
-	if len(parser.ancestries) == 0 {
+	if len(parser.ancestries[SEND]) == 0 && len(parser.ancestries[RECV]) == 0 {
 		// sanity check
 		graph.Logf(log, slog.LevelError, "No ancestries found")
 	}
@@ -313,11 +340,13 @@ func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, out
 	graph.Logf(log, slog.LevelInfo, "%v gopls queries failed, %v succeeded - see %v",
 		len(parser.err_fns), parser.success_fns, err_filepath)
 
-	for dport, ancestry := range parser.ancestries {
-		ancestry.LogGraphStats(log, start)
-		out := fmt.Sprintf("dport%v_sending_types.text", dport)
-		graph.Logf(log, slog.LevelInfo, "Serializing to %v", out)
-		ancestry.Serialize(filepath.Join(output_path, out), module_prefix, true)
-		graph.Logf(log, slog.LevelInfo, "Serialize: %v", time.Since(start))
+	for send_or_recv, ancestries := range parser.ancestries {
+		for dst, ancestry := range ancestries {
+			ancestry.LogGraphStats(log, start)
+			out := dst + ".text"
+			graph.Logf(log, slog.LevelInfo, "Serializing to %v", out)
+			ancestry.Serialize(filepath.Join(output_path, string(send_or_recv), out), module_prefix, true)
+			graph.Logf(log, slog.LevelInfo, "Serialize: %v", time.Since(start))
+		}
 	}
 }
