@@ -25,17 +25,34 @@ func parseOneConn(scanner *bufio.Scanner) (string, []string) {
 	stacks := []string{}
 	in_write := false // Should print without anything interleaved
 	conn_info := ""
+	const (
+		CONN_BEGIN_HDR = "BEGIN STACKS"
+		CONN_INFO_HDR  = "CONN: "
+	)
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.Contains(line, "BEGIN STACKS") {
+		if idx := strings.Index(line, CONN_BEGIN_HDR); idx != -1 {
 			in_write = true // Start saving lines of this write
-		} else if rest, ok := strings.CutPrefix(line, "CONN: "); ok {
+			next_char := len(CONN_BEGIN_HDR) + idx
+			if next_char > len(line)-1 {
+				// end of line => assume format is newline-separated (e.g. k8s integration tests)
+			} else {
+				// not end of line => assume format is msg="<whole conn log with escaped \n>" (e.g. k8s from prombench pod log)
+				stacks := strings.Split(line, "\\n")
+				conn_info, ok := strings.CutPrefix(stacks[1], CONN_INFO_HDR)
+				if !ok {
+					ct.CheckErr(fmt.Errorf("bad format %v", line))
+				}
+				stacks = stacks[2 : len(stacks)-1]
+				return conn_info, stacks
+			}
+		} else if rest, ok := strings.CutPrefix(line, CONN_INFO_HDR); ok {
 			conn_info = rest
 		} else if strings.Contains(line, "END STACKS") {
 			return conn_info, stacks
 		} else if in_write {
-			stacks = append(stacks, line+"\n")
+			stacks = append(stacks, line)
 		} else {
 			// keep scanning till enter write
 		}
@@ -175,7 +192,7 @@ func (p *Parser) ArgTypes(fn string, frame []string) []golang.TypeInfo {
 func ignoreFn(fn string) bool {
 	ignore_libs := []string{
 		// generic messages
-		"net", "crypto", "google.golang.org/grpc", "golang.org/x/net",
+		"net", "crypto", "google.golang.org/grpc", "golang.org/x/net", "bufio",
 		// entrypoints
 		"testing",
 		"main.main",
@@ -287,6 +304,10 @@ func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, out
 
 	if err := scanner.Err(); err != nil {
 		panic(err)
+	}
+	if len(parser.ancestries) == 0 {
+		// sanity check
+		graph.Logf(log, slog.LevelError, "No ancestries found")
 	}
 
 	graph.Logf(log, slog.LevelInfo, "%v gopls queries failed, %v succeeded - see %v",

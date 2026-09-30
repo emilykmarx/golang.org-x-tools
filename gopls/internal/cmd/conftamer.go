@@ -14,7 +14,7 @@ import (
 
 	graph "github.com/emilykmarx/dominikbraun-graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
-	parse "golang.org/x/tools/gopls/internal/cmd/conftamer/stacks"
+	parse "golang.org/x/tools/gopls/internal/cmd/conftamer/parse"
 	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/server"
