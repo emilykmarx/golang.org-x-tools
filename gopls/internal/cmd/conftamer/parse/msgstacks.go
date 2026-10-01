@@ -18,6 +18,7 @@ import (
 	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/server"
+	"golang.org/x/tools/internal/stdlib"
 )
 
 type SEND_OR_RECV string
@@ -209,11 +210,15 @@ func (p *Parser) ArgTypes(fn string, frame []string) []golang.TypeInfo {
 
 // Functions that don't need to be graphed
 func ignoreFn(fn string) bool {
+	pkg := Pkg(fn)
+	if stdlib.HasPackage(pkg) {
+		// standard library
+		return true
+	}
 	ignore_libs := []string{
 		// generic messages
-		"net", "crypto", "google.golang.org/grpc", "golang.org/x/net", "bufio",
+		"google.golang.org/grpc", "golang.org/x/net",
 		// entrypoints
-		"testing",
 		"main.main",
 	}
 
