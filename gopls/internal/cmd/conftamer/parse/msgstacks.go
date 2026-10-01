@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,6 +236,7 @@ type Parser struct {
 	server        *server.Server
 	log           *slog.Logger
 	Module_prefix string
+	module_ips    map[string]string
 
 	// Logs about gopls queries
 	err_file    *os.File
@@ -296,11 +298,40 @@ func (p *Parser) parseConnStacks(conn_log ConnLog) {
 	}
 }
 
+// Return map: pod/service IP => name
+func ParseKubectlIPs(file string, module_ips map[string]string) {
+	raw_lines, err := os.ReadFile(file)
+	ct.CheckErr(err)
+	lines := strings.Split(string(raw_lines), "\n")
+	name_idx := 1 // 2nd col for both pods and services
+	ip_idx := 6
+	if strings.Contains(lines[0], "CLUSTER-IP") {
+		// services
+		ip_idx = 3
+	}
+	for _, line := range lines[1:] {
+		cols := strings.Fields(line)
+		if len(cols) > 0 {
+			module_ips[cols[ip_idx]] = cols[name_idx]
+		}
+	}
+}
+
 // Parse a log of stacktraces (including ancestor goroutines) with a specific format.
 // Separate resulting sends and recvs into two directories, each with a file for each dst endpoint.
 // Write parse failures to a log.
 // Run from the directory containing module source code, since gopls will analyze it.
 func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, output_path string, local_server *server.Server) {
+	// Get module IPs, to name the graph files
+	kubectl_files := []string{
+		// TODO(CT) (minor) make these args
+		"/home/emily/projects/config_tracing/prom-test-infra/prombench/logs/pods.txt",
+		"/home/emily/projects/config_tracing/prom-test-infra/prombench/logs/services.txt",
+	}
+	module_ips := make(map[string]string)
+	for _, file := range kubectl_files {
+		ParseKubectlIPs(file, module_ips)
+	}
 	send_file, err := os.Open(send_log)
 	ct.CheckErr(err)
 	defer send_file.Close()
@@ -316,7 +347,7 @@ func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, out
 		SEND: make(map[string]*ct.CTypes),
 		RECV: make(map[string]*ct.CTypes),
 	}
-	parser := Parser{ancestries: ancestries,
+	parser := Parser{ancestries: ancestries, module_ips: module_ips,
 		server:   local_server,
 		err_file: err_file, err_fns: make(map[string]struct{}),
 		log: log, Module_prefix: module_prefix}
@@ -343,7 +374,13 @@ func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, out
 	for send_or_recv, ancestries := range parser.ancestries {
 		for dst, ancestry := range ancestries {
 			ancestry.LogGraphStats(log, start)
-			out := dst + ".text"
+			dst_ip, _, err := net.SplitHostPort(dst)
+			ct.CheckErr(err)
+			module_name, ok := parser.module_ips[dst_ip]
+			if !ok {
+				graph.Logf(log, slog.LevelWarn, "unknown module dst %v - known ips %v\n", dst_ip, module_ips)
+			}
+			out := fmt.Sprintf("%v_%v.text", module_name, dst)
 			graph.Logf(log, slog.LevelInfo, "Serializing to %v", out)
 			ancestry.Serialize(filepath.Join(output_path, string(send_or_recv), out), module_prefix, true)
 			graph.Logf(log, slog.LevelInfo, "Serialize: %v", time.Since(start))
