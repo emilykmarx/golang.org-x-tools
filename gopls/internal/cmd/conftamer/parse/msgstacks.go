@@ -43,6 +43,7 @@ func parseOneConn(scanner *bufio.Scanner) ConnLog {
 		CONN_BEGIN_HDR  = "conn.log ("
 		CONN_STACKS_HDR = "BEGIN STACKS"
 		CONN_INFO_HDR   = "CONN: "
+		CONTENTS_HDR    = "CONTENTS: "
 	)
 
 	for scanner.Scan() {
@@ -67,12 +68,13 @@ func parseOneConn(scanner *bufio.Scanner) ConnLog {
 				if !ok {
 					ct.CheckErr(fmt.Errorf("bad format %v", line))
 				}
-				conn_log.stacks = stacks[2 : len(stacks)-1]
+				conn_log.stacks = stacks[2 : len(stacks)-2]
 				return conn_log
 			}
 		} else if rest, ok := strings.CutPrefix(line, CONN_INFO_HDR); ok {
 			conn_log.conn_info = rest
-		} else if strings.Contains(line, "END STACKS") {
+		} else if strings.Contains(line, CONTENTS_HDR) {
+			// ignore contents for now
 			return conn_log
 		} else if in_write {
 			conn_log.stacks = append(conn_log.stacks, line)
@@ -136,11 +138,10 @@ func (p *Parser) ShortLabel(full string, pkg string) string {
 // Get pkg of a fully-qualified name
 func Pkg(full string) string {
 	last_slash := strings.LastIndex(full, "/")
-	if last_slash == -1 {
-		last_slash = 0
-	}
-	first_dot := last_slash + strings.Index(full[last_slash:], ".") // first dot after last slash
-	return full[:first_dot]
+	last_slash = max(last_slash, 0)
+	first_dot := strings.Index(full[last_slash:], ".") // first dot after last slash
+	first_dot = max(first_dot, 0)
+	return full[:last_slash+first_dot]
 }
 
 // return hash and whether existed
@@ -209,7 +210,7 @@ func (p *Parser) ArgTypes(fn string, frame []string) []golang.TypeInfo {
 }
 
 // Functions that don't need to be graphed
-func ignoreFn(fn string) bool {
+func IgnoreFn(fn string) bool {
 	pkg := Pkg(fn)
 	if stdlib.HasPackage(pkg) {
 		// standard library
@@ -217,7 +218,7 @@ func ignoreFn(fn string) bool {
 	}
 	ignore_libs := []string{
 		// generic messages
-		"google.golang.org/grpc", "golang.org/x/net",
+		"google.golang.org/grpc", "golang.org/x/net", "github.com/klauspost/compress",
 		// entrypoints
 		"main.main",
 	}
@@ -282,7 +283,7 @@ func (p *Parser) parseConnStacks(conn_log ConnLog) {
 			// Assume the last ( is the beginning of the args
 			fn := line[:strings.LastIndex(line, "(")]
 			SanitizeMethod(&fn)
-			if ignoreFn(fn) {
+			if IgnoreFn(fn) {
 				continue
 			}
 
