@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,6 +33,7 @@ const (
 type ConnLog struct {
 	conn_info    string
 	stacks       []string
+	contents     string
 	send_or_recv SEND_OR_RECV
 }
 
@@ -68,13 +70,23 @@ func parseOneConn(scanner *bufio.Scanner) ConnLog {
 				if !ok {
 					ct.CheckErr(fmt.Errorf("bad format %v", line))
 				}
-				conn_log.stacks = stacks[2 : len(stacks)-2]
+				content_idx := -1
+				for i, line := range stacks {
+					if contents, ok := strings.CutPrefix(line, CONTENTS_HDR); ok {
+						conn_log.contents = contents
+						content_idx = i
+						// If contents have a \n (e.g. if we still logged binary since it happened to contain a \r\n),
+						// contents won't be the second-to-last line after the split above
+						break
+					}
+				}
+				conn_log.stacks = stacks[2:content_idx]
 				return conn_log
 			}
 		} else if rest, ok := strings.CutPrefix(line, CONN_INFO_HDR); ok {
 			conn_log.conn_info = rest
 		} else if strings.Contains(line, CONTENTS_HDR) {
-			// ignore contents for now
+			conn_log.contents, ok = strings.CutPrefix(line, CONTENTS_HDR)
 			return conn_log
 		} else if in_write {
 			conn_log.stacks = append(conn_log.stacks, line)
@@ -120,11 +132,34 @@ func ParseDst(conn string) string {
 	return parsed_conn[len(parsed_conn)-1]
 }
 
-func AddMsgNode(conn string, sending_types *ct.CTypes) ct.CTypeHash {
-	hash := ParseDst(conn)
-	new_ctype := ct.CTypeNode{Names: []ct.FullTypeName{ct.FullTypeName(hash)}}
-	_ = sending_types.Graph.AddVertex(new_ctype, graph.VertexAttribute("color", "red"))
-	return ct.CTypeNodeHash(new_ctype)
+const CONTENTS = "contents"
+
+func AddMsgNode(conn ConnLog, sending_types *ct.CTypes) ct.CTypeHash {
+	hash := ct.CTypeHash(ParseDst(conn.conn_info))
+	msg_node := ct.CTypeNode{Names: []ct.FullTypeName{ct.FullTypeName(hash)}}
+	// Add node if doesn't exist
+	attrs := map[string]string{
+		"color":  "red",
+		CONTENTS: conn.contents,
+	}
+	err := sending_types.Graph.AddVertex(msg_node, graph.VertexAttributes(attrs))
+	if err == nil {
+		return hash // done
+	}
+
+	// Update attributes with new contents
+	// Would be better if vertex attrs supported list values
+	// (so we don't have to awkwardly convert to string, and perhaps to allow smarter gephi things) - same for arg types
+	_, properties, err := sending_types.Graph.VertexWithProperties(hash)
+	ct.CheckErr(err)
+	attrs = properties.Attributes
+	existing_contents := strings.Split(attrs[CONTENTS], ",")
+	if !slices.Contains(existing_contents, conn.contents) {
+		existing_contents = append(existing_contents, conn.contents)
+	}
+	attrs[CONTENTS] = strings.Join(existing_contents, ",")
+	sending_types.Graph.UpdateVertex(hash, msg_node, nil, graph.VertexAttributes(attrs))
+	return hash
 }
 
 // Shorten fn
@@ -259,14 +294,15 @@ func (p *Parser) parseConnStacks(conn_log ConnLog) {
 	fmt.Printf("%+v\n", ParseConn(conn_log.conn_info))
 	fmt.Printf("SENDING G %v\n", sending_g)
 
-	// Make a node for the message, identified by destination endpoint
+	// Make or update the node for the message, identified by destination endpoint
+	// and labeled with all observed contents
 	dst := ParseDst(conn_log.conn_info)
 	ancestry, ok := p.ancestries[conn_log.send_or_recv][dst]
 	if !ok {
 		ancestry = ct.New(p.log)
 		p.ancestries[conn_log.send_or_recv][dst] = ancestry
 	}
-	msg_hash := AddMsgNode(conn_log.conn_info, ancestry)
+	msg_hash := AddMsgNode(conn_log, ancestry)
 
 	g_header := "[originating from goroutine "
 	g := sending_g
@@ -386,9 +422,10 @@ func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, out
 			if !ok {
 				graph.Logf(log, slog.LevelWarn, "unknown module dst %v - known ips %v\n", dst_ip, module_ips)
 			}
-			out := fmt.Sprintf("%v_%v.text", module_name, dst)
+			out_name := fmt.Sprintf("%v_%v.text", module_name, dst)
+			out := filepath.Join(output_path, string(send_or_recv), out_name)
 			graph.Logf(log, slog.LevelInfo, "Serializing to %v", out)
-			ancestry.Serialize(filepath.Join(output_path, string(send_or_recv), out), module_prefix, true)
+			ancestry.Serialize(out, module_prefix, true)
 			graph.Logf(log, slog.LevelInfo, "Serialize: %v", time.Since(start))
 		}
 	}
