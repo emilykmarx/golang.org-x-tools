@@ -35,18 +35,36 @@ type ConnLog struct {
 	stacks       []string
 	contents     string
 	send_or_recv SEND_OR_RECV
+	last_conn    bool
+}
+
+const (
+	CONN_BEGIN_HDR  = "conn.log ("
+	CONN_STACKS_HDR = "BEGIN STACKS"
+	CONN_INFO_HDR   = "CONN: "
+	CONTENTS_HDR    = "CONTENTS: "
+)
+
+func findContents(stacks []string, conn_log *ConnLog) int {
+	for i, line := range stacks {
+		if contents, ok := strings.CutPrefix(line, CONTENTS_HDR); ok {
+			conn_log.contents = contents
+			return i
+		}
+	}
+	return -1
+}
+
+// If line is a continuation of previous that completes the line,
+// format is "2026-10-07T20:10:20.730491584Z stderr F <continuation>"
+func cutLogPrefix(line string) string {
+	return line[strings.Index(line, "F "):]
 }
 
 // Return info on the next conn in the scanner: the connection info, and the corresponding stacks
 func parseOneConn(scanner *bufio.Scanner) ConnLog {
 	in_write := false // Should print without anything interleaved
 	conn_log := ConnLog{send_or_recv: SEND}
-	const (
-		CONN_BEGIN_HDR  = "conn.log ("
-		CONN_STACKS_HDR = "BEGIN STACKS"
-		CONN_INFO_HDR   = "CONN: "
-		CONTENTS_HDR    = "CONTENTS: "
-	)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -70,14 +88,21 @@ func parseOneConn(scanner *bufio.Scanner) ConnLog {
 				if !ok {
 					ct.CheckErr(fmt.Errorf("bad format %v", line))
 				}
-				content_idx := -1
-				for i, line := range stacks {
-					if contents, ok := strings.CutPrefix(line, CONTENTS_HDR); ok {
-						conn_log.contents = contents
-						content_idx = i
-						// If contents have a \n (e.g. if we still logged binary since it happened to contain a \r\n),
-						// contents won't be the second-to-last line after the split above
-						break
+				// If contents have a \n (e.g. if we still logged binary since it happened to contain a \r\n),
+				// contents won't be the second-to-last line after the split above
+				content_idx := findContents(stacks, &conn_log)
+				if content_idx == -1 {
+					// The log statement gets a new line every 16424 bytes (e.g. k8s API server in prombench) =>
+					// concatenate this line with the next
+					if !scanner.Scan() {
+						ct.CheckErr(fmt.Errorf("bad format %v", line))
+					}
+					line += cutLogPrefix(scanner.Text())
+					stacks = strings.Split(line, "\\n")
+					content_idx = findContents(stacks, &conn_log)
+					if content_idx == -1 {
+						// Could support this by looping
+						ct.CheckErr(fmt.Errorf("no message content - line broken in three? %v", line))
 					}
 				}
 				conn_log.stacks = stacks[2:content_idx]
@@ -95,7 +120,7 @@ func parseOneConn(scanner *bufio.Scanner) ConnLog {
 		}
 	}
 
-	return conn_log
+	return ConnLog{last_conn: true}
 }
 
 func SanitizeMethod(method *string) {
@@ -398,7 +423,7 @@ func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, out
 	graph.Logf(log, slog.LevelInfo, "Parsing ancestry stacktrace for message sends")
 
 	scanner := bufio.NewScanner(send_file)
-	for conn_log := parseOneConn(scanner); conn_log.conn_info != ""; conn_log = parseOneConn(scanner) {
+	for conn_log := parseOneConn(scanner); !conn_log.last_conn; conn_log = parseOneConn(scanner) {
 		parser.parseConnStacks(conn_log)
 	}
 
@@ -415,17 +440,22 @@ func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, out
 
 	for send_or_recv, ancestries := range parser.ancestries {
 		for dst, ancestry := range ancestries {
+			graph_name := dst
 			ancestry.LogGraphStats(log, start)
 			dst_ip, _, err := net.SplitHostPort(dst)
-			ct.CheckErr(err)
-			module_name, ok := parser.module_ips[dst_ip]
-			if !ok {
-				graph.Logf(log, slog.LevelWarn, "unknown module dst %v - known ips %v\n", dst_ip, module_ips)
+			if err == nil {
+				module_name, ok := parser.module_ips[dst_ip]
+				if !ok {
+					graph.Logf(log, slog.LevelWarn, "unknown module dst IP %v - known ips %v\n", dst_ip, module_ips)
+				}
+				graph_name = fmt.Sprintf("%v_%v", module_name, dst)
+			} else {
+				// Some Grafana connections have dst addr e.g. /tmp/plugin2698764150
+				graph_name = strings.ReplaceAll(dst, "/", "_") // make it a proper filename
 			}
-			out_name := fmt.Sprintf("%v_%v.text", module_name, dst)
-			out := filepath.Join(output_path, string(send_or_recv), out_name)
-			graph.Logf(log, slog.LevelInfo, "Serializing to %v", out)
-			ancestry.Serialize(out, module_prefix, true)
+			out := filepath.Join(output_path, string(send_or_recv), graph_name)
+			graph.Logf(log, slog.LevelInfo, "Serializing to %v.gv", out)
+			ancestry.Serialize(out+".text", module_prefix, true) // Serialize function expects the .text postfix
 			graph.Logf(log, slog.LevelInfo, "Serialize: %v", time.Since(start))
 		}
 	}
