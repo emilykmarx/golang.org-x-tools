@@ -19,6 +19,7 @@ import (
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/server"
 	"golang.org/x/tools/internal/tool"
+	"gopkg.in/yaml.v3"
 )
 
 // Conftamer implements the Conftamer verb for gopls
@@ -31,15 +32,21 @@ type Conftamer struct {
 	accessors            *ct.CTypes
 	log                  *slog.Logger
 
+	ConfigPath string `flag:"c,config" help:"YAML file specifying the config fields (alternative to passing them as flags)"`
+	ConftamerConfig
+}
+
+// ConftamerConfig holds the Conftamer config fields, settable via flags or a YAML file
+type ConftamerConfig struct {
 	// Flags about module code
-	ModulePrefix       string `flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print and possibly ignore unmarshaler subgraph nodes)"`
-	UnmarshalFuncDefn  string `flag:"u-fn,unmarshal_fn" help:"Location of the unmarshal function definition (optional - if passed, will find unmarshalers passed to unmarshal calls)"`
-	UnmarshalIfaceDefn string `flag:"u-iface,unmarshal_iface" help:"Location of the unmarshal interface definition (optional - if passed, will find unmarshalers that override unmarshal)"`
+	ModulePrefix       string `yaml:"module_prefix" flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print and possibly ignore unmarshaler subgraph nodes)"`
+	UnmarshalFuncDefn  string `yaml:"unmarshal_fn" flag:"u-fn,unmarshal_fn" help:"Location of the unmarshal function definition (optional - if passed, will find unmarshalers passed to unmarshal calls)"`
+	UnmarshalIfaceDefn string `yaml:"unmarshal_iface" flag:"u-iface,unmarshal_iface" help:"Location of the unmarshal interface definition (optional - if passed, will find unmarshalers that override unmarshal)"`
 
 	// Flags customizing the tool
-	OutputPath          string `flag:"out,output_path" help:"Output path for graph files"`
-	ShouldFindAccessors bool   `flag:"a,find_accessors" help:"Whether to find the accessors too (not just the unmarshaler subgraph)"`
-	SendLog             string `flag:"s,send_log" help:"A log of message sends - if passed, will find sending types from the log (rather than finding the Unmarshaler Subgraph and Accessors from the module source)"`
+	OutputPath          string `yaml:"output_path" flag:"out,output_path" help:"Output path for graph files"`
+	ShouldFindAccessors bool   `yaml:"find_accessors" flag:"a,find_accessors" help:"Whether to find the accessors too (not just the unmarshaler subgraph)"`
+	SendLog             string `yaml:"send_log" flag:"s,send_log" help:"A log of message sends - if passed, will find sending types from the log (rather than finding the Unmarshaler Subgraph and Accessors from the module source)"`
 }
 
 func (c *Conftamer) findingAccessors() bool {
@@ -515,9 +522,34 @@ func (c *Conftamer) FindSendingTypes() {
 	parse.ParseStacksLog(c.ModulePrefix, c.log, c.SendLog, c.OutputPath, c.local_server)
 }
 
+// Populate ConftamerConfig from the YAML file at ConfigPath
+func (c *Conftamer) loadConfig() error {
+	f, err := os.Open(c.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("opening config file: %v", err)
+	}
+	defer f.Close()
+
+	dec := yaml.NewDecoder(f)
+	// Catch typos in field names
+	dec.KnownFields(true)
+	if err := dec.Decode(&c.ConftamerConfig); err != nil {
+		return fmt.Errorf("parsing config file %v: %v", c.ConfigPath, err)
+	}
+	return nil
+}
+
 func (c *Conftamer) Run(ctx context.Context, args ...string) error {
 	if len(args) != 0 {
 		return tool.CommandLineErrorf("conftamer expects no arguments (but flags are ok)")
+	}
+	if c.ConfigPath != "" {
+		if c.ConftamerConfig != (ConftamerConfig{}) {
+			return tool.CommandLineErrorf("Specify config via either a config file or flags, not both")
+		}
+		if err := c.loadConfig(); err != nil {
+			return err
+		}
 	}
 	if c.UnmarshalFuncDefn != "" && c.UnmarshalIfaceDefn != "" {
 		return tool.CommandLineErrorf("Specify neither or one flag about unmarshal")
