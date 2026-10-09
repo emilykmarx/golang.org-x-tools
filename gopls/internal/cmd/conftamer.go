@@ -40,24 +40,16 @@ type Conftamer struct {
 // ConftamerConfig holds the Conftamer config fields, settable via flags or a YAML file
 type ConftamerConfig struct {
 	/* Flags about module code */
-	ModulePrefix       string `yaml:"module_prefix" flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print and possibly ignore unmarshaler subgraph nodes)"`
 	UnmarshalFuncDefn  string `yaml:"unmarshal_fn" flag:"u-fn,unmarshal_fn" help:"Location of the unmarshal function definition (optional - if passed, will find unmarshalers passed to unmarshal calls)"`
 	UnmarshalIfaceDefn string `yaml:"unmarshal_iface" flag:"u-iface,unmarshal_iface" help:"Location of the unmarshal interface definition (optional - if passed, will find unmarshalers that override unmarshal)"`
 
 	/* Flags customizing the tool */
-	OutputPath string `yaml:"output_path" flag:"out,output_path" help:"Output path for graph files"`
 	// Flags for unmarshaler subgraph/accessors
 	ShouldFindAccessors bool `yaml:"find_accessors" flag:"a,find_accessors" help:"Whether to find the accessors too (not just the unmarshaler subgraph)"`
-	// Flags for ancestors
-	SendLog       string     `yaml:"send_log" flag:"s,send_log" help:"A log of message sends - if passed, will find sending types from the log (rather than finding the Unmarshaler Subgraph and Accessors from the module source)"`
-	ModuleIPFiles stringList `yaml:"module_ip_files" flag:"ips,module_ip_files" help:"Files containing module IPs (e.g. pods and services)"`
+
+	// Flags shared with the parser
+	parse.ParserConfig `yaml:",inline"`
 }
-
-// stringList is a []string settable via a repeated flag (e.g. -ip=a -ip=b)
-type stringList []string
-
-func (s *stringList) String() string     { return strings.Join(*s, ",") }
-func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 
 func (c *Conftamer) findingAccessors() bool {
 	return c.accessors != nil
@@ -529,9 +521,7 @@ func (c *Conftamer) FindAccessors() {
 }
 
 func (c *Conftamer) FindSendingTypes() {
-	parser := parse.Parser{
-		Server: c.local_server, Log: c.log,
-		ModulePrefix: c.ModulePrefix, SendLog: c.SendLog, OutputPath: c.OutputPath, ModuleIPFiles: c.ModuleIPFiles}
+	parser := parse.Parser{Server: c.local_server, Log: c.log, ParserConfig: c.ParserConfig}
 	parse.ParseStacksLog(parser)
 }
 
@@ -599,7 +589,7 @@ func (c *Conftamer) Run(ctx context.Context, args ...string) error {
 			return a
 		}}))
 
-	if c.SendLog != "" {
+	if c.AncestryLog != "" {
 		c.FindSendingTypes()
 	} else {
 		// Find unmarshaler subgraph, and optionally accessors

@@ -242,12 +242,14 @@ func (p *Parser) AddSendFuncNode(fn string, frame []string, g int, sending_types
 		"fn": fn,
 	}
 
-	args := p.ArgTypes(fn, frame)
-	arg_names := []string{}
-	for _, arg := range args {
-		arg_names = append(arg_names, string(ct.TypeNameSafe(arg.TypeInfo)))
+	if p.ShouldFindArgTypes {
+		args := p.ArgTypes(fn, frame)
+		arg_names := []string{}
+		for _, arg := range args {
+			arg_names = append(arg_names, string(ct.TypeNameSafe(arg.TypeInfo)))
+		}
+		attrs["args"] = strings.Join(arg_names, ",")
 	}
-	attrs["args"] = strings.Join(arg_names, ",")
 
 	// Hash becomes "Id" column; label is default node label
 	err := sending_types.Graph.AddVertex(new_ctype, graph.VertexAttributes(attrs))
@@ -311,17 +313,30 @@ func IgnoreFn(fn string) bool {
 	return false
 }
 
+// ParserConfig holds the Parser fields that are also conftamer verb config fields
+// (embedded in both, so the verb can pass them through as a unit)
+type ParserConfig struct {
+	ModulePrefix       string     `yaml:"module_prefix" flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print and possibly ignore unmarshaler subgraph nodes)"`
+	OutputPath         string     `yaml:"output_path" flag:"out,output_path" help:"Output path for graph files"`
+	AncestryLog        string     `yaml:"ancestry_log" flag:"s,ancestry_log" help:"A log of message sends and receives - if passed, will find send/receive ancestors from the log (rather than finding the Unmarshaler Subgraph and Accessors from the module source)"`
+	ModuleIPFiles      StringList `yaml:"module_ip_files" flag:"ips,module_ip_files" help:"Files containing module IPs (e.g. pods and services)"`
+	ShouldFindArgTypes bool       `yaml:"find_arg_types" flag:"arg-types,find_arg_types" help:"Whether to find arg types of message ancestors"`
+}
+
+// StringList is a []string settable via a repeated flag (e.g. -ip=a -ip=b)
+type StringList []string
+
+func (s *StringList) String() string     { return strings.Join(*s, ",") }
+func (s *StringList) Set(v string) error { *s = append(*s, v); return nil }
+
 type Parser struct {
 	// For each of send and recv: destination => ancestry graph
 	ancestries map[SEND_OR_RECV]map[string]*ct.CTypes
 
 	// From conftamer verb entrypoint
-	Server        *server.Server
-	Log           *slog.Logger
-	ModulePrefix  string
-	SendLog       string
-	OutputPath    string
-	ModuleIPFiles []string
+	Server *server.Server
+	Log    *slog.Logger
+	ParserConfig
 
 	module_ips map[string]string
 
@@ -411,7 +426,7 @@ func ParseStacksLog(p Parser) {
 	for _, file := range p.ModuleIPFiles {
 		ParseKubectlIPs(file, p.module_ips)
 	}
-	send_file, err := os.Open(p.SendLog)
+	send_file, err := os.Open(p.AncestryLog)
 	ct.CheckErr(err)
 	defer send_file.Close()
 	for _, send_or_recv := range []SEND_OR_RECV{SEND, RECV} {
