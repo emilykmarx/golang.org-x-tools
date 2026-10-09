@@ -189,9 +189,9 @@ func AddMsgNode(conn ConnLog, sending_types *ct.CTypes) ct.CTypeHash {
 
 // Shorten fn
 func (p *Parser) ShortLabel(full string, pkg string) string {
-	label, _ := strings.CutPrefix(full, p.Module_prefix) // always cut the module name
+	label, _ := strings.CutPrefix(full, p.ModulePrefix) // always cut the module name
 	// module-specific shortening
-	label = k8s_api_server.ShortLabel(label, pkg, p.Module_prefix)
+	label = k8s_api_server.ShortLabel(label, pkg, p.ModulePrefix)
 	return label
 }
 
@@ -244,7 +244,7 @@ func (p *Parser) ArgTypes(fn string, frame []string) []golang.TypeInfo {
 	gopls_query := protocol.WorkspaceSymbolParams{
 		Query: fn,
 	}
-	arg_types, err := p.server.ArgTypes(context.Background(), &gopls_query)
+	arg_types, err := p.Server.ArgTypes(context.Background(), &gopls_query)
 	if err != nil {
 		if _, ok := p.err_fns[fn]; !ok {
 			p.err_fns[fn] = struct{}{}
@@ -257,11 +257,9 @@ func (p *Parser) ArgTypes(fn string, frame []string) []golang.TypeInfo {
 	} else {
 		p.success_fns += 1
 	}
-	fmt.Printf("ARGS:\n")
 	ret := []golang.TypeInfo{}
 	for _, arg := range arg_types {
 		if !ct.BasicType(arg) {
-			fmt.Printf("%v\n", arg.TypeInfo.Name())
 			ret = append(ret, arg)
 		}
 	}
@@ -299,10 +297,15 @@ type Parser struct {
 	// For each of send and recv: destination => ancestry graph
 	ancestries map[SEND_OR_RECV]map[string]*ct.CTypes
 
-	server        *server.Server
-	log           *slog.Logger
-	Module_prefix string
-	module_ips    map[string]string
+	// From conftamer verb entrypoint
+	Server        *server.Server
+	Log           *slog.Logger
+	ModulePrefix  string
+	SendLog       string
+	OutputPath    string
+	ModuleIPFiles []string
+
+	module_ips map[string]string
 
 	// Logs about gopls queries
 	err_file    *os.File
@@ -316,15 +319,13 @@ func (p *Parser) parseConnStacks(conn_log ConnLog) {
 	sending_g := 0
 	_, err := fmt.Sscanf(conn_log.stacks[0], "goroutine %d", &sending_g)
 	ct.CheckErr(err)
-	fmt.Printf("%+v\n", ParseConn(conn_log.conn_info))
-	fmt.Printf("SENDING G %v\n", sending_g)
 
 	// Make or update the node for the message, identified by destination endpoint
 	// and labeled with all observed contents
 	dst := ParseDst(conn_log.conn_info)
 	ancestry, ok := p.ancestries[conn_log.send_or_recv][dst]
 	if !ok {
-		ancestry = ct.New(p.log)
+		ancestry = ct.New(p.Log)
 		p.ancestries[conn_log.send_or_recv][dst] = ancestry
 	}
 	msg_hash := AddMsgNode(conn_log, ancestry)
@@ -336,7 +337,6 @@ func (p *Parser) parseConnStacks(conn_log ConnLog) {
 		if strings.Contains(line, g_header) {
 			_, err := fmt.Sscanf(line, g_header+"%d", &g)
 			ct.CheckErr(err)
-			fmt.Printf("PARENT G %v\n", g)
 		} else if strings.Contains(line, "created by") {
 			// parent frame
 		} else if strings.Contains(line, "(") {
@@ -348,7 +348,6 @@ func (p *Parser) parseConnStacks(conn_log ConnLog) {
 				continue
 			}
 
-			fmt.Printf("FN: %v\n", fn)
 			cur_fn, _ := p.AddSendFuncNode(fn, conn_log.stacks[i:i+2], g, ancestry)
 			if prev_fn != cur_fn { // don't add self-edges
 				// add edge to previous frame (in parent g's stack if applicable),
@@ -388,75 +387,67 @@ func ParseKubectlIPs(file string, module_ips map[string]string) {
 // Separate resulting sends and recvs into two directories, each with a file for each dst endpoint.
 // Write parse failures to a log.
 // Run from the directory containing module source code, since gopls will analyze it.
-func ParseStacksLog(module_prefix string, log *slog.Logger, send_log string, output_path string, local_server *server.Server) {
+func ParseStacksLog(p Parser) {
 	// Get module IPs, to name the graph files
-	kubectl_files := []string{
-		// TODO(CT) (minor) make these args
-		"/home/emily/projects/config_tracing/prom-test-infra/prombench/logs/pods.txt",
-		"/home/emily/projects/config_tracing/prom-test-infra/prombench/logs/services.txt",
+	p.module_ips = make(map[string]string)
+	for _, file := range p.ModuleIPFiles {
+		ParseKubectlIPs(file, p.module_ips)
 	}
-	module_ips := make(map[string]string)
-	for _, file := range kubectl_files {
-		ParseKubectlIPs(file, module_ips)
-	}
-	send_file, err := os.Open(send_log)
+	send_file, err := os.Open(p.SendLog)
 	ct.CheckErr(err)
 	defer send_file.Close()
 	for _, send_or_recv := range []SEND_OR_RECV{SEND, RECV} {
-		ct.CheckErr(os.MkdirAll(filepath.Join(output_path, string(send_or_recv)), 0777))
+		ct.CheckErr(os.MkdirAll(filepath.Join(p.OutputPath, string(send_or_recv)), 0777))
 	}
 
-	err_filepath := filepath.Join(output_path, "stackframe_fails.md")
-	err_file, err := os.Create(err_filepath)
+	err_filepath := filepath.Join(p.OutputPath, "stackframe_fails.md")
+	p.err_file, err = os.Create(err_filepath)
 	ct.CheckErr(err)
-	defer err_file.Close()
-	ancestries := map[SEND_OR_RECV]map[string]*ct.CTypes{
+	defer p.err_file.Close()
+	p.ancestries = map[SEND_OR_RECV]map[string]*ct.CTypes{
 		SEND: make(map[string]*ct.CTypes),
 		RECV: make(map[string]*ct.CTypes),
 	}
-	parser := Parser{ancestries: ancestries, module_ips: module_ips,
-		server:   local_server,
-		err_file: err_file, err_fns: make(map[string]struct{}),
-		log: log, Module_prefix: module_prefix}
+	p.err_fns = make(map[string]struct{})
 
 	start := time.Now()
-	graph.Logf(log, slog.LevelInfo, "Parsing ancestry stacktrace for message sends")
+	graph.Logf(p.Log, slog.LevelInfo, "Parsing ancestry stacktrace for message sends")
 
 	scanner := bufio.NewScanner(send_file)
 	for conn_log := parseOneConn(scanner); !conn_log.last_conn; conn_log = parseOneConn(scanner) {
-		parser.parseConnStacks(conn_log)
+		p.parseConnStacks(conn_log)
 	}
 
 	if err := scanner.Err(); err != nil {
 		panic(err)
 	}
-	if len(parser.ancestries[SEND]) == 0 && len(parser.ancestries[RECV]) == 0 {
+	if len(p.ancestries[SEND]) == 0 && len(p.ancestries[RECV]) == 0 {
 		// sanity check
-		graph.Logf(log, slog.LevelError, "No ancestries found")
+		graph.Logf(p.Log, slog.LevelError, "No ancestries found")
 	}
 
-	graph.Logf(log, slog.LevelInfo, "%v gopls queries failed, %v succeeded - see %v",
-		len(parser.err_fns), parser.success_fns, err_filepath)
+	graph.Logf(p.Log, slog.LevelInfo, "%v gopls queries failed, %v succeeded - see %v",
+		len(p.err_fns), p.success_fns, err_filepath)
 
-	for send_or_recv, ancestries := range parser.ancestries {
+	for send_or_recv, ancestries := range p.ancestries {
 		for dst, ancestry := range ancestries {
 			graph_name := dst
-			ancestry.LogGraphStats(log, start)
+			ancestry.LogGraphStats(p.Log, start)
 			dst_ip, _, err := net.SplitHostPort(dst)
 			if err == nil {
-				module_name, ok := parser.module_ips[dst_ip]
+				module_name, ok := p.module_ips[dst_ip]
 				if !ok {
-					graph.Logf(log, slog.LevelWarn, "unknown module dst IP %v - known ips %v\n", dst_ip, module_ips)
+					graph.Logf(p.Log, slog.LevelWarn, "unknown module dst IP %v - known ips %v\n", dst_ip, p.module_ips)
 				}
 				graph_name = fmt.Sprintf("%v_%v", module_name, dst)
 			} else {
 				// Some Grafana connections have dst addr e.g. /tmp/plugin2698764150
 				graph_name = strings.ReplaceAll(dst, "/", "_") // make it a proper filename
 			}
-			out := filepath.Join(output_path, string(send_or_recv), graph_name)
-			graph.Logf(log, slog.LevelInfo, "Serializing to %v.gv", out)
-			ancestry.Serialize(out+".text", module_prefix, true) // Serialize function expects the .text postfix
-			graph.Logf(log, slog.LevelInfo, "Serialize: %v", time.Since(start))
+			out := filepath.Join(p.OutputPath, string(send_or_recv), graph_name)
+			graph.Logf(p.Log, slog.LevelInfo, "Serializing to %v.gv", out)
+			ancestry.Serialize(out+".text", p.ModulePrefix, true) // Serialize function expects the .text postfix
+			graph.Logf(p.Log, slog.LevelInfo, "Serialize: %v", time.Since(start))
 		}
 	}
 }
