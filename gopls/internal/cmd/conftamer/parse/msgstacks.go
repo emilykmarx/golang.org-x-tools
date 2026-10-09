@@ -175,15 +175,16 @@ func RAddr(conn string) string {
 	return parsed_conn[len(parsed_conn)-1]
 }
 
-const CONTENTS = "contents"
+const CONTENTSATTR = "contents"
+const ARGSATTR = "args"
 
 func AddMsgNode(conn ConnLog, sending_types *ct.CTypes) ct.CTypeHash {
 	hash := ct.CTypeHash(RAddr(conn.conn_info))
 	msg_node := ct.CTypeNode{Names: []ct.FullTypeName{ct.FullTypeName(hash)}}
 	// Add node if doesn't exist
 	attrs := map[string]string{
-		"color":  "red",
-		CONTENTS: conn.contents,
+		"color":      "red",
+		CONTENTSATTR: conn.contents,
 	}
 	err := sending_types.Graph.AddVertex(msg_node, graph.VertexAttributes(attrs))
 	if err == nil {
@@ -196,11 +197,11 @@ func AddMsgNode(conn ConnLog, sending_types *ct.CTypes) ct.CTypeHash {
 	_, properties, err := sending_types.Graph.VertexWithProperties(hash)
 	ct.CheckErr(err)
 	attrs = properties.Attributes
-	existing_contents := strings.Split(attrs[CONTENTS], ",")
+	existing_contents := strings.Split(attrs[CONTENTSATTR], ",")
 	if !slices.Contains(existing_contents, conn.contents) {
 		existing_contents = append(existing_contents, conn.contents)
 	}
-	attrs[CONTENTS] = strings.Join(existing_contents, ",")
+	attrs[CONTENTSATTR] = strings.Join(existing_contents, ",")
 	sending_types.Graph.UpdateVertex(hash, msg_node, nil, graph.VertexAttributes(attrs))
 	return hash
 }
@@ -241,6 +242,20 @@ func (p *Parser) scanned_module(module_name string) bool {
 	return false
 }
 
+func (p *Parser) queriedGopls(fn string) (string, bool) {
+	for _, ancestries := range p.ancestries {
+		for _, ancestry := range ancestries {
+			if _, properties, err := ancestry.Graph.VertexWithProperties(ct.CTypeHash(fn)); err == nil {
+				if args, ok := properties.Attributes[ARGSATTR]; ok {
+					// we only add this attr if we queried gopls
+					return args, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
 // return hash and whether existed
 func (p *Parser) AddAncestorFuncNode(fn string, frame []string, g int, sending_types *ct.CTypes, dst string) (ct.CTypeHash, bool) {
 	// This will group calls from different goroutines, so e.g. if G1 is A => B => msg X and G2 is A' => B => msg Y,
@@ -250,7 +265,7 @@ func (p *Parser) AddAncestorFuncNode(fn string, frame []string, g int, sending_t
 	hash := ct.CTypeHash(fn)
 	new_ctype := ct.CTypeNode{Names: []ct.FullTypeName{ct.FullTypeName(hash)}}
 	if _, err := sending_types.Graph.Vertex(hash); err == nil {
-		// avoid calling gopls
+		// already in this graph
 		return hash, true
 	}
 	pkg := Pkg(fn)
@@ -262,14 +277,20 @@ func (p *Parser) AddAncestorFuncNode(fn string, frame []string, g int, sending_t
 	}
 
 	// To save gopls queries for now, only find arg types if the dst is a known module (or `kubernetes`)
+	args, queried := p.queriedGopls(fn)
 	find_arg_types := p.ShouldFindArgTypes && p.scanned_module(p.dstToModuleName(dst))
 	if find_arg_types {
-		args := p.ArgTypes(fn, frame)
-		arg_names := []string{}
-		for _, arg := range args {
-			arg_names = append(arg_names, string(ct.TypeNameSafe(arg.TypeInfo)))
+		if !queried {
+			args := p.ArgTypes(fn, frame)
+			arg_names := []string{}
+			for _, arg := range args {
+				arg_names = append(arg_names, string(ct.TypeNameSafe(arg.TypeInfo)))
+			}
+			attrs[ARGSATTR] = strings.Join(arg_names, ",")
+		} else {
+			// Copy from other graph
+			attrs[ARGSATTR] = args
 		}
-		attrs["args"] = strings.Join(arg_names, ",")
 	}
 
 	// Hash becomes "Id" column; label is default node label
