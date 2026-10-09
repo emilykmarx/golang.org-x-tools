@@ -57,8 +57,21 @@ func findContents(stacks []string, conn_log *ConnLog) int {
 
 // If line is a continuation of previous that completes the line,
 // format is "2026-10-07T20:10:20.730491584Z stderr F <continuation>"
-func cutLogPrefix(line string) string {
-	return line[strings.Index(line, "F "):]
+func cutLogPrefix(line string) (string, error) {
+	fields := strings.SplitN(line, " ", 4)
+	if len(fields) != 4 {
+		return "", fmt.Errorf("bad log prefix format: %v", line)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, fields[0]); err != nil {
+		return "", fmt.Errorf("bad log prefix timestamp: %v: %w", line, err)
+	}
+	if fields[1] != "stderr" && fields[1] != "stdout" {
+		return "", fmt.Errorf("bad log prefix stream: %v", line)
+	}
+	if fields[2] != "F" {
+		return "", fmt.Errorf("bad log prefix tag: %v", line)
+	}
+	return fields[3], nil
 }
 
 // Return info on the next conn in the scanner: the connection info, and the corresponding stacks
@@ -97,7 +110,12 @@ func parseOneConn(scanner *bufio.Scanner) ConnLog {
 					if !scanner.Scan() {
 						ct.CheckErr(fmt.Errorf("bad format %v", line))
 					}
-					line += cutLogPrefix(scanner.Text())
+					nextline := scanner.Text()
+					var err error
+					nextline, err = cutLogPrefix(nextline)
+					ct.CheckErr(err)
+
+					line += nextline
 					stacks = strings.Split(line, "\\n")
 					content_idx = findContents(stacks, &conn_log)
 					if content_idx == -1 {
