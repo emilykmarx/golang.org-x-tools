@@ -170,7 +170,7 @@ func ParseConn(conn string) []string {
 	return parts
 }
 
-func ParseDst(conn string) string {
+func RAddr(conn string) string {
 	parsed_conn := ParseConn(conn)
 	return parsed_conn[len(parsed_conn)-1]
 }
@@ -178,7 +178,7 @@ func ParseDst(conn string) string {
 const CONTENTS = "contents"
 
 func AddMsgNode(conn ConnLog, sending_types *ct.CTypes) ct.CTypeHash {
-	hash := ct.CTypeHash(ParseDst(conn.conn_info))
+	hash := ct.CTypeHash(RAddr(conn.conn_info))
 	msg_node := ct.CTypeNode{Names: []ct.FullTypeName{ct.FullTypeName(hash)}}
 	// Add node if doesn't exist
 	attrs := map[string]string{
@@ -222,8 +222,27 @@ func Pkg(full string) string {
 	return full[:last_slash+first_dot]
 }
 
+// Modules we have message logs from
+var SCANNED_MODULES = []string{
+	"prometheus-meta",
+	"prometheus-test",
+	"grafana",
+	"alertmanager",
+	"kube",
+}
+
+// Will also include the "kubernetes" service
+func (p *Parser) scanned_module(module_name string) bool {
+	for _, prefix := range SCANNED_MODULES {
+		if strings.HasPrefix(module_name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // return hash and whether existed
-func (p *Parser) AddSendFuncNode(fn string, frame []string, g int, sending_types *ct.CTypes) (ct.CTypeHash, bool) {
+func (p *Parser) AddAncestorFuncNode(fn string, frame []string, g int, sending_types *ct.CTypes, dst string) (ct.CTypeHash, bool) {
 	// This will group calls from different goroutines, so e.g. if G1 is A => B => msg X and G2 is A' => B => msg Y,
 	// it will look like both A or A' could lead to both msgs.
 	// To avoid (at the cost of more nodes), uncomment line below:
@@ -242,7 +261,9 @@ func (p *Parser) AddSendFuncNode(fn string, frame []string, g int, sending_types
 		"fn": fn,
 	}
 
-	if p.ShouldFindArgTypes {
+	// To save gopls queries for now, only find arg types if the dst is a known module (or `kubernetes`)
+	find_arg_types := p.ShouldFindArgTypes && p.scanned_module(p.dstToModuleName(dst))
+	if find_arg_types {
 		args := p.ArgTypes(fn, frame)
 		arg_names := []string{}
 		for _, arg := range args {
@@ -347,15 +368,16 @@ type Parser struct {
 }
 
 // Parse the stacks of the given conn,
-// writing any frames that failed to parse to err_file
+// writing any frames that failed to parse to err_file.
+// Each ancestry graph corresponds to sends or receives from one destination endpoint (IP:port).
+// The single message node is labeled with all observed contents.
 func (p *Parser) parseConnStacks(conn_log ConnLog) {
 	sending_g := 0
 	_, err := fmt.Sscanf(conn_log.stacks[0], "goroutine %d", &sending_g)
 	ct.CheckErr(err)
 
-	// Make or update the node for the message, identified by destination endpoint
-	// and labeled with all observed contents
-	dst := ParseDst(conn_log.conn_info)
+	// Make or update the node for the message
+	dst := RAddr(conn_log.conn_info)
 	ancestry, ok := p.ancestries[conn_log.send_or_recv][dst]
 	if !ok {
 		ancestry = ct.New(p.Log)
@@ -381,7 +403,7 @@ func (p *Parser) parseConnStacks(conn_log ConnLog) {
 				continue
 			}
 
-			cur_fn, _ := p.AddSendFuncNode(fn, conn_log.stacks[i:i+2], g, ancestry)
+			cur_fn, _ := p.AddAncestorFuncNode(fn, conn_log.stacks[i:i+2], g, ancestry, dst)
 			if prev_fn != cur_fn { // don't add self-edges
 				// add edge to previous frame (in parent g's stack if applicable),
 				// or to sent message (if this is the sending frame)
@@ -466,16 +488,13 @@ func ParseStacksLog(p Parser) {
 		for dst, ancestry := range ancestries {
 			graph_name := dst
 			ancestry.LogGraphStats(p.Log, start)
-			dst_ip, _, err := net.SplitHostPort(dst)
-			if err == nil {
-				module_name, ok := p.module_ips[dst_ip]
-				if !ok {
-					graph.Logf(p.Log, slog.LevelWarn, "unknown module dst IP %v - known ips %v\n", dst_ip, p.module_ips)
-				}
-				graph_name = fmt.Sprintf("%v_%v", module_name, dst)
-			} else {
+			module_name := p.dstToModuleName(dst)
+			if module_name == "" {
+				graph.Logf(p.Log, slog.LevelWarn, "unknown module dst %v - known ips %v\n", dst, p.module_ips)
 				// Some Grafana connections have dst addr e.g. /tmp/plugin2698764150
 				graph_name = strings.ReplaceAll(dst, "/", "_") // make it a proper filename
+			} else {
+				graph_name = fmt.Sprintf("%v_%v", module_name, dst)
 			}
 			out := filepath.Join(p.OutputPath, string(send_or_recv), graph_name)
 			graph.Logf(p.Log, slog.LevelInfo, "Serializing to %v.gv", out)
@@ -483,4 +502,19 @@ func ParseStacksLog(p Parser) {
 			graph.Logf(p.Log, slog.LevelInfo, "Serialize: %v", time.Since(start))
 		}
 	}
+}
+
+func (p *Parser) dstToModuleName(dst string) string {
+	dst_ip, _, err := net.SplitHostPort(dst)
+	if err != nil {
+		// Not a host:port
+		return ""
+	}
+	module_name, ok := p.module_ips[dst_ip]
+
+	if !ok {
+		// Unknown host
+		return ""
+	}
+	return module_name
 }
