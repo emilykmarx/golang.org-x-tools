@@ -14,6 +14,7 @@ import (
 	"time"
 
 	graph "github.com/emilykmarx/dominikbraun-graph"
+	"golang.org/x/tools/gopls/conftamer/stacklog"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
 	"golang.org/x/tools/gopls/internal/cmd/conftamer/parse/modules/k8s_api_server"
 	"golang.org/x/tools/gopls/internal/golang"
@@ -22,137 +23,33 @@ import (
 	"golang.org/x/tools/internal/stdlib"
 )
 
-type SEND_OR_RECV string
+// The log format and its parsing are in stacklog, so tools outside gopls can use them
+type SEND_OR_RECV = stacklog.SendOrRecv
 
 const (
-	SEND SEND_OR_RECV = "send"
-	RECV SEND_OR_RECV = "recv"
+	SEND = stacklog.SEND
+	RECV = stacklog.RECV
 )
 
-// Info about one connection log
-type ConnLog struct {
-	conn_info    string
-	stacks       []string
-	contents     string
-	send_or_recv SEND_OR_RECV
-	last_conn    bool
-}
+type ConnLog = stacklog.ConnLog
 
-const (
-	CONN_BEGIN_HDR  = "conn.log ("
-	CONN_STACKS_HDR = "BEGIN STACKS"
-	CONN_INFO_HDR   = "CONN: "
-	CONTENTS_HDR    = "CONTENTS: "
-)
-
-func findContents(stacks []string, conn_log *ConnLog) int {
-	for i, line := range stacks {
-		if contents, ok := strings.CutPrefix(line, CONTENTS_HDR); ok {
-			conn_log.contents = contents
-			return i
-		}
-	}
-	return -1
-}
-
-// If line is a continuation of previous that completes the line,
-// format is "2026-10-07T20:10:20.730491584Z stderr F <continuation>"
-func cutLogPrefix(line string) (string, error) {
-	fields := strings.SplitN(line, " ", 4)
-	if len(fields) != 4 {
-		return "", fmt.Errorf("bad log prefix format: %v", line)
-	}
-	if _, err := time.Parse(time.RFC3339Nano, fields[0]); err != nil {
-		return "", fmt.Errorf("bad log prefix timestamp: %v: %w", line, err)
-	}
-	if fields[1] != "stderr" && fields[1] != "stdout" {
-		return "", fmt.Errorf("bad log prefix stream: %v", line)
-	}
-	if fields[2] != "F" {
-		return "", fmt.Errorf("bad log prefix tag: %v", line)
-	}
-	return fields[3], nil
-}
-
-// Return info on the next conn in the scanner: the connection info, and the corresponding stacks
-func parseOneConn(scanner *bufio.Scanner) ConnLog {
-	in_write := false // Should print without anything interleaved
-	conn_log := ConnLog{send_or_recv: SEND}
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if idx := strings.Index(line, CONN_STACKS_HDR); idx != -1 {
-			in_write = true // Start saving lines of this write
-			s_or_r := strings.Index(line, CONN_BEGIN_HDR)
-			if s_or_r == -1 {
-				ct.CheckErr(fmt.Errorf("bad format %v", line))
-			}
-			if string(line[s_or_r+len(CONN_BEGIN_HDR)]) == "r" {
-				conn_log.send_or_recv = RECV
-			}
-			next_char := len(CONN_STACKS_HDR) + idx
-			if next_char > len(line)-1 {
-				// end of line => assume format is newline-separated (e.g. k8s integration tests)
-			} else {
-				// not end of line => assume format is msg="<whole conn log with escaped \n>" (e.g. k8s from prombench pod log)
-				stacks := strings.Split(line, "\\n")
-				ok := false
-				conn_log.conn_info, ok = strings.CutPrefix(stacks[1], CONN_INFO_HDR)
-				if !ok {
-					ct.CheckErr(fmt.Errorf("bad format %v", line))
-				}
-				// If contents have a \n (e.g. if we still logged binary since it happened to contain a \r\n),
-				// contents won't be the second-to-last line after the split above
-				content_idx := findContents(stacks, &conn_log)
-				if content_idx == -1 {
-					// The log statement gets a new line every 16424 bytes (e.g. k8s API server in prombench) =>
-					// concatenate this line with the next
-					if !scanner.Scan() {
-						ct.CheckErr(fmt.Errorf("bad format %v", line))
-					}
-					nextline := scanner.Text()
-					var err error
-					nextline, err = cutLogPrefix(nextline)
-					ct.CheckErr(err)
-
-					line += nextline
-					stacks = strings.Split(line, "\\n")
-					content_idx = findContents(stacks, &conn_log)
-					if content_idx == -1 {
-						// Could support this by looping
-						ct.CheckErr(fmt.Errorf("no message content - line broken in three? %v", line))
-					}
-				}
-				conn_log.stacks = stacks[2:content_idx]
-				return conn_log
-			}
-		} else if rest, ok := strings.CutPrefix(line, CONN_INFO_HDR); ok {
-			conn_log.conn_info = rest
-		} else if strings.Contains(line, CONTENTS_HDR) {
-			conn_log.contents, ok = strings.CutPrefix(line, CONTENTS_HDR)
-			return conn_log
-		} else if in_write {
-			conn_log.stacks = append(conn_log.stacks, line)
-		} else {
-			// keep scanning till enter write
-		}
-	}
-
-	return ConnLog{last_conn: true}
-}
-
+// Sanitize a stack frame's function name, switching to the function that defined it
+// if it's e.g. an anonymous function (see SanitizeMethods)
 func SanitizeMethod(method *string) {
-	*method = strings.ReplaceAll(*method, "*", "")
-	*method = strings.ReplaceAll(*method, "(", "")
-	*method = strings.ReplaceAll(*method, ")", "")
-
-	DeanonymizeFn(method)
+	*method = SanitizeMethods(*method)[0]
 }
 
-// If appears to be an anonymous function, switch to the function that defined it
-func DeanonymizeFn(fn *string) {
-	// remove anything after ".func"
-	*fn, _, _ = strings.Cut(*fn, ".func")
+// Sanitize a stack frame's function name, returning the declared functions it stands for:
+// usually just the function, but if it's e.g. an anonymous function, the function that defined it,
+// and also the function that was inlined into, if any (see stacklog.EnclosingFns)
+func SanitizeMethods(method string) []string {
+	fns := stacklog.EnclosingFns(method)
+	for i, fn := range fns {
+		fn = strings.ReplaceAll(fn, "*", "")
+		fn = strings.ReplaceAll(fn, "(", "")
+		fns[i] = strings.ReplaceAll(fn, ")", "")
+	}
+	return fns
 }
 
 func CleanConnPart(part string) string {
@@ -179,12 +76,12 @@ const CONTENTSATTR = "contents"
 const ARGSATTR = "args"
 
 func AddMsgNode(conn ConnLog, sending_types *ct.CTypes) ct.CTypeHash {
-	hash := ct.CTypeHash(RAddr(conn.conn_info))
+	hash := ct.CTypeHash(RAddr(conn.ConnInfo))
 	msg_node := ct.CTypeNode{Names: []ct.FullTypeName{ct.FullTypeName(hash)}}
 	// Add node if doesn't exist
 	attrs := map[string]string{
 		"color":      "red",
-		CONTENTSATTR: conn.contents,
+		CONTENTSATTR: conn.Contents,
 	}
 	err := sending_types.Graph.AddVertex(msg_node, graph.VertexAttributes(attrs))
 	if err == nil {
@@ -198,8 +95,8 @@ func AddMsgNode(conn ConnLog, sending_types *ct.CTypes) ct.CTypeHash {
 	ct.CheckErr(err)
 	attrs = properties.Attributes
 	existing_contents := strings.Split(attrs[CONTENTSATTR], ",")
-	if !slices.Contains(existing_contents, conn.contents) {
-		existing_contents = append(existing_contents, conn.contents)
+	if !slices.Contains(existing_contents, conn.Contents) {
+		existing_contents = append(existing_contents, conn.Contents)
 	}
 	attrs[CONTENTSATTR] = strings.Join(existing_contents, ",")
 	sending_types.Graph.UpdateVertex(hash, msg_node, nil, graph.VertexAttributes(attrs))
@@ -216,11 +113,7 @@ func (p *Parser) ShortLabel(full string, pkg string) string {
 
 // Get pkg of a fully-qualified name
 func Pkg(full string) string {
-	last_slash := strings.LastIndex(full, "/")
-	last_slash = max(last_slash, 0)
-	first_dot := strings.Index(full[last_slash:], ".") // first dot after last slash
-	first_dot = max(first_dot, 0)
-	return full[:last_slash+first_dot]
+	return stacklog.Pkg(full)
 }
 
 // Modules we have message logs from
@@ -331,28 +224,7 @@ func (p *Parser) ArgTypes(fn string, frame []string) []golang.TypeInfo {
 
 // Functions that don't need to be graphed
 func IgnoreFn(fn string) bool {
-	pkg := Pkg(fn)
-	if stdlib.HasPackage(pkg) {
-		// standard library
-		return true
-	}
-	ignore_libs := []string{
-		// generic messages
-		"google.golang.org/grpc", "golang.org/x/net", "github.com/klauspost/compress",
-		// entrypoints
-		"main.main",
-	}
-
-	/* module-specific libs */
-	ignore_libs = append(ignore_libs, k8s_api_server.IGNORE_FNS...)
-
-	for _, lib := range ignore_libs {
-		if strings.HasPrefix(fn, lib) {
-			return true
-		}
-	}
-
-	return false
+	return stacklog.IgnoreFn(fn, stdlib.HasPackage)
 }
 
 // ParserConfig holds the Parser fields that are also conftamer verb config fields
@@ -394,47 +266,44 @@ type Parser struct {
 // The single message node is labeled with all observed contents.
 func (p *Parser) parseConnStacks(conn_log ConnLog) {
 	sending_g := 0
-	_, err := fmt.Sscanf(conn_log.stacks[0], "goroutine %d", &sending_g)
+	_, err := fmt.Sscanf(conn_log.Stacks[0], "goroutine %d", &sending_g)
 	ct.CheckErr(err)
 
 	// Make or update the node for the message
-	dst := RAddr(conn_log.conn_info)
-	ancestry, ok := p.ancestries[conn_log.send_or_recv][dst]
+	dst := RAddr(conn_log.ConnInfo)
+	ancestry, ok := p.ancestries[conn_log.SendOrRecv][dst]
 	if !ok {
 		ancestry = ct.New(p.Log)
-		p.ancestries[conn_log.send_or_recv][dst] = ancestry
+		p.ancestries[conn_log.SendOrRecv][dst] = ancestry
 	}
 	msg_hash := AddMsgNode(conn_log, ancestry)
 
-	g_header := "[originating from goroutine "
 	g := sending_g
 	prev_fn := msg_hash
-	for i, line := range conn_log.stacks {
-		if strings.Contains(line, g_header) {
-			_, err := fmt.Sscanf(line, g_header+"%d", &g)
+	for i, line := range conn_log.Stacks {
+		if strings.Contains(line, stacklog.G_HEADER) {
+			_, err := fmt.Sscanf(line, stacklog.G_HEADER+"%d", &g)
 			ct.CheckErr(err)
-		} else if strings.Contains(line, "created by") {
-			// parent frame
-		} else if strings.Contains(line, "(") {
-			// If line has a (, try to parse it as a function name
-			// Assume the last ( is the beginning of the args
-			fn := line[:strings.LastIndex(line, "(")]
-			SanitizeMethod(&fn)
-			if IgnoreFn(fn) {
-				continue
-			}
-
-			cur_fn, _ := p.AddAncestorFuncNode(fn, conn_log.stacks[i:i+2], g, ancestry, dst)
-			if prev_fn != cur_fn { // don't add self-edges
-				// add edge to previous frame (in parent g's stack if applicable),
-				// or to sent message (if this is the sending frame)
-				err := ancestry.Graph.AddEdge(cur_fn, prev_fn, graph.EdgeWeight(1))
-				if err != nil {
-					if !errors.Is(err, graph.ErrEdgeAlreadyExists) {
-						ct.CheckErr(err)
-					}
+		} else if frame_fn, ok := stacklog.FrameFunc(line); ok {
+			// A closure in an inlined function stands for two functions: the one that defined it,
+			// and (as its caller) the one it was inlined into
+			for _, fn := range SanitizeMethods(frame_fn) {
+				if IgnoreFn(fn) {
+					continue
 				}
-				prev_fn = cur_fn
+
+				cur_fn, _ := p.AddAncestorFuncNode(fn, conn_log.Stacks[i:i+2], g, ancestry, dst)
+				if prev_fn != cur_fn { // don't add self-edges
+					// add edge to previous frame (in parent g's stack if applicable),
+					// or to sent message (if this is the sending frame)
+					err := ancestry.Graph.AddEdge(cur_fn, prev_fn, graph.EdgeWeight(1))
+					if err != nil {
+						if !errors.Is(err, graph.ErrEdgeAlreadyExists) {
+							ct.CheckErr(err)
+						}
+					}
+					prev_fn = cur_fn
+				}
 			}
 		}
 	}
@@ -490,7 +359,12 @@ func ParseStacksLog(p Parser) {
 	graph.Logf(p.Log, slog.LevelInfo, "Parsing ancestry stacktrace for message sends")
 
 	scanner := bufio.NewScanner(send_file)
-	for conn_log := parseOneConn(scanner); !conn_log.last_conn; conn_log = parseOneConn(scanner) {
+	for {
+		conn_log, err := stacklog.ParseOneConn(scanner)
+		ct.CheckErr(err)
+		if conn_log.LastConn {
+			break
+		}
 		p.parseConnStacks(conn_log)
 	}
 

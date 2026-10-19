@@ -2,13 +2,7 @@ package k8s_api_server
 
 import "strings"
 
-var IGNORE_FNS = []string{
-	// wait
-	"k8s.io/apimachinery/pkg/util/wait",
-	// generic messages
-	"k8s.io/client-go/rest",
-	"k8s.io/client-go/transport",
-}
+// Functions to ignore are in stacklog.IGNORE_LIBS
 
 func ShortLabel(cut_fn string, pkg string, module_prefix string) string {
 	is_module_node := strings.HasPrefix(pkg, module_prefix)

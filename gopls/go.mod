@@ -143,4 +143,8 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
+require golang.org/x/tools/gopls/conftamer/stacklog v0.0.0
+
 replace golang.org/x/tools => ..
+
+replace golang.org/x/tools/gopls/conftamer/stacklog => ./conftamer/stacklog
