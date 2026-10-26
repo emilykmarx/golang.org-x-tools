@@ -21,6 +21,7 @@ import (
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/server"
 	"golang.org/x/tools/internal/stdlib"
+	"gopkg.in/yaml.v3"
 )
 
 // The log format and its parsing are in stacklog, so tools outside gopls can use them
@@ -222,19 +223,64 @@ func (p *Parser) ArgTypes(fn string, frame []string) []golang.TypeInfo {
 	return ret
 }
 
-// Functions that don't need to be graphed
-func IgnoreFn(fn string) bool {
+// Functions that don't need to be graphed, per IncludeLibs (unset means MODULE_ONLY)
+func (p *Parser) IgnoreFn(fn string) bool {
+	module_org := filepath.Dir(p.ModulePrefix)
+
+	if p.IncludeLibs != IGNORE_COMMON {
+		if _, in_org := strings.CutPrefix(fn, module_org); !in_org {
+			// Not defined in the module's organization (e.g. github.com/prometheus)
+			return true
+		}
+	}
+
+	if p.IncludeLibs == MODULE_ONLY || p.IncludeLibs == "" {
+		if _, in_module := strings.CutPrefix(fn, p.ModulePrefix); !in_module {
+			// Not defined in the module (e.g. github.com/prometheus/prometheus)
+			return true
+		}
+	}
+	// One of the common ignored functions (e.g. std lib)
 	return stacklog.IgnoreFn(fn, stdlib.HasPackage)
 }
 
 // ParserConfig holds the Parser fields that are also conftamer verb config fields
 // (embedded in both, so the verb can pass them through as a unit)
 type ParserConfig struct {
-	ModulePrefix       string     `yaml:"module_prefix" flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print and possibly ignore unmarshaler subgraph nodes)"`
-	OutputPath         string     `yaml:"output_path" flag:"out,output_path" help:"Output path for graph files"`
-	AncestryLog        string     `yaml:"ancestry_log" flag:"s,ancestry_log" help:"A log of message sends and receives - if passed, will find send/receive ancestors from the log (rather than finding the Unmarshaler Subgraph and Accessors from the module source)"`
-	ModuleIPFiles      StringList `yaml:"module_ip_files" flag:"ips,module_ip_files" help:"Files containing module IPs (e.g. pods and services)"`
-	ShouldFindArgTypes bool       `yaml:"find_arg_types" flag:"arg-types,find_arg_types" help:"Whether to find arg types of message ancestors"`
+	ModulePrefix       string      `yaml:"module_prefix" flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print and possibly ignore unmarshaler subgraph nodes)"`
+	OutputPath         string      `yaml:"output_path" flag:"out,output_path" help:"Output path for graph files"`
+	AncestryLog        string      `yaml:"ancestry_log" flag:"s,ancestry_log" help:"A log of message sends and receives - if passed, will find send/receive ancestors from the log (rather than finding the Unmarshaler Subgraph and Accessors from the module source)"`
+	ModuleIPFiles      StringList  `yaml:"module_ip_files" flag:"ips,module_ip_files" help:"Files containing module IPs (e.g. pods and services)"`
+	ShouldFindArgTypes bool        `yaml:"find_arg_types" flag:"arg-types,find_arg_types" help:"Whether to find arg types of message ancestors"`
+	IncludeLibs        IncludeLibs `yaml:"include_libs" flag:"include-libs,include_libs" help:"Which functions to include in ancestries: MODULE_ONLY (default), MODULE_ORG_ONLY, or IGNORE_COMMON"`
+}
+
+// IncludeLibs is which functions to include in ancestries
+type IncludeLibs string
+
+const (
+	MODULE_ONLY     IncludeLibs = "MODULE_ONLY"
+	MODULE_ORG_ONLY IncludeLibs = "MODULE_ORG_ONLY"
+	IGNORE_COMMON   IncludeLibs = "IGNORE_COMMON"
+)
+
+func (i *IncludeLibs) String() string { return string(*i) }
+func (i *IncludeLibs) Set(v string) error {
+	switch IncludeLibs(v) {
+	case MODULE_ONLY, MODULE_ORG_ONLY, IGNORE_COMMON:
+		*i = IncludeLibs(v)
+		return nil
+	}
+	return fmt.Errorf("invalid include_libs %q: want %v, %v, or %v", v, MODULE_ONLY, MODULE_ORG_ONLY, IGNORE_COMMON)
+}
+
+// Validate when set from the YAML config too
+func (i *IncludeLibs) UnmarshalYAML(value *yaml.Node) error {
+	var v string
+	if err := value.Decode(&v); err != nil {
+		return err
+	}
+	return i.Set(v)
 }
 
 // StringList is a []string settable via a repeated flag (e.g. -ip=a -ip=b)
@@ -288,7 +334,7 @@ func (p *Parser) parseConnStacks(conn_log ConnLog) {
 			// A closure in an inlined function stands for two functions: the one that defined it,
 			// and (as its caller) the one it was inlined into
 			for _, fn := range SanitizeMethods(frame_fn) {
-				if IgnoreFn(fn) {
+				if p.IgnoreFn(fn) {
 					continue
 				}
 
