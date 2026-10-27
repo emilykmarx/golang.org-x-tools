@@ -73,12 +73,23 @@ func RAddr(conn string) string {
 	return parsed_conn[len(parsed_conn)-1]
 }
 
+// Whether addr is host:port with a loopback IP host (e.g. 127.0.0.1:8080, [::1]:8080)
+func IsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		// Not a host:port
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 const CONTENTSATTR = "contents"
 const ARGSATTR = "args"
 
-func AddMsgNode(conn ConnLog, sending_types *ct.CTypes) ct.CTypeHash {
-	hash := ct.CTypeHash(RAddr(conn.ConnInfo))
-	msg_node := ct.CTypeNode{Names: []ct.FullTypeName{ct.FullTypeName(hash)}}
+func AddMsgNode(dst string, conn ConnLog, sending_types *ct.CTypes) {
+	hash := ct.CTypeHash(dst)
+	msg_node := ct.CTypeNode{Names: []ct.FullTypeName{ct.FullTypeName(dst)}}
 	// Add node if doesn't exist
 	attrs := map[string]string{
 		"color":      "red",
@@ -86,7 +97,7 @@ func AddMsgNode(conn ConnLog, sending_types *ct.CTypes) ct.CTypeHash {
 	}
 	err := sending_types.Graph.AddVertex(msg_node, graph.VertexAttributes(attrs))
 	if err == nil {
-		return hash // done
+		return
 	}
 
 	// Update attributes with new contents
@@ -101,7 +112,6 @@ func AddMsgNode(conn ConnLog, sending_types *ct.CTypes) ct.CTypeHash {
 	}
 	attrs[CONTENTSATTR] = strings.Join(existing_contents, ",")
 	sending_types.Graph.UpdateVertex(hash, msg_node, nil, graph.VertexAttributes(attrs))
-	return hash
 }
 
 // Shorten fn
@@ -170,9 +180,8 @@ func (p *Parser) AddAncestorFuncNode(fn string, frame []string, g int, sending_t
 		"fn": fn,
 	}
 
-	// To save gopls queries for now, only find arg types if the dst is a known module (or `kubernetes`)
 	args, queried := p.queriedGopls(fn)
-	find_arg_types := p.ShouldFindArgTypes && p.scanned_module(p.dstToModuleName(dst))
+	find_arg_types := p.ShouldFindArgTypes
 	if find_arg_types {
 		if !queried {
 			args := p.ArgTypes(fn, frame)
@@ -247,12 +256,40 @@ func (p *Parser) IgnoreFn(fn string) bool {
 // ParserConfig holds the Parser fields that are also conftamer verb config fields
 // (embedded in both, so the verb can pass them through as a unit)
 type ParserConfig struct {
-	ModulePrefix       string      `yaml:"module_prefix" flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print and possibly ignore unmarshaler subgraph nodes)"`
-	OutputPath         string      `yaml:"output_path" flag:"out,output_path" help:"Output path for graph files"`
-	AncestryLog        string      `yaml:"ancestry_log" flag:"s,ancestry_log" help:"A log of message sends and receives - if passed, will find send/receive ancestors from the log (rather than finding the Unmarshaler Subgraph and Accessors from the module source)"`
-	ModuleIPFiles      StringList  `yaml:"module_ip_files" flag:"ips,module_ip_files" help:"Files containing module IPs (e.g. pods and services)"`
-	ShouldFindArgTypes bool        `yaml:"find_arg_types" flag:"arg-types,find_arg_types" help:"Whether to find arg types of message ancestors"`
-	IncludeLibs        IncludeLibs `yaml:"include_libs" flag:"include-libs,include_libs" help:"Which functions to include in ancestries: MODULE_ONLY (default), MODULE_ORG_ONLY, or IGNORE_COMMON"`
+	ModulePrefix       string         `yaml:"module_prefix" flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print and possibly ignore unmarshaler subgraph nodes)"`
+	OutputPath         string         `yaml:"output_path" flag:"out,output_path" help:"Output path for graph files"`
+	AncestryLog        string         `yaml:"ancestry_log" flag:"s,ancestry_log" help:"A log of message sends and receives - if passed, will find send/receive ancestors from the log (rather than finding the Unmarshaler Subgraph and Accessors from the module source)"`
+	ModuleIPFiles      StringList     `yaml:"module_ip_files" flag:"ips,module_ip_files" help:"Files containing module IPs (e.g. pods and services)"`
+	ShouldFindArgTypes bool           `yaml:"find_arg_types" flag:"arg-types,find_arg_types" help:"Whether to find arg types of message ancestors"`
+	IncludeLibs        IncludeLibs    `yaml:"include_libs" flag:"include-libs,include_libs" help:"Which functions to include in ancestries: MODULE_ONLY (default), MODULE_ORG_ONLY, or IGNORE_COMMON"`
+	OutputGrouping     OutputGrouping `yaml:"output_grouping" flag:"output-grouping,output_grouping" help:"Which nodes are output to the same graph: RECV_SEND (default - all receive nodes share one graph, all send nodes another) or DST_ENDPOINT (further divide receive and send nodes by destination IP:port)"`
+}
+
+// OutputGrouping is which nodes are output to the same graph
+type OutputGrouping string
+
+const (
+	RECV_SEND    OutputGrouping = "RECV_SEND"
+	DST_ENDPOINT OutputGrouping = "DST_ENDPOINT"
+)
+
+func (o *OutputGrouping) String() string { return string(*o) }
+func (o *OutputGrouping) Set(v string) error {
+	switch OutputGrouping(v) {
+	case RECV_SEND, DST_ENDPOINT:
+		*o = OutputGrouping(v)
+		return nil
+	}
+	return fmt.Errorf("invalid output_grouping %q: want %v or %v", v, RECV_SEND, DST_ENDPOINT)
+}
+
+// Validate when set from the YAML config too
+func (o *OutputGrouping) UnmarshalYAML(value *yaml.Node) error {
+	var v string
+	if err := value.Decode(&v); err != nil {
+		return err
+	}
+	return o.Set(v)
 }
 
 // IncludeLibs is which functions to include in ancestries
@@ -308,24 +345,28 @@ type Parser struct {
 
 // Parse the stacks of the given conn,
 // writing any frames that failed to parse to err_file.
-// Each ancestry graph corresponds to sends or receives from one destination endpoint (IP:port).
-// The single message node is labeled with all observed contents.
+// The message node is labeled with all observed contents.
 func (p *Parser) parseConnStacks(conn_log ConnLog) {
 	sending_g := 0
 	_, err := fmt.Sscanf(conn_log.Stacks[0], "goroutine %d", &sending_g)
 	ct.CheckErr(err)
 
-	// Make or update the node for the message
-	dst := RAddr(conn_log.ConnInfo)
-	ancestry, ok := p.ancestries[conn_log.SendOrRecv][dst]
+	// Make or update the node for the message in the relevant graph
+	dst := p.withDstModule(RAddr(conn_log.ConnInfo))
+	ancestry_key := ""
+	if p.OutputGrouping == DST_ENDPOINT {
+		// Each ancestry graph corresponds to sends or receives from one destination endpoint (IP:port).
+		ancestry_key = dst
+	}
+	ancestry, ok := p.ancestries[conn_log.SendOrRecv][ancestry_key]
 	if !ok {
 		ancestry = ct.New(p.Log)
-		p.ancestries[conn_log.SendOrRecv][dst] = ancestry
+		p.ancestries[conn_log.SendOrRecv][ancestry_key] = ancestry
 	}
-	msg_hash := AddMsgNode(conn_log, ancestry)
+	AddMsgNode(dst, conn_log, ancestry)
 
 	g := sending_g
-	prev_fn := msg_hash
+	prev_fn := ct.CTypeHash(dst)
 	for i, line := range conn_log.Stacks {
 		if strings.Contains(line, stacklog.G_HEADER) {
 			_, err := fmt.Sscanf(line, stacklog.G_HEADER+"%d", &g)
@@ -427,17 +468,8 @@ func ParseStacksLog(p Parser) {
 
 	for send_or_recv, ancestries := range p.ancestries {
 		for dst, ancestry := range ancestries {
-			graph_name := dst
 			ancestry.LogGraphStats(p.Log, start)
-			module_name := p.dstToModuleName(dst)
-			if module_name == "" {
-				graph.Logf(p.Log, slog.LevelWarn, "unknown module dst %v - known ips %v\n", dst, p.module_ips)
-				// Some Grafana connections have dst addr e.g. /tmp/plugin2698764150
-				graph_name = strings.ReplaceAll(dst, "/", "_") // make it a proper filename
-			} else {
-				graph_name = fmt.Sprintf("%v_%v", module_name, dst)
-			}
-			out := filepath.Join(p.OutputPath, string(send_or_recv), graph_name)
+			out := filepath.Join(p.OutputPath, string(send_or_recv), dst)
 			graph.Logf(p.Log, slog.LevelInfo, "Serializing to %v.gv", out)
 			ancestry.Serialize(out+".text", p.ModulePrefix, true) // Serialize function expects the .text postfix
 			graph.Logf(p.Log, slog.LevelInfo, "Serialize: %v", time.Since(start))
@@ -445,17 +477,26 @@ func ParseStacksLog(p Parser) {
 	}
 }
 
-func (p *Parser) dstToModuleName(dst string) string {
+// host:port => module_host:port
+func (p *Parser) withDstModule(dst string) string {
+	// Some Grafana connections have dst addr e.g. /tmp/plugin2698764150 =>
+	// make it a proper filename
+	dst = strings.ReplaceAll(dst, "/", "_")
+
+	if IsLoopback(dst) {
+		return "loopback_" + dst
+	}
 	dst_ip, _, err := net.SplitHostPort(dst)
 	if err != nil {
 		// Not a host:port
-		return ""
+		return dst
 	}
 	module_name, ok := p.module_ips[dst_ip]
 
 	if !ok {
-		// Unknown host
-		return ""
+		// Unknown, non-loopback host
+		graph.Logf(p.Log, slog.LevelWarn, "unknown module dst %v - known ips %v\n", dst, p.module_ips)
+		return dst
 	}
-	return module_name
+	return module_name + "_" + dst
 }
