@@ -16,7 +16,6 @@ import (
 	graph "github.com/emilykmarx/dominikbraun-graph"
 	"golang.org/x/tools/gopls/conftamer/stacklog"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
-	"golang.org/x/tools/gopls/internal/cmd/conftamer/parse/modules/k8s_api_server"
 	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/protocol"
 	"golang.org/x/tools/gopls/internal/server"
@@ -117,8 +116,6 @@ func AddMsgNode(dst string, conn ConnLog, sending_types *ct.CTypes) {
 // Shorten fn
 func (p *Parser) ShortLabel(full string, pkg string) string {
 	label, _ := strings.CutPrefix(full, p.ModulePrefix) // always cut the module name
-	// module-specific shortening
-	label = k8s_api_server.ShortLabel(label, pkg, p.ModulePrefix)
 	return label
 }
 
