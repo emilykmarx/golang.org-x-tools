@@ -381,12 +381,13 @@ func readKeys(keys_csv string) []string {
 }
 
 func main() {
-	var keys_csv, keys_txt, unmarshaler_subgraph, module_prefix, output string
+	var keys_csv, keys_txt, unmarshaler_subgraph, module_prefix, output, root string
 	flag.StringVar(&keys_csv, "keys-csv", "", "csv with a param_keys column (or pass --keys-txt)")
 	flag.StringVar(&keys_txt, "keys-txt", "", `file with lines "<value>:<key>[,<key>...]", e.g. param_keys.txt from extract_param_values.py (or pass --keys-csv)`)
 	flag.StringVar(&unmarshaler_subgraph, "unmarshaler-subgraph", "", "File containing serialized unmarshaler subgraph")
 	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
 	flag.StringVar(&output, "output", "", "Output csv")
+	flag.StringVar(&root, "root", "", "Node to search from, as named in the serialized graph (e.g. /config.Config) - optional, default all roots")
 	flag.Parse()
 	if (keys_csv == "") == (keys_txt == "") || unmarshaler_subgraph == "" || module_prefix == "" || output == "" {
 		flag.Usage()
@@ -395,6 +396,15 @@ func main() {
 
 	g, _ := ct.Deserialize(unmarshaler_subgraph)
 	f := newFinder(g)
+	if root != "" {
+		if _, err := g.Vertex(ct.CTypeHash(root)); err != nil {
+			log.Fatalf("--root %v not in graph: %v", root, err)
+		}
+		if !slices.Contains(f.roots, ct.CTypeHash(root)) {
+			log.Printf("Warning: --root %v is not a root of the graph (it has in-edges)", root)
+		}
+		f.roots = []ct.CTypeHash{ct.CTypeHash(root)}
+	}
 
 	// Groups: 0 = no full path, 1 = multiple unmarshalers, 2 = one unmarshaler
 	groups := make([][]result, 3)

@@ -8,8 +8,10 @@ This is roughly the inverse of `ASTPathToParams` in `dlv/params.go` (which goes 
 go run . (--keys-csv <csv with a param_keys column> | --keys-txt <param_keys.txt>) \
   --unmarshaler-subgraph <graph serialized by Serialize, e.g. unmarshaler_subgraph.text> \
   --module-prefix <module as in go.mod, e.g. github.com/prometheus/prometheus> \
-  --output <output csv>
+  --output <output csv> \
+  [--root <node to search from, e.g. /config.Config>]
 ```
+`--root` names the node as it appears in the serialized graph, i.e. with the module prefix cut. By default the search starts from every root of the graph. Other roots can be tagged types for other formats, e.g. API responses or promtool's test files, and they can add spurious matches.
 Pass the keys in one of two ways:
 - `--keys-csv`: the csv's `param_keys` column holds comma-separated lists of dot-separated keys.
 - `--keys-txt`: a file with lines `<value>:<key>[,<key>...]`, such as the `param_keys.txt` written by `prom-test-infra/prombench/extract_param_values.py`. The keys come after the last colon on each line.
