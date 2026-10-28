@@ -72,6 +72,10 @@ type CTypeNode struct {
 	// (these are also in TypeInfo, but copied here to make [un]marshaling easier)
 	Methods []FullTypeName
 	Tags    map[string]string // Field name => tag or "" (populated if struct)
+	// Whether the type, or each of its fields, is a map (after stripping pointers/slices/arrays) -
+	// needed to match map keys when the map's value type isn't a CType (so there's no edge with MapType.Value)
+	IsMap     bool
+	MapFields map[string]bool // Field name => true if field is a map (populated if struct)
 
 	// Parameters this CType can access, and via which fields
 	Stored_down  map[Stored]struct{} // becomes irrelevant once entire push down pass is done
@@ -241,6 +245,7 @@ func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_info *NeighInfo) (TypeNameE
 	// TODO(CT) if we combine nodes, do we need to add the methods of the new type?
 	CopyMethods(&new_ctype)
 	CopyTags(&new_ctype)
+	CopyMapInfo(&new_ctype)
 
 	err := c.Graph.AddVertex(new_ctype, func(vp *graph.VertexProperties) {})
 	// Shouldn't have existed - checked that above

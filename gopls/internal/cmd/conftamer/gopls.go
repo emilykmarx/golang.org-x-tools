@@ -61,6 +61,42 @@ func CopyTags(node *CTypeNode) {
 	node.Tags = tags
 }
 
+// Populate whether n and its fields (if struct) are maps
+func CopyMapInfo(node *CTypeNode) {
+	node.IsMap = IsMap(node.TypeInfo)
+	struct_info := IsStruct(node.TypeInfo)
+	if struct_info == nil {
+		return
+	}
+	for i := range struct_info.NumFields() {
+		if IsMap(struct_info.Field(i).Type()) {
+			if node.MapFields == nil {
+				node.MapFields = make(map[string]bool)
+			}
+			node.MapFields[struct_info.Field(i).Name()] = true
+		}
+	}
+}
+
+// Whether type is a map, after stripping pointers/slices/arrays
+// (which don't add key segments in the config file)
+func IsMap(typ types.Type) bool {
+	for {
+		switch u := typ.Underlying().(type) {
+		case *types.Pointer:
+			typ = u.Elem()
+		case *types.Slice:
+			typ = u.Elem()
+		case *types.Array:
+			typ = u.Elem()
+		case *types.Map:
+			return true
+		default:
+			return false
+		}
+	}
+}
+
 func TypeNameSafe(type_info *types.TypeName) FullTypeName {
 	pkg := "<nil>"
 	if type_info.Pkg() != nil {

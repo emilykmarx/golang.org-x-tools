@@ -269,6 +269,14 @@ func EnclosedTypeObjs(ctx context.Context, snapshot *cache.Snapshot, decl_name p
 		// identifier - check if it's of a type name
 		child_typeinfo, err := cursorToTypeInfo(child_node, parent_cursor.Parent(), pkg)
 		if err != nil {
+			// Embedded field (T, *T, pkg.T): cursorToTypeInfo returns the field Var, so get the TypeName instead
+			if v, ok := pkg.TypesInfo().Defs[child_node].(*types.Var); ok && v.Embedded() {
+				if tn, ok := pkg.TypesInfo().Uses[child_node].(*types.TypeName); ok {
+					child_typeinfo, err = tn, nil
+				}
+			}
+		}
+		if err != nil {
 			// Not a type name
 			// TODO(CT) (minor) Some of these errors may be actual errors
 			return true

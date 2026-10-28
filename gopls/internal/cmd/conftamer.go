@@ -174,6 +174,8 @@ func (c *Conftamer) ignoreCType(typ golang.TypeInfo, neigh_find NeighFind, neigh
 				// excluded edge
 				return true
 			}
+			// NOTE this check doesn't apply to embedded fields: their AST path has no Field: edge
+			// (ASTPath only adds field names, and embedded fields have none), so untagged embedded fields aren't ignored
 			if !c.findingAccessors() && len(neigh_node.Tags) > 0 {
 				// neigh_node.Tags may be empty when AST path still has a field, e.g. when parent is interface
 				// (see Prometheus /discovery.Config => /discovery.DiscovererOptions)
@@ -204,8 +206,8 @@ func (c *Conftamer) ignoreCType(typ golang.TypeInfo, neigh_find NeighFind, neigh
 			// When finding edges from Accessors, stop if find one back into US - this wouldn't happen if
 			// we found descendants in same way as ancestors, but we don't, hence this happens in a few cases:
 			// - Edge from US => Accessor has an AST edge that US excludes
-			// - Accessor finds a node the US doesn't, due to two things we may want to fix:
-			// Embedded fields and discovery/xds.KumaSDConfig - TODO(CT) for both
+			// - Accessor finds a node the US doesn't - this was due to two things that should now be fixed:
+			// Embedded fields and discovery/xds.KumaSDConfig
 			if _, ok := c.unmarshaler_subgraph.GetHash(cur_name); ok {
 				if depth != 1 {
 					graph.Logf(c.log, slog.LevelInfo, "Accessors would have edge out of Unmarshaler Subgraph: %v => %v\n", cur_name, neigh_info.Name)
