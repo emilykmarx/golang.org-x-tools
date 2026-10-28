@@ -23,7 +23,7 @@ func main() {
 	nodes, err := in.Vertices()
 	ct.CheckErr(err)
 
-	p := parse.Parser{Module_prefix: module_prefix}
+	p := parse.Parser{ParserConfig: parse.ParserConfig{ModulePrefix: module_prefix}}
 	for _, node := range nodes {
 		hash := string(ct.CTypeNodeHash(node))
 		pkg := parse.Pkg(string(hash))
