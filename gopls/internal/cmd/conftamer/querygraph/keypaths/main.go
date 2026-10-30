@@ -9,12 +9,9 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	graph "github.com/emilykmarx/dominikbraun-graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
@@ -34,9 +31,10 @@ type segment struct {
 }
 
 type finder struct {
-	g     ct.CTypeGraph
-	adj   map[ct.CTypeHash][]outEdge
-	roots []ct.CTypeHash
+	g      ct.CTypeGraph
+	adj    map[ct.CTypeHash][]outEdge
+	roots  []ct.CTypeHash
+	format ct.Format
 
 	// per-key results
 	full    map[string]bool // path string => true
@@ -61,7 +59,7 @@ func joinKey(parts ...string) string {
 // Keys in the section of `node` at `prefix` that are reachable without following any edge out of `node`:
 // the key itself (already matched by the path), plus the node's fields that have no edge out.
 // So fields of inlined structs, yaml:"-" fields, and fields whose type is a node in the graph are excluded.
-// Unexported fields are skipped (go-yaml skips them). MAP_KEY stands for any key of an inline map.
+// Fields that aren't keys (see fieldKey) are skipped. MAP_KEY stands for any key of an inline map.
 func (f *finder) sectionKeys(node ct.CTypeHash, prefix string, key string) []string {
 	keys := []string{key}
 	n, err := f.g.Vertex(node)
@@ -75,20 +73,18 @@ func (f *finder) sectionKeys(node ct.CTypeHash, prefix string, key string) []str
 		}
 	}
 
-	for field, tag := range n.Tags {
-		if r, _ := utf8.DecodeRuneInString(field); !unicode.IsUpper(r) {
-			continue // unexported
-		}
+	for field := range n.Tags {
+		field_key := f.fieldKey(n, field, false)
 		switch {
-		case yamlDash(tag):
-			// only populated via an edge (custom unmarshaler fills the field's type)
-		case yamlInline(tag):
-			if n.MapFields[field] && !edge_keys[MAP_KEY] {
+		case !field_key.IsKey():
+			// unexported, untagged (our exception), or yaml:"-" (only populated via an edge, by a custom unmarshaler)
+		case field_key.Inline:
+			if field_key.InlineMap && !edge_keys[MAP_KEY] {
 				keys = append(keys, joinKey(prefix, MAP_KEY)) // inline map with non-CType values
 			} // inline structs are only reachable via an edge
 		default:
-			if field_key := ct.FieldToParamKey(field, tag); !edge_keys[field_key] {
-				keys = append(keys, joinKey(prefix, field_key))
+			if !edge_keys[field_key.Key] {
+				keys = append(keys, joinKey(prefix, field_key.Key))
 			}
 		}
 	}
@@ -101,10 +97,23 @@ func customUnmarshaler(n ct.CTypeNode) bool {
 	return slices.ContainsFunc(n.Methods, func(m ct.FullTypeName) bool { return strings.HasSuffix(string(m), ".UnmarshalYAML") })
 }
 
-// Whether the struct tag's yaml key is "-"
-func yamlDash(tag string) bool {
-	yaml_tag, ok := reflect.StructTag(tag).Lookup("yaml")
-	return ok && strings.Split(yaml_tag, ",")[0] == "-"
+// How a node's field maps to config file keys, following the unmarshaling library for f.format (see ct.GetFieldKey).
+// Callers apply our untagged-field exception via FieldKey.IsKey.
+// embedded: the field is known to be embedded (for graphs serialized before EmbeddedFields was recorded).
+func (f *finder) fieldKey(n ct.CTypeNode, field string, embedded bool) ct.FieldKey {
+	raw := ct.NodeRawField(n, field)
+	raw.Embedded = raw.Embedded || embedded
+	key, err := ct.GetFieldKey(raw, f.format)
+	if err != nil {
+		log.Printf("Warning: treating field as not a key: %v (in %v)", err, n.Names)
+		return ct.FieldKey{Skip: true}
+	}
+	return key
+}
+
+// Whether the field can be followed to a child: a key, or yaml:"-" (populated by a custom unmarshaler, if any)
+func followable(key ct.FieldKey) bool {
+	return key.IsKey() || key.Dash
 }
 
 // Name of the embedded field the AST path goes through, if any.
@@ -137,29 +146,39 @@ const CUSTOM_SUFFIX = " (custom UnmarshalYAML)"
 // Matches any one key segment (a map key)
 const MAP_KEY = "*"
 
-// Key segment(s) for an edge, computed as in ASTPathToParams.
-// Embedded fields are keyed as go-yaml does: by tag if any (so "" if inline), else lowercased field name.
-// Map values are keyed as go-yaml does: by any one segment (the map key), represented as MAP_KEY.
+// Key segment(s) for an edge, one per AST path, with fields keyed as the unmarshaling library does (see fieldKey).
+// An AST path through a field that isn't a key (e.g. unexported, or untagged per our exception) gives no segment.
+// Map values are keyed by any one segment (the map key), represented as MAP_KEY.
 // Edges to map key types aren't followed (the key type decodes the key's name, not a section) => no segment.
-func edgeSegments(src, target ct.CTypeNode, edge graph.Edge[ct.CTypeHash]) []segment {
+func (f *finder) edgeSegments(src, target ct.CTypeNode, edge graph.Edge[ct.CTypeHash]) []segment {
 	segs := []segment{}
+ast_paths:
 	for _, ast_path := range dlvgraph.EdgeASTPaths(edge.Properties) {
 		if slices.Contains(ast_path, "MapType.Key") {
 			continue
 		}
 		seg := segment{}
+		add_field := func(key ct.FieldKey) bool {
+			if !followable(key) {
+				return false
+			}
+			seg.pattern = joinKey(seg.pattern, key.Key)
+			seg.inline = seg.inline || key.Inline
+			seg.dash = seg.dash || key.Dash
+			return true
+		}
 		if field, ok := embeddedField(src, target, ast_path); ok {
-			seg.pattern = ct.FieldToParamKey(field, src.Tags[field])
-			seg.inline = yamlInline(src.Tags[field])
-			seg.dash = yamlDash(src.Tags[field])
+			if !add_field(f.fieldKey(src, field, true)) {
+				continue
+			}
 		}
 		for _, ast_edge := range ast_path {
 			if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
-				seg.pattern = ct.AppendFieldTag(field, src.Tags[field], seg.pattern)
-				seg.inline = seg.inline || yamlInline(src.Tags[field])
-				seg.dash = seg.dash || yamlDash(src.Tags[field])
+				if !add_field(f.fieldKey(src, field, false)) {
+					continue ast_paths
+				}
 			} else if ast_edge == "MapType.Value" {
-				seg.pattern = strings.Trim(seg.pattern+"."+MAP_KEY, ".")
+				seg.pattern = joinKey(seg.pattern, MAP_KEY)
 			}
 		}
 		segs = append(segs, seg)
@@ -168,7 +187,8 @@ func edgeSegments(src, target ct.CTypeNode, edge graph.Edge[ct.CTypeHash]) []seg
 	return slices.Compact(segs)
 }
 
-func newFinder(g ct.CTypeGraph) *finder {
+func newFinder(g ct.CTypeGraph, format ct.Format) *finder {
+	f := &finder{g: g, format: format}
 	roots, _, err := graph.RootsLeaves(g)
 	ct.CheckErr(err)
 	slices.Sort(roots)
@@ -182,11 +202,12 @@ func newFinder(g ct.CTypeGraph) *finder {
 		for target, edge := range targets {
 			target_node, err := g.Vertex(target)
 			ct.CheckErr(err)
-			adj[src] = append(adj[src], outEdge{target: target, segments: edgeSegments(src_node, target_node, edge)})
+			adj[src] = append(adj[src], outEdge{target: target, segments: f.edgeSegments(src_node, target_node, edge)})
 		}
 		slices.SortFunc(adj[src], func(a, b outEdge) int { return strings.Compare(string(a.target), string(b.target)) })
 	}
-	return &finder{g: g, adj: adj, roots: roots}
+	f.adj, f.roots = adj, roots
+	return f
 }
 
 func (f *finder) pathString(path []ct.CTypeHash, module_prefix string) string {
@@ -223,8 +244,8 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 	// - even if an inlined struct has a field with the same key (yaml panics on such duplicates)
 	n, err := f.g.Vertex(node)
 	ct.CheckErr(err)
-	for field, tag := range n.Tags {
-		if ct.FieldToParamKey(field, tag) == remaining {
+	for field := range n.Tags {
+		if field_key := f.fieldKey(n, field, false); field_key.IsKey() && !field_key.Inline && field_key.Key == remaining {
 			f.recordFull(f.pathString(path, module_prefix), f.sectionKeys(node, prefix, key))
 			return
 		}
@@ -310,12 +331,6 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 	}
 }
 
-// Whether the struct tag has a yaml inline flag
-func yamlInline(tag string) bool {
-	yaml_tag, ok := reflect.StructTag(tag).Lookup("yaml")
-	return ok && slices.Contains(strings.Split(yaml_tag, ",")[1:], "inline")
-}
-
 // Whether `remaining` is a map key of the node (if a map), or a map field's key followed by a map key.
 // If so, also return the map's section key relative to the node (MAP_KEY, or <field key>.MAP_KEY).
 func (f *finder) mapKeyMatch(n ct.CTypeNode, remaining string) (string, bool) {
@@ -326,7 +341,7 @@ func (f *finder) mapKeyMatch(n ct.CTypeNode, remaining string) (string, bool) {
 			return MAP_KEY, true
 		}
 		for field := range n.MapFields {
-			if yamlInline(n.Tags[field]) {
+			if field_key := f.fieldKey(n, field, false); field_key.IsKey() && field_key.InlineMap {
 				return MAP_KEY, true
 			}
 		}
@@ -336,7 +351,7 @@ func (f *finder) mapKeyMatch(n ct.CTypeNode, remaining string) (string, bool) {
 		return "", false
 	}
 	for field := range n.MapFields {
-		if ct.FieldToParamKey(field, n.Tags[field]) == field_key {
+		if k := f.fieldKey(n, field, false); k.IsKey() && !k.Inline && k.Key == field_key {
 			return joinKey(field_key, MAP_KEY), true
 		}
 	}
@@ -462,12 +477,13 @@ func readKeys(keys_csv string) []string {
 }
 
 func main() {
-	var keys_csv, keys_txt, unmarshaler_subgraph, module_prefix, output, root string
+	var keys_csv, keys_txt, unmarshaler_subgraph, module_prefix, output, root, format_arg string
 	flag.StringVar(&keys_csv, "keys-csv", "", "csv with a param_keys column (or pass --keys-txt)")
 	flag.StringVar(&keys_txt, "keys-txt", "", `file with lines "<value>:<key>[,<key>...]", e.g. param_keys.txt from extract_param_values.py (or pass --keys-csv)`)
 	flag.StringVar(&unmarshaler_subgraph, "unmarshaler-subgraph", "", "File containing serialized unmarshaler subgraph")
 	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
 	flag.StringVar(&output, "output", "", "Output csv")
+	flag.StringVar(&format_arg, "format", string(ct.YAML), "Config file format: yaml (follow gopkg.in/yaml.v2) or json (follow encoding/json; not yet supported)")
 	flag.StringVar(&root, "root", "", "Node to search from, as named in the serialized graph (e.g. /config.Config) - optional, default all roots")
 	flag.Parse()
 	if (keys_csv == "") == (keys_txt == "") || unmarshaler_subgraph == "" || module_prefix == "" || output == "" {
@@ -475,8 +491,13 @@ func main() {
 		log.Fatalf("Missing mandatory argument")
 	}
 
+	format, err := ct.ParseFormat(format_arg)
+	if err != nil {
+		log.Fatalf("--format: %v", err)
+	}
+
 	g, _ := ct.Deserialize(unmarshaler_subgraph)
-	f := newFinder(g)
+	f := newFinder(g, format)
 	if root != "" {
 		if _, err := g.Vertex(ct.CTypeHash(root)); err != nil {
 			log.Fatalf("--root %v not in graph: %v", root, err)

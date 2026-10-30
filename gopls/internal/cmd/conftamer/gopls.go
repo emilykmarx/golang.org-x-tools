@@ -61,7 +61,7 @@ func CopyTags(node *CTypeNode) {
 	node.Tags = tags
 }
 
-// Populate whether n and its fields (if struct) are maps
+// Populate whether n and its fields (if struct) are maps, and which fields are embedded
 func CopyMapInfo(node *CTypeNode) {
 	node.IsMap = IsMap(node.TypeInfo)
 	struct_info := IsStruct(node.TypeInfo)
@@ -69,11 +69,18 @@ func CopyMapInfo(node *CTypeNode) {
 		return
 	}
 	for i := range struct_info.NumFields() {
-		if IsMap(struct_info.Field(i).Type()) {
+		field := struct_info.Field(i)
+		if IsMap(field.Type()) {
 			if node.MapFields == nil {
 				node.MapFields = make(map[string]bool)
 			}
-			node.MapFields[struct_info.Field(i).Name()] = true
+			node.MapFields[field.Name()] = true
+		}
+		if field.Embedded() {
+			if node.EmbeddedFields == nil {
+				node.EmbeddedFields = make(map[string]bool)
+			}
+			node.EmbeddedFields[field.Name()] = true
 		}
 	}
 }

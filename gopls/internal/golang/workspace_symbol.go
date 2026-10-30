@@ -137,7 +137,8 @@ func ArgTypes(ctx context.Context, snapshots []*cache.Snapshot, query string, op
 }
 
 // Get all types in the workspace packages that have any struct tags
-func TaggedTypes(ctx context.Context, snapshots []*cache.Snapshot) ([]TypeInfo, error) {
+// Find struct types with at least one field for which is_tagged returns true (e.g. has a tag for the config format).
+func TaggedTypes(ctx context.Context, snapshots []*cache.Snapshot, is_tagged func(st *types.Struct, i int) bool) ([]TypeInfo, error) {
 	tagged_types := []TypeInfo{}
 
 	for _, snapshot := range snapshots {
@@ -160,16 +161,15 @@ func TaggedTypes(ctx context.Context, snapshots []*cache.Snapshot) ([]TypeInfo, 
 						if !ok {
 							return nil, fmt.Errorf("node %+v is a struct but not the corresponding type?", structinfo)
 						}
-						is_tagged := false
+						tagged := false
 						for i := 0; i < styp.NumFields(); i++ {
-							tag := styp.Tag(i)
-							if tag != "" {
-								is_tagged = true
+							if is_tagged(styp, i) {
+								tagged = true
 								break
 							}
 						}
 
-						if is_tagged {
+						if tagged {
 							// typeToObjects returns nothing for typ.Type => get the type from the node
 							pgf, err := pkg.FileEnclosing(node.Pos())
 							if err != nil {

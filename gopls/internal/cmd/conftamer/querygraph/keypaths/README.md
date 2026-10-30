@@ -9,9 +9,11 @@ go run . (--keys-csv <csv with a param_keys column> | --keys-txt <param_keys.txt
   --unmarshaler-subgraph <graph serialized by Serialize, e.g. unmarshaler_subgraph.text> \
   --module-prefix <module as in go.mod, e.g. github.com/prometheus/prometheus> \
   --output <output csv> \
+  [--format yaml|json] \
   [--root <node to search from, e.g. /config.Config>]
 ```
-`--root` names the node as it appears in the serialized graph, i.e. with the module prefix cut. By default the search starts from every root of the graph. Other roots can be tagged types for other formats, e.g. API responses or promtool's test files, and they can add spurious matches.
+`--format` is the config file's format, which determines whose unmarshaling behavior is followed: `yaml` follows `gopkg.in/yaml.v2` (the default), and `json` will follow `encoding/json` (not yet supported). Generate the graph with the same format (`gopls conftamer -format`).
+`--root` names the node as it appears in the serialized graph, i.e. with the module prefix cut. By default the search starts from every root of the graph. Other roots can be types for other files in the same format, e.g. promtool's test files, and they can add spurious matches.
 Pass the keys in one of two ways:
 - `--keys-csv`: the csv's `param_keys` column holds comma-separated lists of dot-separated keys.
 - `--keys-txt`: a file with lines `<value>:<key>[,<key>...]`, such as the `param_keys.txt` written by `prom-test-infra/prombench/extract_param_values.py`. The keys come after the last colon on each line.
@@ -46,10 +48,16 @@ Rows are sorted into groups, and by key within each group:
 
 ## How keys are matched
 The search runs depth-first from every root of the graph, consuming the key one segment at a time:
-- **Edge segment:** an edge's key segment is computed from its AST paths and the source node's tags, using `ct.AppendFieldTag` (the same logic as `ASTPathToParams`). An edge with no field segment, such as an inline field or a slice element, is followed without consuming any of the key.
-  - **Embedded fields** (`T`, `*T`, `pkg.T`) are keyed as go-yaml keys them: by their yaml tag if they have one, so `""` for `yaml:",inline"`, and otherwise by the lowercased field name.
+- **Field keys:** every decision about a struct field's key goes through `ct.GetFieldKey` (`conftamer/fieldkeys.go`), which `gopls conftamer` also uses when building the graph. For YAML it's a port of the per-field part of go-yaml v2.4.0's `getStructInfo`, applied to the field's name, tag, and whether it's embedded or a map:
+  - Unexported fields are skipped, unless they're embedded.
+  - The key is the `yaml` tag's name, or the lowercased field name if the tag has no name. A tag with no `key:"..."` parts is used whole, as a yaml tag (go-yaml's legacy behavior).
+  - `yaml:"-"` fields are skipped by go-yaml. See "Custom unmarshalers" below for when they're followed anyway.
+  - `,inline` fields contribute no key segment of their own. An inline map collects all other keys.
+  - Fields with no tag for the format are excluded (see "Untagged fields").
+- **Edge segment:** an edge's key segment is built from its AST paths, keying each field on the path with `ct.GetFieldKey`. An AST path through a field that isn't a key gives no segment, so that path isn't followed. An edge with no field segment, such as an inline field or a slice element, is followed without consuming any of the key.
+  - **Embedded fields** (`T`, `*T`, `pkg.T`) are keyed like any other field: by their yaml tag if they have one, so `""` for `yaml:",inline"`. Untagged embedded fields are excluded (see "Untagged fields"). go-yaml only inlines an embedded field with `,inline`, unlike encoding/json.
     - The graph's AST path for an embedded field has no `Field:` entry, because `ASTPath` only records field names and embedded fields have none.
-    - So an edge is treated as an embedded field when its AST path starts `StructType.Fields`, `FieldList.List` and has no `Field:` entry. The field name is the target's type name, which must appear in the source's tags.
+    - So an edge is treated as an embedded field when its AST path starts `StructType.Fields`, `FieldList.List` and has no `Field:` entry. The field name is the target's type name, which must appear in the source's tags. (Graphs now also record each node's `EmbeddedFields`.)
 - **Map keys:** these are matched as go-yaml matches them.
   - A `MapType.Value` entry in an edge's AST path consumes exactly one key segment, whatever it is: the map key. For example, `scrape_configs.http_headers.X-Fuzz-Source.files` goes `HTTPClientConfig =http_headers=> Headers =(inline field, map key X-Fuzz-Source)=> Header`, then ends at field `files`.
   - An AST path with `MapType.Key` isn't followed, because the key type decodes the key's name, not a config section. In Prometheus this is `model.LabelSet => model.LabelName`.
@@ -79,10 +87,13 @@ The search runs depth-first from every root of the graph, consuming the key one 
     - [The following doesn't matter] So if a node and a struct inlined into it both have a field with the remaining key, only the outer node is returned: the outer field shadows the inlined one.
       - That situation shouldn't arise in a config that loads. go-yaml (`gopkg.in/yaml.v2` v2.4.0, which Prometheus uses, and `gopkg.in/yaml.v3` v3.0.1) panics with `Duplicated key '<key>' in struct <type>` when unmarshaling into such a struct. This happens whichever order the fields are declared in.
       - This was checked by reading `getStructInfo` in `yaml.go` and running a small test program.
-- **Untagged fields:** a field with no `yaml:"..."` tag uses its lowercased field name as its key segment, both for edge segments and for field matches at a node. (When finding the Unmarshaler graph we are more strict about untagged fields, i.e. we don't an add an edge A => B if B's field is untagged - otherwise there are many false positives in the Unmarshaler graph.) This is roughly what go-yaml does for untagged exported fields. Edge cases, with counts from the Prometheus graph:
-  - **Non-yaml tags only:** fields with only other tags also get the lowercased name, e.g. `json:"cns"` becomes `computenodes`. Of the 683 fields with no yaml tag, 568 have some other tag. They're mostly on json/protobuf types that aren't config.
-  - **Unexported fields:** these are lowercased and matched even though go-yaml ignores them. There are 20, e.g. `ionos.SDConfig.ionosEndpoint` and `xds.MonitoringAssignment_Target.state`. So a key like `...ionos_sd_configs.ionosendpoint` would match falsely, though none of the current keys do.
-  - **Empty yaml name:** a yaml tag with an empty name and no `inline` flag (e.g. `yaml:",omitempty"`) gets `""` from `FieldToParamKey`, not the lowercased name go-yaml uses. So it is treated like an inline field. The graph has no such tags.
+- **Untagged fields:** go-yaml keys an untagged exported field by its lowercased name. Ignoring untagged fields is a deliberate exception to go-yaml, both when building the Unmarshaler Subgraph (`ignoreCType` in `conftamer.go` adds no edge A => B through an untagged field) and in keypaths.
+  - The reason: if the document has no key for a field, go-yaml silently leaves the field as it was. So we expect following go-yaml strictly for untagged exported fields would be more likely to cause false positives (i.e. outputting keys that the developer intends to hold data not directly from the config file) than false negatives (i.e. failing to output keys that the developer didn't tag, but that are directly populated from the config file).
+  - Checked against `gopkg.in/yaml.v2` v2.4.0: a field with no key in the document keeps its previous value with no error, even under `UnmarshalStrict`, which Prometheus uses. Strict mode only rejects document keys that match no field.
+  - Example: `TSDBConfig.OutOfOrderTimeWindow` is untagged. go-yaml would accept `storage.tsdb.outofordertimewindow`, but Prometheus means it to hold data derived from the tagged `out_of_order_time_window`.
+  - Implemented by `ct.GetFieldKey` reporting `Untagged`, which `ct.FieldKey.IsKey` turns into "not a key". "Untagged" means no tag for the chosen format, so a field with only `json:"cns"` is untagged for YAML. In the graph this removes many json/protobuf API types' edges. The struct-tags strategy (`TaggedTypes`) uses the same rule to pick starting types: a struct counts as tagged only if one of its fields is a key for the format. So those types aren't in a YAML graph at all. In Prometheus the roots go from 54 to 8, all of them YAML config types: `config.Config`, `config.ScrapeConfigs`, `config.ExternalFilesConfig`, rule files, promtool test files, and `xds.HTTPConfig`.
+  - Untagged embedded fields are excluded too. In Prometheus this drops `config.URL => net/url.URL` and `relabel.Regexp => grafana/regexp.Regexp`, while the `yaml:",inline"` embeds (`HTTPClientConfig`/`OAuth2 => ProxyConfig`, `xds.HTTPConfig => HTTPClientConfig`) are kept. For JSON, untagged embedded structs should be kept, because encoding/json promotes their fields.
+  - A known cost: `targetgroup.Group`'s fields are untagged, so `scrape_configs.static_configs.targets` now ends at `/discovery.Configs (custom UnmarshalYAML)`. `Group.UnmarshalYAML` actually decodes `targets` and `labels` through an anonymous struct that *is* tagged. Handling that needs analysis of what each custom unmarshaler decodes.
 - **Cycles:** a node already on the current path is never revisited.
 - **Partial path:** a partial path is recorded at a dead end, where some key remains but nothing matches. It is cut back to the node where part of the key was last consumed (to avoid outputting many partial paths found by following edges with no key segment).
   - A partial path is dropped if another partial path for the same key extends it. This happens when one branch through edges with no key segment dead-ends sooner than a sibling branch: e.g. `RemoteReadConfig => HTTPClientConfig => ProxyConfig` for an `http_headers` key, when `RemoteReadConfig => HTTPClientConfig => Headers` matched further.

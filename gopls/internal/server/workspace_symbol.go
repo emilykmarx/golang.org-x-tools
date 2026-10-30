@@ -6,6 +6,7 @@ package server
 
 import (
 	"context"
+	"go/types"
 
 	"golang.org/x/tools/gopls/internal/cache"
 	"golang.org/x/tools/gopls/internal/golang"
@@ -68,7 +69,7 @@ func (s *Server) ArgTypes(ctx context.Context, params *protocol.WorkspaceSymbolP
 	return golang.ArgTypes(ctx, snapshots, params.Query, golang.WorkspaceSymbolsOptions{Matcher: matcher, Style: style})
 }
 
-func (s *Server) TaggedTypes(ctx context.Context) (_ []golang.TypeInfo, rerr error) {
+func (s *Server) TaggedTypes(ctx context.Context, is_tagged func(st *types.Struct, i int) bool) (_ []golang.TypeInfo, rerr error) {
 	recordLatency := telemetry.StartLatencyTimer("symbol")
 	defer func() {
 		recordLatency(ctx, rerr)
@@ -89,5 +90,5 @@ func (s *Server) TaggedTypes(ctx context.Context) (_ []golang.TypeInfo, rerr err
 		defer release()
 		snapshots = append(snapshots, snapshot)
 	}
-	return golang.TaggedTypes(ctx, snapshots)
+	return golang.TaggedTypes(ctx, snapshots, is_tagged)
 }

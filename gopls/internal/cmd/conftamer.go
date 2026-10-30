@@ -32,6 +32,7 @@ type Conftamer struct {
 	unmarshaler_subgraph *ct.CTypes
 	accessors            *ct.CTypes
 	log                  *slog.Logger
+	format               ct.Format
 
 	ConfigPath string `flag:"c,config" help:"YAML file specifying the config fields (alternative to passing them as flags)"`
 	ConftamerConfig
@@ -46,6 +47,8 @@ type ConftamerConfig struct {
 	/* Flags customizing the tool */
 	// Flags for unmarshaler subgraph/accessors
 	ShouldFindAccessors bool `yaml:"find_accessors" flag:"a,find_accessors" help:"Whether to find the accessors too (not just the unmarshaler subgraph)"`
+	// Format of the config file, determining whose unmarshaling behavior to follow
+	Format string `yaml:"format" flag:"format" help:"Config file format: yaml (follow gopkg.in/yaml.v2; default) or json (follow encoding/json; not yet supported)"`
 
 	// Flags shared with the parser
 	parse.ParserConfig `yaml:",inline"`
@@ -167,33 +170,17 @@ func (c *Conftamer) ignoreCType(typ golang.TypeInfo, neigh_find NeighFind, neigh
 			ct.CheckErr(err)
 		}
 
-		// Ignore type if AST path to it has an excluded edge, or
-		// for Unmarshaler Subgraph an untagged field
+		// Ignore type if AST path to it has an excluded edge
 		for _, ast_edge := range neigh_info.Typ.ASTPath {
 			if slices.Contains(neigh_find.excluded_ast_edges, ast_edge) {
 				// excluded edge
 				return true
 			}
-			// NOTE this check doesn't apply to embedded fields: their AST path has no Field: edge
-			// (ASTPath only adds field names, and embedded fields have none), so untagged embedded fields aren't ignored
-			if !c.findingAccessors() && len(neigh_node.Tags) > 0 {
-				// neigh_node.Tags may be empty when AST path still has a field, e.g. when parent is interface
-				// (see Prometheus /discovery.Config => /discovery.DiscovererOptions)
-				if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
-					tag, ok := neigh_node.Tags[field]
-					if !ok {
-						// parent has fields, but no entry for this field - happens in grafana and k8s
-						graph.Logf(c.log, slog.LevelWarn, "Child field %v not in tags %v: %v => %v",
-							field, neigh_node.Tags, neigh_hash, cur_name)
-					} else if tag == "" {
-						graph.Logf(c.log, slog.LevelInfo, "Ignoring child since corresponding parent field is untagged: %v => %v", neigh_hash, cur_name)
-						// untagged field => ignore type
-						return true
-					} else {
-						// tagged field => don't ignore type
-					}
-				}
-			}
+		}
+
+		// For Unmarshaler Subgraph, ignore type if the parent field it's in isn't a key in the config file
+		if !c.findingAccessors() && c.ignoreField(typ, neigh_node, neigh_hash, neigh_info.Typ.ASTPath) {
+			return true
 		}
 
 		// Ignore type if found via an excluded source
@@ -218,6 +205,78 @@ func (c *Conftamer) ignoreCType(typ golang.TypeInfo, neigh_find NeighFind, neigh
 	}
 
 	return false
+}
+
+// Whether the parent field(s) on the AST path from parent to child aren't keys in the config file,
+// following the unmarshaling library for c.format (see ct.GetFieldKey). That includes our deliberate exception
+// for untagged fields (see ct.FieldKey.Untagged; querygraph/keypaths makes the same exception).
+// yaml:"-" fields aren't ignored: the parent's custom unmarshaler may populate them.
+func (c *Conftamer) ignoreField(child golang.TypeInfo, parent ct.CTypeNode, parent_hash ct.CTypeHash, ast_path ct.ASTPath) bool {
+	st := ct.IsStruct(parent.TypeInfo)
+	if st == nil {
+		// e.g. parent is interface, even if AST path has a field
+		// (see Prometheus /discovery.Config => /discovery.DiscovererOptions)
+		return false
+	}
+	child_name := ct.TypeName(child.TypeInfo)
+
+	// Fields on the AST path: named fields have a Field: edge. Embedded fields have none
+	// (ASTPath only adds field names), so find the embedded field whose type is the child.
+	field_idxs := []int{}
+	has_named := false
+	for _, ast_edge := range ast_path {
+		if name, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
+			has_named = true
+			i := slices.IndexFunc(fieldIdxs(st), func(i int) bool { return st.Field(i).Name() == name })
+			if i == -1 {
+				// parent has fields, but no entry for this field - happens in grafana and k8s
+				graph.Logf(c.log, slog.LevelWarn, "Child field %v not in parent struct: %v => %v", name, parent_hash, child_name)
+				continue
+			}
+			field_idxs = append(field_idxs, i)
+		}
+	}
+	if !has_named && len(ast_path) >= 2 && ast_path[0] == "StructType.Fields" && ast_path[1] == "FieldList.List" {
+		for i := range st.NumFields() {
+			// compare names, not objects: the same type can be a different *types.TypeName per importing package
+			if tn := embeddedTypeName(st.Field(i).Type()); st.Field(i).Embedded() && tn != nil && ct.TypeNameSafe(tn) == ct.TypeNameSafe(child.TypeInfo) {
+				field_idxs = append(field_idxs, i)
+			}
+		}
+	}
+
+	for _, i := range field_idxs {
+		key, err := ct.GetFieldKey(ct.StructRawField(st, i), c.format)
+		if err != nil {
+			graph.Logf(c.log, slog.LevelWarn, "Not ignoring child: %v: %v => %v", err, parent_hash, child_name)
+			continue
+		}
+		if key.Untagged || (key.Skip && !key.Dash) {
+			graph.Logf(c.log, slog.LevelInfo, "Ignoring child since corresponding parent field %v isn't a key (%+v): %v => %v",
+				st.Field(i).Name(), key, parent_hash, child_name)
+			return true
+		}
+	}
+	return false
+}
+
+func fieldIdxs(st *types.Struct) []int {
+	idxs := make([]int, st.NumFields())
+	for i := range idxs {
+		idxs[i] = i
+	}
+	return idxs
+}
+
+// Type name of an embedded field's type (T or *T)
+func embeddedTypeName(typ types.Type) *types.TypeName {
+	if ptr, ok := types.Unalias(typ).(*types.Pointer); ok {
+		typ = ptr.Elem()
+	}
+	if named, ok := types.Unalias(typ).(*types.Named); ok {
+		return named.Obj()
+	}
+	return nil
 }
 
 // Add all CTypes reachable from this one via neigh_find, stopping on reaching one we've already found
@@ -375,7 +434,12 @@ func (c *Conftamer) FindUnmarshalers() []golang.TypeInfo {
 		log += "Unmarshal interface"
 	} else {
 		// Strategy: Type has struct tags
-		unmarshalers, err = c.local_server.TaggedTypes(c.ctx)
+		// A struct counts as tagged if it has a field that's a key for the config format
+		// (e.g. a struct whose only tags are json tags isn't tagged for yaml)
+		unmarshalers, err = c.local_server.TaggedTypes(c.ctx, func(st *types.Struct, i int) bool {
+			key, err := ct.GetFieldKey(ct.StructRawField(st, i), c.format)
+			return err == nil && key.IsKey()
+		})
 		ct.CheckErr(err)
 		log += "struct tags"
 	}
@@ -556,6 +620,14 @@ func (c *Conftamer) Run(ctx context.Context, args ...string) error {
 			return err
 		}
 	}
+	if c.Format == "" {
+		c.Format = string(ct.YAML)
+	}
+	format, err := ct.ParseFormat(c.Format)
+	if err != nil {
+		return tool.CommandLineErrorf("%v", err)
+	}
+	c.format = format
 	if c.UnmarshalFuncDefn != "" && c.UnmarshalIfaceDefn != "" {
 		return tool.CommandLineErrorf("Specify neither or one flag about unmarshal")
 	}

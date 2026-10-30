@@ -74,8 +74,9 @@ type CTypeNode struct {
 	Tags    map[string]string // Field name => tag or "" (populated if struct)
 	// Whether the type, or each of its fields, is a map (after stripping pointers/slices/arrays) -
 	// needed to match map keys when the map's value type isn't a CType (so there's no edge with MapType.Value)
-	IsMap     bool
-	MapFields map[string]bool // Field name => true if field is a map (populated if struct)
+	IsMap          bool
+	MapFields      map[string]bool // Field name => true if field is a map (populated if struct)
+	EmbeddedFields map[string]bool // Field name => true if field is embedded (populated if struct)
 
 	// Parameters this CType can access, and via which fields
 	Stored_down  map[Stored]struct{} // becomes irrelevant once entire push down pass is done

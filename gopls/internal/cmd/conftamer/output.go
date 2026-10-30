@@ -48,12 +48,14 @@ type MarshalableNode struct {
 	Methods []FullTypeName
 	Tags    map[string]string // Field name => tag (populated if struct)
 	// omitempty so graphs serialized before these were added are unchanged
-	IsMap     bool            `json:",omitempty"`
-	MapFields map[string]bool `json:",omitempty"`
+	IsMap          bool            `json:",omitempty"`
+	MapFields      map[string]bool `json:",omitempty"`
+	EmbeddedFields map[string]bool `json:",omitempty"`
 }
 
 func (n *CTypeNode) MarshalJSON() ([]byte, error) {
-	m := MarshalableNode{Names: n.Names, Methods: n.Methods, Tags: n.Tags, IsMap: n.IsMap, MapFields: n.MapFields}
+	m := MarshalableNode{Names: n.Names, Methods: n.Methods, Tags: n.Tags, IsMap: n.IsMap, MapFields: n.MapFields,
+		EmbeddedFields: n.EmbeddedFields}
 	return json.Marshal(m)
 
 	// marshal without error to empty string (probably bc interesting fields aren't exported): types.Type, *types.Named, types.Named
@@ -69,6 +71,7 @@ func (n *CTypeNode) UnmarshalJSON(b []byte) error {
 	n.Tags = m.Tags
 	n.IsMap = m.IsMap
 	n.MapFields = m.MapFields
+	n.EmbeddedFields = m.EmbeddedFields
 
 	return nil
 }
