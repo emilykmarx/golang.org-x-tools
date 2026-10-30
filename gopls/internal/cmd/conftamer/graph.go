@@ -24,6 +24,8 @@ type CTypes struct {
 	Graph   CTypeGraph
 	List    CTypeList
 	Latency map[string]telemetry.LatencyTotal // operation => timing
+	// If set, called on each new node after its key info is populated (e.g. to classify custom unmarshalers)
+	KeyInfoHook func(node *CTypeNode)
 	// Config file format whose unmarshaling library determines edges' key segments (for DOT labels); "" means YAML
 	Format Format
 }
@@ -82,6 +84,10 @@ type CTypeNode struct {
 	// Whether *T has a custom unmarshaler that the library calls instead of its default rules (see fieldkeys.go)
 	YAMLUnmarshaler bool // gopkg.in/yaml.v2 Unmarshaler
 	TextUnmarshaler bool // encoding.TextUnmarshaler (used by go-yaml for scalars)
+	// For YAMLUnmarshaler: what it decodes the config value into (see ClassifyUnmarshaler)
+	UnmarshalKinds []UnmarshalKind
+	DecodedFields  map[string]DecodedField // Field name => field, if it decodes into another struct
+	ScalarLike     bool                    // config values of this type are scalars (no keys below it)
 
 	// Parameters this CType can access, and via which fields
 	Stored_down  map[Stored]struct{} // becomes irrelevant once entire push down pass is done
@@ -252,6 +258,9 @@ func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_info *NeighInfo) (TypeNameE
 	CopyMethods(&new_ctype)
 	CopyTags(&new_ctype)
 	CopyKeyInfo(&new_ctype)
+	if c.KeyInfoHook != nil {
+		c.KeyInfoHook(&new_ctype)
+	}
 
 	err := c.Graph.AddVertex(new_ctype, func(vp *graph.VertexProperties) {})
 	// Shouldn't have existed - checked that above

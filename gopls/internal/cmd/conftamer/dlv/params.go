@@ -190,7 +190,7 @@ func ASTPathToParams(ctype_path []graph.Edge[ct.CTypeNode], all_ctype_paths [][]
 				return []string{ct.JoinKey(prefix, ct.MAP_KEY)}
 			}
 			return nil // inline struct: its fields are reached via its edge
-		case node.MapFields[field]:
+		case ct.NodeRawField(node, field).IsMap:
 			return []string{ct.JoinKey(prefix, field_key.Key, ct.MAP_KEY)}
 		default:
 			return []string{ct.JoinKey(prefix, field_key.Key)}
@@ -202,14 +202,17 @@ func ASTPathToParams(ctype_path []graph.Edge[ct.CTypeNode], all_ctype_paths [][]
 	for ctype_edge_i, edge_ast_path := range ast_path {
 		// For each CType edge
 		ctype_edge := ctype_path[ctype_edge_i]
+		if ctype_edge.Source.ScalarLike {
+			return nil // config values of the source are scalars: no keys below it
+		}
 		seg, ok := ct.ASTPathKeySegment(ctype_edge.Source, ctype_edge.Target, edge_ast_path, format)
 		if !ok {
 			return nil
 		}
 		pattern := seg.Pattern
 		if seg.Dash {
-			if !ctype_edge.Source.YAMLUnmarshaler {
-				return nil // nothing populates the yaml:"-" field
+			if !ctype_edge.Source.DynamicUnmarshaler() {
+				return nil // nothing populates the yaml:"-" field from the file
 			}
 			pattern = ct.JoinKey(pattern, ct.MAP_KEY) // key chosen by the custom unmarshaler
 		}
@@ -222,7 +225,7 @@ func ASTPathToParams(ctype_path []graph.Edge[ct.CTypeNode], all_ctype_paths [][]
 			}
 		}
 		if len(path_fields) > 0 {
-			for other_field := range ctype_edge.Source.Tags {
+			for _, other_field := range ct.KeyFieldNames(ctype_edge.Source) {
 				if !slices.Contains(path_fields, other_field) && nonCustomField(other_field, ctype_edge, all_ctype_paths) {
 					keys = append(keys, field_keys(ctype_edge.Source, other_field, key_prefix)...)
 				}
@@ -234,14 +237,14 @@ func ASTPathToParams(ctype_path []graph.Edge[ct.CTypeNode], all_ctype_paths [][]
 
 	// Reached end of AST path => record key(s)
 	last_node := ctype_path[len(ctype_path)-1].Target
-	if !leaf_keys || len(last_node.Tags) == 0 {
+	if !leaf_keys || len(ct.KeyFieldNames(last_node)) == 0 {
 		if leaf_keys && last_node.IsMap {
 			keys = append(keys, ct.JoinKey(key_prefix, ct.MAP_KEY))
 		} else {
 			keys = append(keys, key_prefix)
 		}
 	} else {
-		for field := range last_node.Tags {
+		for _, field := range ct.KeyFieldNames(last_node) {
 			keys = append(keys, field_keys(last_node, field, key_prefix)...)
 		}
 	}

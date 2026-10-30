@@ -47,23 +47,29 @@ func (f *finder) recordFull(path_str string, section_keys []string) {
 }
 
 // Keys in the section of `node` at `prefix` that are reachable without following any edge out of `node`:
-// the key itself (already matched by the path), plus the node's fields that have no edge out.
-// So fields of inlined structs, yaml:"-" fields, and fields whose type is a node in the graph are excluded.
+// the key itself (already matched by the path), plus the node's key fields that have no edge out - except edges to
+// scalar-like types (e.g. model.Duration), whose values are scalars, so they're keys of this section.
+// So fields of inlined structs, yaml:"-" fields, and fields whose type is a non-scalar node in the graph are excluded.
 // Fields that aren't keys (see fieldKey) are skipped. MAP_KEY stands for any key of an inline map.
 func (f *finder) sectionKeys(node ct.CTypeHash, prefix string, key string) []string {
 	keys := []string{key}
 	n, err := f.g.Vertex(node)
 	ct.CheckErr(err)
 
-	// Field keys with an edge out
+	// Field keys with an edge out to a non-scalar type
 	edge_keys := map[string]bool{}
 	for _, e := range f.adj[node] {
+		target, err := f.g.Vertex(e.target)
+		ct.CheckErr(err)
+		if target.ScalarLike {
+			continue
+		}
 		for _, seg := range e.segments {
 			edge_keys[strings.Split(seg.Pattern, ".")[0]] = true
 		}
 	}
 
-	for field := range n.Tags {
+	for _, field := range ct.KeyFieldNames(n) {
 		field_key := f.fieldKey(n, field, false)
 		switch {
 		case !field_key.IsKey():
@@ -80,12 +86,6 @@ func (f *finder) sectionKeys(node ct.CTypeHash, prefix string, key string) []str
 	}
 	slices.Sort(keys)
 	return slices.Compact(keys)
-}
-
-// Whether the library calls the node's own unmarshaler instead of applying its default rules
-// (for yaml: *T implements go-yaml v2's Unmarshaler, possibly via a promoted method - recorded when building the graph)
-func (f *finder) customUnmarshaler(n ct.CTypeNode) bool {
-	return n.YAMLUnmarshaler
 }
 
 // How a node's field maps to config file keys, following the unmarshaling library for f.format (see ct.NodeFieldKey)
@@ -168,7 +168,12 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 	// - even if an inlined struct has a field with the same key (yaml panics on such duplicates)
 	n, err := f.g.Vertex(node)
 	ct.CheckErr(err)
-	for field := range n.Tags {
+	if n.ScalarLike {
+		// Config values of this type are scalars (e.g. a custom unmarshaler decodes a string): no keys below it
+		f.recordPartial(path[:consumed_len], key, remaining, module_prefix)
+		return
+	}
+	for _, field := range ct.KeyFieldNames(n) {
 		if field_key := f.fieldKey(n, field, false); field_key.IsKey() && !field_key.Inline && field_key.Key == remaining {
 			f.recordFull(f.pathString(path, module_prefix), f.sectionKeys(node, prefix, key))
 			return
@@ -220,10 +225,10 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 		}
 	}
 
-	// Nothing found yet (including via inline fields) => try yaml:"-" fields, if this node has a custom unmarshaler
-	// (else nothing populates them). The custom unmarshaler chooses the field's key, so match any one segment -
+	// Nothing found yet (including via inline fields) => try yaml:"-" fields, if this node has a dynamic custom
+	// unmarshaler (else nothing populates them from the file). It chooses the field's key, so match any one segment -
 	// but not the last one, since param keys are leaves and the field's type is a CType.
-	if f.n_full == n_full_before && f.customUnmarshaler(n) {
+	if f.n_full == n_full_before && n.DynamicUnmarshaler() {
 		if _, rest, found := strings.Cut(remaining, "."); found {
 			for _, e := range f.adj[node] {
 				if on_path[e.target] {
@@ -238,21 +243,28 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 		}
 	}
 
-	// Nothing below matched, but this is a non-struct with a custom unmarshaler that go-yaml will call =>
-	// default go-yaml rules (tags etc) don't say how its keys map to types, so attribute the rest of the key to it.
-	// (Structs with custom unmarshalers are assumed to use the `type plain T` pattern, so their tags still apply.)
-	if f.n_full == n_full_before && f.customUnmarshaler(n) && n.Tags == nil && !via_inline && remaining != key {
+	// Nothing below matched, but this is a non-struct with a dynamic custom unmarshaler that go-yaml will call =>
+	// we don't know how its keys map to types, so attribute the rest of the key to it.
+	// (Other custom unmarshalers are classified: see ct.ClassifyUnmarshaler.)
+	if f.n_full == n_full_before && n.DynamicUnmarshaler() && n.Tags == nil && !via_inline && remaining != key {
 		// The custom unmarshaler decides the section's keys
 		f.recordFull(f.pathString(path, module_prefix)+CUSTOM_SUFFIX, []string{ct.JoinKey(prefix, MAP_KEY)})
 		return
 	}
 
 	// Dead end with some of the key matched => partial path, up to where the key was last consumed
-	if !matched && remaining != key {
-		path = path[:consumed_len]
-		matched_prefix := strings.TrimSuffix(strings.TrimSuffix(key, remaining), ".")
-		f.partial[fmt.Sprintf("%v (matched: %v)", f.pathString(path, module_prefix), matched_prefix)] = true
+	if !matched {
+		f.recordPartial(path[:consumed_len], key, remaining, module_prefix)
 	}
+}
+
+// Record a partial path (if some of the key was matched)
+func (f *finder) recordPartial(path []ct.CTypeHash, key, remaining string, module_prefix string) {
+	if remaining == key {
+		return
+	}
+	matched_prefix := strings.TrimSuffix(strings.TrimSuffix(key, remaining), ".")
+	f.partial[fmt.Sprintf("%v (matched: %v)", f.pathString(path, module_prefix), matched_prefix)] = true
 }
 
 // Whether `remaining` is a map key of the node (if a map), or a map field's key followed by a map key.
@@ -264,7 +276,7 @@ func (f *finder) mapKeyMatch(n ct.CTypeNode, remaining string) (string, bool) {
 		if n.IsMap {
 			return MAP_KEY, true
 		}
-		for field := range n.MapFields {
+		for _, field := range ct.KeyFieldNames(n) {
 			if field_key := f.fieldKey(n, field, false); field_key.IsKey() && field_key.InlineMap {
 				return MAP_KEY, true
 			}
@@ -274,8 +286,8 @@ func (f *finder) mapKeyMatch(n ct.CTypeNode, remaining string) (string, bool) {
 	if strings.Contains(map_key, ".") {
 		return "", false
 	}
-	for field := range n.MapFields {
-		if k := f.fieldKey(n, field, false); k.IsKey() && !k.Inline && k.Key == field_key {
+	for _, field := range ct.KeyFieldNames(n) {
+		if k := f.fieldKey(n, field, false); ct.NodeRawField(n, field).IsMap && k.IsKey() && !k.Inline && k.Key == field_key {
 			return ct.JoinKey(field_key, MAP_KEY), true
 		}
 	}

@@ -67,6 +67,9 @@ func CopyKeyInfo(node *CTypeNode) {
 	node.IsMap = IsMap(node.TypeInfo)
 	node.YAMLUnmarshaler = ImplementsYAMLUnmarshaler(node.TypeInfo)
 	node.TextUnmarshaler = ImplementsTextUnmarshaler(node.TypeInfo)
+	if !node.YAMLUnmarshaler {
+		node.ScalarLike = IsScalarType(node.TypeInfo)
+	} // else see ClassifyUnmarshaler
 	struct_info := IsStruct(node.TypeInfo)
 	if struct_info == nil {
 		return

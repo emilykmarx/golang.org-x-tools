@@ -207,6 +207,20 @@ func (c *Conftamer) ignoreCType(typ golang.TypeInfo, neigh_find NeighFind, neigh
 	return false
 }
 
+// For a new node with a custom UnmarshalYAML, find what it decodes the config value into (see ct.ClassifyUnmarshaler)
+func (c *Conftamer) classifyUnmarshaler(node *ct.CTypeNode) {
+	if !node.YAMLUnmarshaler {
+		return
+	}
+	calls, err := c.local_server.FuncParamCalls(c.ctx, node.GoplsInfo[0].Loc, "UnmarshalYAML", 0)
+	if err != nil {
+		graph.Logf(c.log, slog.LevelWarn, "Treating UnmarshalYAML of %v as dynamic: %v", ct.CTypeNodeHash(*node), err)
+		calls = nil
+	}
+	ct.ClassifyUnmarshaler(node, calls)
+	graph.Logf(c.log, slog.LevelInfo, "UnmarshalYAML of %v decodes into: %v (decoded fields %v)", ct.CTypeNodeHash(*node), node.UnmarshalKinds, ct.KeyFieldNames(*node))
+}
+
 // Whether the parent field(s) on the AST path from parent to child aren't keys in the config file,
 // following the unmarshaling library for c.format (see ct.GetFieldKey). That includes our deliberate exception
 // for untagged fields (see ct.FieldKey.Untagged; querygraph/keypaths makes the same exception).
@@ -333,6 +347,18 @@ func (c *Conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 		return nil
 	}
 
+	// For the Unmarshaler Subgraph, don't look for children of types whose config values are scalars
+	// (e.g. a custom unmarshaler decodes a string): no config keys are below them
+	if !c.findingAccessors() && neigh_find.children {
+		own_hash, _ := c.graph().GetHash(cur_name)
+		own_node, err := c.graph().Graph.Vertex(own_hash)
+		ct.CheckErr(err)
+		if own_node.ScalarLike {
+			graph.Logf(c.log, slog.LevelInfo, "Not finding children of scalar-like type %v (unmarshal kinds %v)", cur_name, own_node.UnmarshalKinds)
+			neigh_find.children = false
+		}
+	}
+
 	// 3. Find new neighbors (direct parents and/or children), and nodes reachable from them -
 	// i.e. find enclosing (parent) CTypes, and/or enclosed (child) CTypes, then recurse on them
 	defn_locs, err := locsToSpans(c.ctx, c.cli, []protocol.Location{typ.Loc})
@@ -455,6 +481,7 @@ func (c *Conftamer) FindUnmarshalerSubgraph() {
 	start := time.Now()
 	c.unmarshaler_subgraph = ct.New(c.log)
 	c.unmarshaler_subgraph.Format = c.format
+	c.unmarshaler_subgraph.KeyInfoHook = c.classifyUnmarshaler
 
 	// 1. Find "Unmarshalers" by configured strategy
 	unmarshalers := c.FindUnmarshalers()

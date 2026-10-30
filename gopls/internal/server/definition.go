@@ -115,3 +115,13 @@ func (s *Server) TypeDefinition(ctx context.Context, params *protocol.TypeDefini
 		return nil, fmt.Errorf("can't find type definitions for file type %s", kind)
 	}
 }
+
+// See golang.FuncParamCalls
+func (s *Server) FuncParamCalls(ctx context.Context, loc protocol.Location, method_name string, param_idx int) ([]golang.FuncParamCall, error) {
+	_, snapshot, release, err := s.session.FileOf(ctx, loc.URI)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return golang.FuncParamCalls(ctx, snapshot, loc, method_name, param_idx)
+}

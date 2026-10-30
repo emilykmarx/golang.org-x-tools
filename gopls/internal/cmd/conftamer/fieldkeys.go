@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"go/types"
 	"reflect"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/tools/gopls/internal/golang"
 )
 
 /* How config file keys map to struct fields, following the library that unmarshals the given format */
@@ -121,8 +124,12 @@ func StructRawField(st *types.Struct, i int) RawField {
 	return RawField{Name: v.Name(), Tag: st.Tag(i), Embedded: v.Embedded(), IsMap: IsMap(v.Type())}
 }
 
-// RawField for a serialized graph node's field
+// RawField for a graph node's field (of the decoded struct, if a custom unmarshaler decodes into another struct)
 func NodeRawField(n CTypeNode, field string) RawField {
+	if n.DecodedFields != nil {
+		d := n.DecodedFields[field]
+		return RawField{Name: field, Tag: d.Tag, Embedded: d.Embedded, IsMap: d.IsMap}
+	}
 	return RawField{Name: field, Tag: n.Tags[field], Embedded: n.EmbeddedFields[field], IsMap: n.MapFields[field]}
 }
 
@@ -179,4 +186,128 @@ func lookupMethod(typ types.Type, name string) *types.Signature {
 
 func returnsOnlyError(sig *types.Signature) bool {
 	return sig.Results().Len() == 1 && types.Identical(sig.Results().At(0).Type(), types.Universe.Lookup("error").Type())
+}
+
+// What a custom unmarshaler decodes the config value into (see ClassifyUnmarshaler)
+type UnmarshalKind string
+
+const (
+	// The receiver's own type (e.g. `type plain T; unmarshal((*plain)(c))`): the type's fields/tags apply as usual
+	UnmarshalPlain UnmarshalKind = "plain"
+	// A scalar (basic type, slice of scalars, or TextUnmarshaler): the type is a leaf, with no keys below it
+	UnmarshalScalar UnmarshalKind = "scalar"
+	// A map: any key
+	UnmarshalMap UnmarshalKind = "map"
+	// Another struct: its fields (DecodedFields) are the keys, rather than the type's own
+	UnmarshalStruct UnmarshalKind = "struct"
+	// Unknown (e.g. interface{}, or the unmarshal func is passed to another function):
+	// assume the type's fields/tags apply, and that it may populate yaml:"-" fields under keys it picks
+	UnmarshalDynamic UnmarshalKind = "dynamic"
+)
+
+// A field of a struct that a custom unmarshaler decodes into (serializable subset of RawField)
+type DecodedField struct {
+	Tag      string `json:",omitempty"`
+	Embedded bool   `json:",omitempty"`
+	IsMap    bool   `json:",omitempty"`
+}
+
+// Classify what the node's custom UnmarshalYAML decodes into, from the uses of its unmarshal func parameter
+// (see golang.FuncParamCalls), and set UnmarshalKinds, DecodedFields, IsMap and ScalarLike accordingly.
+// With no uses found, the unmarshaler is treated as dynamic.
+// TODO(CT) This only records what type the value is decoded into, not what the unmarshaler then does with it. It could
+// be extended to detect unmarshalers that change the value before storing it - e.g. relabel.Action's UnmarshalYAML
+// (prometheus/model/relabel/relabel.go) stores strings.ToLower(s), so `action: Replace` is in memory as "replace" -
+// so that callers searching memory for config values know to look for the changed value.
+func ClassifyUnmarshaler(node *CTypeNode, calls []golang.FuncParamCall) {
+	kinds := map[UnmarshalKind]bool{}
+	decoded := map[string]DecodedField{}
+	for _, call := range calls {
+		kind := UnmarshalDynamic
+		if !call.Dynamic {
+			arg := call.Arg
+			if ptr, ok := arg.Underlying().(*types.Pointer); ok {
+				arg = ptr.Elem()
+			}
+			switch u := arg.Underlying().(type) {
+			case *types.Interface:
+				kind = UnmarshalDynamic
+			case *types.Map:
+				kind = UnmarshalMap
+			default:
+				// Compare printed types, not types.Identical: the method's package may be type-checked separately from
+				// the node's, so the same named types are different objects
+				if IsScalarType(arg) {
+					kind = UnmarshalScalar // including `type plain T` for a T with a basic underlying type
+				} else if types.TypeString(u, nil) == types.TypeString(node.TypeInfo.Underlying(), nil) {
+					kind = UnmarshalPlain
+				} else if st, ok := u.(*types.Struct); ok && !ImplementsYAMLUnmarshaler(arg) {
+					kind = UnmarshalStruct
+					for i := range st.NumFields() {
+						raw := StructRawField(st, i)
+						decoded[raw.Name] = DecodedField{Tag: raw.Tag, Embedded: raw.Embedded, IsMap: raw.IsMap}
+					}
+				}
+			}
+		}
+		kinds[kind] = true
+	}
+	if len(kinds) == 0 {
+		kinds[UnmarshalDynamic] = true
+	}
+
+	node.UnmarshalKinds = nil
+	for _, k := range []UnmarshalKind{UnmarshalPlain, UnmarshalScalar, UnmarshalMap, UnmarshalStruct, UnmarshalDynamic} {
+		if kinds[k] {
+			node.UnmarshalKinds = append(node.UnmarshalKinds, k)
+		}
+	}
+	only := func(k UnmarshalKind) bool { return len(kinds) == 1 && kinds[k] }
+	node.ScalarLike = only(UnmarshalScalar)
+	if only(UnmarshalMap) {
+		node.IsMap = true // decoded as a map: any key
+	}
+	// Decoded struct fields are the keys, unless the type's own fields may also apply
+	if kinds[UnmarshalStruct] && !kinds[UnmarshalPlain] && !kinds[UnmarshalDynamic] {
+		node.DecodedFields = decoded
+	}
+}
+
+// Whether the unmarshaler is unknown, so may populate yaml:"-" fields (see UnmarshalDynamic)
+func (n CTypeNode) DynamicUnmarshaler() bool {
+	return n.YAMLUnmarshaler && (len(n.UnmarshalKinds) == 0 || slices.Contains(n.UnmarshalKinds, UnmarshalDynamic))
+}
+
+// Whether config values of this type are scalars (no keys below them), following go-yaml:
+// a basic type, a slice/array of scalars, or an encoding.TextUnmarshaler.
+// (For types with a custom UnmarshalYAML, see ClassifyUnmarshaler instead.)
+func IsScalarType(typ types.Type) bool {
+	switch u := typ.Underlying().(type) {
+	case *types.Basic:
+		return true
+	case *types.Slice:
+		return IsScalarType(u.Elem())
+	case *types.Array:
+		return IsScalarType(u.Elem())
+	case *types.Pointer:
+		return IsScalarType(u.Elem())
+	}
+	return ImplementsTextUnmarshaler(typ)
+}
+
+// Names of the fields whose keys are the node's keys: the decoded struct's fields if a custom unmarshaler decodes
+// into another struct, else the node's own fields
+func KeyFieldNames(n CTypeNode) []string {
+	names := []string{}
+	if n.DecodedFields != nil {
+		for name := range n.DecodedFields {
+			names = append(names, name)
+		}
+	} else {
+		for name := range n.Tags {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
 }

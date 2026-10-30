@@ -27,15 +27,15 @@ One row per key, with columns `param_key,Unmarshaler,Num Unmarshalers,Unmarshale
 - `Unmarshaler Path`: all paths for the key, joined with `; `, e.g. `/config.Config => /config.ScrapeConfig`
 - `section keys`: the keys in the section directly containing the key that can be reached without following any edge beyond the key's own paths in `Unmarshaler Path`. Joined with `; `.
   - It's the union over the key's full paths, and empty for keys with no full path.
-  - It always includes the key itself, plus the Unmarshaler's fields that have no outgoing edge in the graph.
+  - It always includes the key itself, plus the Unmarshaler's key fields (its decoded fields, if it has `DecodedFields`) that have no outgoing edge in the graph, or whose edge goes to a scalar-like type.
   - Following go-yaml, unexported fields are skipped.
   - Everything that needs an edge is excluded:
-    - fields whose type is a node in the graph, e.g. `scrape_configs.params` (`url.Values`) and `scrape_configs.scrape_interval` (`model.Duration`)
+    - fields whose type is a non-scalar node in the graph, e.g. `scrape_configs.params` (`url.Values`). Fields of scalar-like types, e.g. `scrape_configs.scrape_interval` (`model.Duration`), are included.
     - fields of inlined structs, e.g. `HTTPClientConfig`'s `scrape_configs.bearer_token_file`
     - `yaml:"-"` fields
-  - For example, `scrape_configs.scrape_failure_log_file` gets `scrape_configs.job_name` but not `scrape_configs.params`.
+  - For example, `scrape_configs.scrape_failure_log_file` gets `scrape_configs.job_name` and `scrape_configs.scrape_interval`, but not `scrape_configs.params`.
   - `*` stands for any map key.
-  - Keys whose path ends in a map key, or in a custom unmarshaler absorbing the rest of the key, get just the map's or type's `<prefix>.*`, e.g. `remote_write.headers.*` or `global.external_labels.*`.
+  - Keys whose path ends in a map key, or in a dynamic custom unmarshaler absorbing the rest of the key, get just the map's or type's `<prefix>.*`, e.g. `remote_write.headers.*` or `global.external_labels.*`.
   - If an edge used up the rest of the key, the section is that edge's source. If the edge ended with a map key, it's the map's `.*` instead, e.g. `scrape_configs.proxy_connect_header.*`.
   - Where several Unmarshalers are possible, their sections are combined. For example, `scrape_configs.kubernetes_sd_configs.role` gets the combined sections of all 6 SD configs that have a `role` field.
 
@@ -65,22 +65,28 @@ The search runs depth-first from every root of the graph, consuming the key one 
     - If no field and no key-consuming edge matches at a node, one remaining segment matches as a map key when the node is a map or has an inline map field. A map field's key followed by one segment also matches. The path ends at that node.
     - For example, `scrape_configs.params.fuzz_job` ends at `net/url.Values`. `remote_write.headers.X-SINK-SOURCE` ends at `/config.RemoteWriteConfig`, the struct holding the `map[string]string` field, consistent with the "section containing that key" overapproximation above.
     - Only one level of map is handled: `map[string]map[string]string` matches one segment, not two.
-- **Custom unmarshalers:** go-yaml calls a type's `UnmarshalYAML` (if its method list has one) instead of applying its default rules. It doesn't do this when the type is reached through an inline field: the inlined struct's fields are decoded into the parent's mapping.
+- **Custom unmarshalers:** go-yaml calls a type's `UnmarshalYAML` instead of applying its default rules. It doesn't do this when the type is reached through an inline field: the inlined struct's fields are decoded into the parent's mapping.
   - Checked with a test program against `gopkg.in/yaml.v2` v2.4.0:
     - **Named inline field** (`In T yaml:",inline"`): `T.UnmarshalYAML` isn't called.
     - **Slice element:** it is called.
     - **`yaml:"-"` field:** ignored, even when the YAML has that key.
     - **Embedded inline field** (`T yaml:",inline"`): the method is promoted, so the outer type is the one that has `UnmarshalYAML`.
-  - Two rules follow from this:
-    - **`yaml:"-"` edges.** Default go-yaml never populates a `yaml:"-"` field, so the edge is only followed when the source node has a custom unmarshaler. That unmarshaler chooses the field's key, so the edge matches any one key segment.
-      - It's only tried when nothing else under the node matched, including through inline fields.
-      - It never matches the last segment, since param keys are scalar leaves.
-      - For example, `scrape_configs.kubernetes_sd_configs.api_server` goes `ScrapeConfig =(yaml:"-", any segment: kubernetes_sd_configs)=> discovery.Configs => discovery.Config => kubernetes.SDConfig`, then ends at field `api_server`. Without a custom unmarshaler on the source, `yaml:"-"` edges aren't followed at all.
-    - **Non-struct types with a custom unmarshaler** (e.g. `labels.Labels`, whose `UnmarshalYAML` decodes a `map[string]string`): tags say nothing about how such a type's keys map to types. So if nothing under the node matched, the rest of the key is attributed to the node.
-      - Only when the node wasn't reached through an inline field, and only when some of the key was already consumed.
-      - These paths get a ` (custom UnmarshalYAML)` suffix, e.g. `global.external_labels.cluster`: `/config.Config => /config.GlobalConfig => /model/labels.Labels (custom UnmarshalYAML)`.
-      - Structs with a custom unmarshaler are assumed to use the usual `type plain T; unmarshal((*plain)(c))` pattern, so their tags still describe their keys. Otherwise every SD config, all of which have custom unmarshalers, would claim any key below `*_sd_configs`.
-  - The `yaml:"-"` wildcard doesn't say *which* type the custom unmarshaler picks for the segment. So every type reachable through it that has a matching field is returned. For example, `scrape_configs.kubernetes_sd_configs.role` gets 6 Unmarshalers: the SD configs with a `role` field, i.e. hetzner, kubernetes, moby, openstack, scaleway and triton. Keys like `kubernetes_sd_configs.tls_config.ca_file` get one path per SD config, though these all end at the same type, `TLSConfig`. Tying the segment to the right SD type would need Prometheus-specific knowledge (the key is each config's `Name()` + `_sd_configs`).
+  - **Detection** (`ct.ImplementsYAMLUnmarshaler`): `*T` implements go-yaml v2's `Unmarshaler`, with promoted methods included. It's recorded on each node as `YAMLUnmarshaler`.
+  - **Classification** (`golang.FuncParamCalls` + `ct.ClassifyUnmarshaler`, when the graph is built): every use of the `unmarshal` parameter in the method's body is classified by its argument type, and recorded as the node's `UnmarshalKinds`:
+    - **plain**: the receiver's own type (`type plain T; unmarshal((*plain)(c))`). The type's tags apply as usual.
+    - **scalar**: a basic type, a slice of scalars, or a `TextUnmarshaler`. This includes `type plain T` for a T with a basic underlying type. The type is **scalar-like** (`ScalarLike`): a leaf, with no keys below it, e.g. `model.Duration`, `config.URL`, `relabel.Regexp`, `relabel.Action`, `config.Secret`.
+    - **map**: any key. The node is marked `IsMap`, e.g. `labels.Labels`, so `global.external_labels.cluster` is an ordinary map key.
+    - **struct**: another struct, whose fields become the node's key fields (`DecodedFields`). For example, `targetgroup.Group` decodes an anonymous struct with `targets` and `labels`, so `scrape_configs.static_configs.targets` ends at `targetgroup.Group`.
+    - **dynamic**: `interface{}`, or `unmarshal` used any other way, e.g. passed to a helper. The type's tags are assumed to apply, and the unmarshaler may also populate `yaml:"-"` fields under keys it picks. Examples: `ScrapeConfig` and `AlertmanagerConfig` (`discovery.UnmarshalYAMLWithInlineConfigs`) and `discovery.Configs`.
+  - Types without a custom unmarshaler are scalar-like if they're a basic type, a slice of scalars, or a `TextUnmarshaler`, e.g. `config.ScrapeProtocol` and `model.LabelNames`.
+  - **How the matching uses this:**
+    - **Scalar-like nodes:** never descended into. No key matches below them, and the graph builder doesn't look for their children. In `section keys`, fields of scalar-like types count as direct keys, e.g. `scrape_configs.scrape_interval`.
+    - **`yaml:"-"` edges:** followed only when the source's unmarshaler is dynamic, as a wildcard for one key segment. It's only tried when nothing else under the node matched, and never for the last segment, since param keys are scalar leaves. For example, `scrape_configs.kubernetes_sd_configs.api_server` goes `ScrapeConfig =(yaml:"-", any segment: kubernetes_sd_configs)=> discovery.Configs => discovery.Config => kubernetes.SDConfig`, then ends at field `api_server`.
+    - **Dynamic non-structs:** if nothing below matches, the rest of the key is attributed to the node, with a ` (custom UnmarshalYAML)` suffix. That only applies when the node wasn't reached through an inline field, and some of the key was already consumed.
+  - **Limitations:**
+    - Only the type the value is decoded *into* is recorded, not what the unmarshaler then does with it. The analysis could be extended to detect unmarshalers that change the value before storing it. For example, `relabel.Action`'s `UnmarshalYAML` (`prometheus/model/relabel/relabel.go:77`) stores `strings.ToLower(s)`, so `action: Replace` is held in memory as `replace`. That matters for searching memory for config values. Not handled yet: there's a TODO on `ct.ClassifyUnmarshaler`.
+    - A node with `DecodedFields` (e.g. `xds.HTTPConfig`, whose promoted `HTTPClientConfig.UnmarshalYAML` decodes `HTTPClientConfig`'s fields) has only its decoded fields' direct keys. Its real fields' edges aren't followed, and the decoded struct's field types aren't nodes in the graph.
+    - The `yaml:"-"` wildcard doesn't say *which* type the custom unmarshaler picks for the segment, so every type reachable through it that has a matching field is returned. For example, `scrape_configs.kubernetes_sd_configs.role` gets 6 Unmarshalers: the SD configs with a `role` field, i.e. hetzner, kubernetes, moby, openstack, scaleway and triton. Tying the segment to the right SD type would need Prometheus-specific knowledge: the key is each config's `Name()` + `_sd_configs`.
 - **Path end:** a path ends at a node when the key is fully consumed, or when the remaining key is one of the node's fields.
   - If the remaining key is a field that also has an edge out, the edge is not followed and the path ends at the node containing the field. For example, `scrape_configs.relabel_configs.action` ends at `/model/relabel.Config`, not `/model/relabel.Action`. This reflects the overapproximation that if a type has access to one key, it also has access to all other keys in the section containing that key.
   - Once a path ends, no further edges are followed from that node, including edges with no key segment.
@@ -93,7 +99,7 @@ The search runs depth-first from every root of the graph, consuming the key one 
   - Example: `TSDBConfig.OutOfOrderTimeWindow` is untagged. go-yaml would accept `storage.tsdb.outofordertimewindow`, but Prometheus means it to hold data derived from the tagged `out_of_order_time_window`.
   - Implemented by `ct.GetFieldKey` reporting `Untagged`, which `ct.FieldKey.IsKey` turns into "not a key". "Untagged" means no tag for the chosen format, so a field with only `json:"cns"` is untagged for YAML. In the graph this removes many json/protobuf API types' edges. The struct-tags strategy (`TaggedTypes`) uses the same rule to pick starting types: a struct counts as tagged only if one of its fields is a key for the format. So those types aren't in a YAML graph at all. In Prometheus the roots go from 54 to 8, all of them YAML config types: `config.Config`, `config.ScrapeConfigs`, `config.ExternalFilesConfig`, rule files, promtool test files, and `xds.HTTPConfig`.
   - Untagged embedded fields are excluded too. In Prometheus this drops `config.URL => net/url.URL` and `relabel.Regexp => grafana/regexp.Regexp`, while the `yaml:",inline"` embeds (`HTTPClientConfig`/`OAuth2 => ProxyConfig`, `xds.HTTPConfig => HTTPClientConfig`) are kept. For JSON, untagged embedded structs should be kept, because encoding/json promotes their fields.
-  - A known cost: `targetgroup.Group`'s fields are untagged, so `scrape_configs.static_configs.targets` now ends at `/discovery.Configs (custom UnmarshalYAML)`. `Group.UnmarshalYAML` actually decodes `targets` and `labels` through an anonymous struct that *is* tagged. Handling that needs analysis of what each custom unmarshaler decodes.
+  - `targetgroup.Group`'s own fields are untagged, but that doesn't matter: its `UnmarshalYAML` decodes a tagged anonymous struct, which becomes its key fields (see "Custom unmarshalers").
 - **Cycles:** a node already on the current path is never revisited.
 - **Partial path:** a partial path is recorded at a dead end, where some key remains but nothing matches. It is cut back to the node where part of the key was last consumed (to avoid outputting many partial paths found by following edges with no key segment).
   - A partial path is dropped if another partial path for the same key extends it. This happens when one branch through edges with no key segment dead-ends sooner than a sibling branch: e.g. `RemoteReadConfig => HTTPClientConfig => ProxyConfig` for an `http_headers` key, when `RemoteReadConfig => HTTPClientConfig => Headers` matched further.
