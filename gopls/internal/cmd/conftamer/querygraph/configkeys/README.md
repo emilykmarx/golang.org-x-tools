@@ -1,27 +1,49 @@
-# keypaths
+# configkeys
 
-For each param key in a csv, find the path(s) through a serialized Unmarshaler Subgraph that produce that key.
-This is roughly the inverse of `ASTPathToParams` in `dlv/params.go` (which goes path => key). Both build each edge's key segment with `ct.ASTPathKeySegment` (`conftamer/keysegments.go`), so they follow the same rules.
+Step (2) of the config-tracing workflow: map config keys to their paths through a serialized Unmarshaler Subgraph (from `gopls conftamer`), with each key's `section keys` and the kind of value it holds. It also writes the config file's values and keys for step (1), which searches the module's memory for them.
+
+Keys come from two places:
+- **Concrete keys** from a config file (or a keys file): each is matched depth-first through the graph (see "How concrete keys are matched").
+- **Patterns** for all keys the graph allows, enumerated from the roots, with `*` for any one segment: map keys, and keys a custom unmarshaler picks for `yaml:"-"` fields (see "How patterns are enumerated"). Useful for statistics on keys that aren't in the config. This replaces `dlv --dump-params`.
+
+Each edge's key segment comes from `ct.ASTPathKeySegment` (`conftamer/keysegments.go`), which the DOT edge labels also use, so they follow the same rules.
+
+This replaces `keypaths`, `prom-test-infra/prombench/extract_param_values.py`, and `dlv --dump-params` (`ASTPathToParams`) and `querygraph/dumpparams`, which have been removed along with the rest of `dlv`'s message-send tracker (all in git history).
 
 ## Usage
 ```
-go run . (--keys-csv <csv with a param_keys column> | --keys-txt <param_keys.txt>) \
-  --unmarshaler-subgraph <graph serialized by Serialize, e.g. unmarshaler_subgraph.text> \
+go run . --unmarshaler-subgraph <graph serialized by Serialize, e.g. unmarshaler_subgraph.text> \
   --module-prefix <module as in go.mod, e.g. github.com/prometheus/prometheus> \
   --output <output csv> \
-  [--format yaml|json] \
-  [--root <node to search from, e.g. /config.Config>]
+  [--config <config file> [--txt-dir <dir> [--strings-only]] | --keys-txt <param_keys.txt> | --keys-csv <csv>] \
+  [--format yaml|json] [--root <node>] [--through <node>] [--enumerate=false]
 ```
-`--format` is the config file's format, which determines whose unmarshaling behavior is followed: `yaml` follows `gopkg.in/yaml.v2` (the default), and `json` will follow `encoding/json` (not yet supported). Generate the graph with the same format (`gopls conftamer -format`).
-`--root` names the node as it appears in the serialized graph, i.e. with the module prefix cut. By default the search starts from every root of the graph. Other roots can be types for other files in the same format, e.g. promtool's test files, and they can add spurious matches.
-Pass the keys in one of two ways:
-- `--keys-csv`: the csv's `param_keys` column holds comma-separated lists of dot-separated keys.
-- `--keys-txt`: a file with lines `<value>:<key>[,<key>...]`, such as the `param_keys.txt` written by `prom-test-infra/prombench/extract_param_values.py`. The keys come after the last colon on each line.
+For example, for Prometheus:
+```
+go run . --config .../prom-test-infra/prombench/fuzzed_prometheus.yaml --txt-dir .../prom-test-infra/prombench --strings-only \
+  --unmarshaler-subgraph <dir>/unmarshaler_subgraph.text --module-prefix github.com/prometheus/prometheus \
+  --root /config.Config --output keys.csv
+```
+- `--format` is the config file's format, which determines whose unmarshaling behavior is followed: `yaml` follows `gopkg.in/yaml.v2` (the default), and `json` will follow `encoding/json` (not yet supported). Generate the graph with the same format (`gopls conftamer -format`).
+- `--root` names the node as it appears in the serialized graph, i.e. with the module prefix cut. By default matching and enumeration start from every root of the graph. Other roots can be types for other files in the same format, e.g. promtool's test files, and they can add spurious matches and patterns.
+- `--through` keeps only keys with a path through the given node, and only those paths: the keys accessible from a (possibly non-root) type, e.g. `github.com/prometheus/common/config.TLSConfig`.
+- Concrete keys come from one of:
+  - `--config`: the config file, parsed with the format's own parser (`gopkg.in/yaml.v3` nodes, or `encoding/json` tokens). Keys are the dot-separated map keys down to each scalar; list indices aren't part of keys. YAML aliases are followed (each use is a separate occurrence) and merge keys (`<<`) add the merged mapping's keys. Empty values are skipped.
+  - `--keys-txt`: lines `<value>:<key>[,<key>...]`, e.g. `param_keys.txt`. The keys come after the last colon on each line. No values.
+  - `--keys-csv`: a csv whose `param_keys` column holds comma-separated keys. No values.
+- `--txt-dir` (with `--config`) writes, as `extract_param_values.py` did:
+  - `param_values.txt`: each distinct value once, in order of first appearance
+  - `param_keys.txt`: `<value>:<key>[,<key>...]`, every distinct key at which the value appears
 
-Keys are deduplicated.
+  Values are written as they appear in the file (after unquoting, e.g. `true`, `5s`), with newlines (e.g. in inline PEM blocks) as a literal `\n`. Unlike the script, `no_proxy` values aren't split on commas: the value is stored whole.
+- `--strings-only` (with `--txt-dir`) writes only values whose key's Go values are stored as strings or byte arrays/slices, or structs, since memory is searched for strings, including inside structs (e.g. `config.URL`, `relabel.Regexp`, `relabel.Action`, `config.Secret`). This excludes numbers (including `model.Duration`, `config.TLSVersion`, `units.Base2Bytes`) and bools. It's by the key's Go type, not the YAML value: go-yaml stores an unquoted `true` in a string field as `"true"`. If the key's kind is unknown (no full path, or decided by a dynamic custom unmarshaler) or an interface, it falls back to whether the parser resolves the value to a string. This replaces the script's YAML-tag check and hard-coded Prometheus duration regex.
 
 ## Output
-One row per key, with columns `param_key,Unmarshaler,Num Unmarshalers,Unmarshaler Path,section keys`:
+One row per key, with columns `param_key,source,pattern,values,value kind,Unmarshaler,Num Unmarshalers,Unmarshaler Path,section keys`:
+- `source`: `config` (a concrete key), `graph` (a pattern), or `both` (a pattern with no `*` that's also in the config)
+- `pattern`: for concrete keys, the patterns they instantiate via the same path, joined with `; `. Every concrete key with a full path should have one; the tool warns about any that don't.
+- `values`: for concrete keys from `--config`, their distinct values as a JSON array, in document order
+- `value kind`: the kind of Go value the key's values are stored as (`string`, `number`, `bool`, `struct`, `interface`, `other`, or `unknown`), from the underlying type of the field or node holding them, after stripping pointers, slices/arrays and maps (whose elements and values are the leaves). `[]byte` is a string. A custom unmarshaler that decodes a map (e.g. `labels.Labels`) has its map's value kind. Joined with `; ` if the paths differ. These come from the graph's `Kind` and `FieldKinds` (and `DecodedFields`), so regenerate older graphs.
 - `Unmarshaler`: the distinct last types on the key's paths, joined with `; `
 - `Num Unmarshalers`: the number of distinct Unmarshalers. It's 0 for keys with no full path, even though `Unmarshaler` then lists the last types of the partial paths.
 - `Unmarshaler Path`: all paths for the key, joined with `; `, e.g. `/config.Config => /config.ScrapeConfig`
@@ -34,7 +56,7 @@ One row per key, with columns `param_key,Unmarshaler,Num Unmarshalers,Unmarshale
     - fields of inlined structs, e.g. `HTTPClientConfig`'s `scrape_configs.bearer_token_file`
     - `yaml:"-"` fields
   - For example, `scrape_configs.scrape_failure_log_file` gets `scrape_configs.job_name` and `scrape_configs.scrape_interval`, but not `scrape_configs.params`.
-  - `*` stands for any map key.
+  - `*` stands for any map key. Map fields are listed as `<field key>.*`, and an inline map as `<prefix>.*`.
   - Keys whose path ends in a map key, or in a dynamic custom unmarshaler absorbing the rest of the key, get just the map's or type's `<prefix>.*`, e.g. `remote_write.headers.*` or `global.external_labels.*`.
   - If an edge used up the rest of the key, the section is that edge's source. If the edge ended with a map key, it's the map's `.*` instead, e.g. `scrape_configs.proxy_connect_header.*`.
   - Where several Unmarshalers are possible, their sections are combined. For example, `scrape_configs.kubernetes_sd_configs.role` gets the combined sections of all 6 SD configs that have a `role` field.
@@ -46,7 +68,9 @@ Rows are sorted into groups, and by key within each group:
 2. Keys whose paths end at more than one distinct Unmarshaler.
 3. All other keys, which have exactly one Unmarshaler.
 
-## How keys are matched
+The tool prints counts of config keys per group, the number of patterns, and the number of config keys with no pattern.
+
+## How concrete keys are matched
 The search runs depth-first from every root of the graph, consuming the key one segment at a time:
 - **Field keys:** every decision about a struct field's key goes through `ct.GetFieldKey` (`conftamer/fieldkeys.go`), which `gopls conftamer` also uses when building the graph. For YAML it's a port of the per-field part of go-yaml v2.4.0's `getStructInfo`, applied to the field's name, tag, and whether it's embedded or a map:
   - Unexported fields are skipped, unless they're embedded.
@@ -93,7 +117,7 @@ The search runs depth-first from every root of the graph, consuming the key one 
     - [The following doesn't matter] So if a node and a struct inlined into it both have a field with the remaining key, only the outer node is returned: the outer field shadows the inlined one.
       - That situation shouldn't arise in a config that loads. go-yaml (`gopkg.in/yaml.v2` v2.4.0, which Prometheus uses, and `gopkg.in/yaml.v3` v3.0.1) panics with `Duplicated key '<key>' in struct <type>` when unmarshaling into such a struct. This happens whichever order the fields are declared in.
       - This was checked by reading `getStructInfo` in `yaml.go` and running a small test program.
-- **Untagged fields:** go-yaml keys an untagged exported field by its lowercased name. Ignoring untagged fields is a deliberate exception to go-yaml, both when building the Unmarshaler Subgraph (`ignoreCType` in `conftamer.go` adds no edge A => B through an untagged field) and in keypaths.
+- **Untagged fields:** go-yaml keys an untagged exported field by its lowercased name. Ignoring untagged fields is a deliberate exception to go-yaml, both when building the Unmarshaler Subgraph (`ignoreCType` in `conftamer.go` adds no edge A => B through an untagged field) and here.
   - The reason: if the document has no key for a field, go-yaml silently leaves the field as it was. So we expect following go-yaml strictly for untagged exported fields would be more likely to cause false positives (i.e. outputting keys that the developer intends to hold data not directly from the config file) than false negatives (i.e. failing to output keys that the developer didn't tag, but that are directly populated from the config file).
   - Checked against `gopkg.in/yaml.v2` v2.4.0: a field with no key in the document keeps its previous value with no error, even under `UnmarshalStrict`, which Prometheus uses. Strict mode only rejects document keys that match no field.
   - Example: `TSDBConfig.OutOfOrderTimeWindow` is untagged. go-yaml would accept `storage.tsdb.outofordertimewindow`, but Prometheus means it to hold data derived from the tagged `out_of_order_time_window`.
@@ -104,5 +128,12 @@ The search runs depth-first from every root of the graph, consuming the key one 
 - **Partial path:** a partial path is recorded at a dead end, where some key remains but nothing matches. It is cut back to the node where part of the key was last consumed (to avoid outputting many partial paths found by following edges with no key segment).
   - A partial path is dropped if another partial path for the same key extends it. This happens when one branch through edges with no key segment dead-ends sooner than a sibling branch: e.g. `RemoteReadConfig => HTTPClientConfig => ProxyConfig` for an `http_headers` key, when `RemoteReadConfig => HTTPClientConfig => Headers` matched further.
 
-## Known limitations (from the graph, not the matching)
-- A custom unmarshaler is detected from the node's method list in the graph. `CopyMethods` (`conftamer/gopls.go`) fills that list from `types.Named.Methods()`, which only has declared methods. So a struct that gets `UnmarshalYAML` by embedding a type that has one isn't detected, even though go-yaml would call the promoted method.
+## How patterns are enumerated
+Depth-first from every root (or `--root`), never revisiting a node already on the current path, following the same rules as matching (`enumerate.go` mirrors `dfs` in `match.go`), so that each concrete key's full path is also a path of the pattern it instantiates:
+- At each node, its `section keys` fields are patterns ending at the node: `<prefix>.<field key>`, `<prefix>.<map field key>.*`, or `<prefix>.*` for an inline map. Map fields whose values are scalar-like nodes are reached via their edge instead, as matching does.
+- A map node with no key-consuming map edge (`IsMap`) gives `<prefix>.*`.
+- Edges are followed with their key segment appended. `yaml:"-"` edges are followed only from dynamic unmarshalers, as a `*` segment. An edge to a scalar-like node ends a pattern there, unless the node's field already gave that key (matching stops at the field) or the edge consumes nothing.
+- A dynamic non-struct (e.g. `discovery.Configs`) also gives `<prefix>.*` with the ` (custom UnmarshalYAML)` suffix, e.g. `scrape_configs.*.*`.
+- So keys built at runtime appear as `*`: e.g. Prometheus `<Name()>_sd_configs` (`RegisterConfig` and `reflect.StructOf` in `discovery/registry.go`) are `scrape_configs.*`, so `scrape_configs.*.role` is one pattern for all 6 SD configs with a `role` field.
+
+Compared with `dlv --dump-params` from `/config.Config` (`results/prom/tmp/struct_tags/dump_params_step3/all_keys.txt`, 639 keys), the 684 patterns include all of its keys, plus: keys ending at scalar-like custom types (`proxy_url`, `url`, `regex`), the `min_version` keys it missed, SD config keys such as `targets`, `labels.*` and `api_server`, `alerting.alertmanagers.relabel_configs.*`, `global.external_labels.*`, and the two `*.*` patterns of `discovery.Configs`.

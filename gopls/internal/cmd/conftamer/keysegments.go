@@ -9,7 +9,7 @@ import (
 )
 
 /* Config file key segments for edges of the CTypes graph, following the unmarshaling library for a format.
-Shared by querygraph/keypaths (key => path) and dlv's ASTPathToParams (path => key). */
+Used by querygraph/configkeys (key <=> path) and the DOT edge labels. */
 
 // Stands for any one key segment: a map key, or the key a custom unmarshaler picks for a yaml:"-" field
 const MAP_KEY = "*"

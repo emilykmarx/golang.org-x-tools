@@ -88,6 +88,9 @@ type CTypeNode struct {
 	UnmarshalKinds []UnmarshalKind
 	DecodedFields  map[string]DecodedField // Field name => field, if it decodes into another struct
 	ScalarLike     bool                    // config values of this type are scalars (no keys below it)
+	// Kind of the values stored in the type and in each of its fields (if struct), for leaves of the document
+	Kind       ValueKind
+	FieldKinds map[string]ValueKind
 
 	// Parameters this CType can access, and via which fields
 	Stored_down  map[Stored]struct{} // becomes irrelevant once entire push down pass is done

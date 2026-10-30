@@ -57,12 +57,15 @@ type MarshalableNode struct {
 	UnmarshalKinds  []UnmarshalKind         `json:",omitempty"`
 	DecodedFields   map[string]DecodedField `json:",omitempty"`
 	ScalarLike      bool                    `json:",omitempty"`
+	Kind            ValueKind               `json:",omitempty"`
+	FieldKinds      map[string]ValueKind    `json:",omitempty"`
 }
 
 func (n *CTypeNode) MarshalJSON() ([]byte, error) {
 	m := MarshalableNode{Names: n.Names, Methods: n.Methods, Tags: n.Tags, IsMap: n.IsMap, MapFields: n.MapFields,
 		EmbeddedFields: n.EmbeddedFields, YAMLUnmarshaler: n.YAMLUnmarshaler, TextUnmarshaler: n.TextUnmarshaler,
-		UnmarshalKinds: n.UnmarshalKinds, DecodedFields: n.DecodedFields, ScalarLike: n.ScalarLike}
+		UnmarshalKinds: n.UnmarshalKinds, DecodedFields: n.DecodedFields, ScalarLike: n.ScalarLike,
+		Kind: n.Kind, FieldKinds: n.FieldKinds}
 	return json.Marshal(m)
 
 	// marshal without error to empty string (probably bc interesting fields aren't exported): types.Type, *types.Named, types.Named
@@ -84,6 +87,8 @@ func (n *CTypeNode) UnmarshalJSON(b []byte) error {
 	n.UnmarshalKinds = m.UnmarshalKinds
 	n.DecodedFields = m.DecodedFields
 	n.ScalarLike = m.ScalarLike
+	n.Kind = m.Kind
+	n.FieldKinds = m.FieldKinds
 
 	return nil
 }

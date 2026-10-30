@@ -223,7 +223,7 @@ func (c *Conftamer) classifyUnmarshaler(node *ct.CTypeNode) {
 
 // Whether the parent field(s) on the AST path from parent to child aren't keys in the config file,
 // following the unmarshaling library for c.format (see ct.GetFieldKey). That includes our deliberate exception
-// for untagged fields (see ct.FieldKey.Untagged; querygraph/keypaths makes the same exception).
+// for untagged fields (see ct.FieldKey.Untagged; querygraph/configkeys makes the same exception).
 // yaml:"-" fields aren't ignored: the parent's custom unmarshaler may populate them.
 func (c *Conftamer) ignoreField(child golang.TypeInfo, parent ct.CTypeNode, parent_hash ct.CTypeHash, ast_path ct.ASTPath) bool {
 	st := ct.IsStruct(parent.TypeInfo)

@@ -207,13 +207,14 @@ const (
 
 // A field of a struct that a custom unmarshaler decodes into (serializable subset of RawField)
 type DecodedField struct {
-	Tag      string `json:",omitempty"`
-	Embedded bool   `json:",omitempty"`
-	IsMap    bool   `json:",omitempty"`
+	Tag      string    `json:",omitempty"`
+	Embedded bool      `json:",omitempty"`
+	IsMap    bool      `json:",omitempty"`
+	Kind     ValueKind `json:",omitempty"`
 }
 
 // Classify what the node's custom UnmarshalYAML decodes into, from the uses of its unmarshal func parameter
-// (see golang.FuncParamCalls), and set UnmarshalKinds, DecodedFields, IsMap and ScalarLike accordingly.
+// (see golang.FuncParamCalls), and set UnmarshalKinds, DecodedFields, IsMap, ScalarLike and Kind accordingly.
 // With no uses found, the unmarshaler is treated as dynamic.
 // TODO(CT) This only records what type the value is decoded into, not what the unmarshaler then does with it. It could
 // be extended to detect unmarshalers that change the value before storing it - e.g. relabel.Action's UnmarshalYAML
@@ -222,6 +223,7 @@ type DecodedField struct {
 func ClassifyUnmarshaler(node *CTypeNode, calls []golang.FuncParamCall) {
 	kinds := map[UnmarshalKind]bool{}
 	decoded := map[string]DecodedField{}
+	map_kinds := map[ValueKind]bool{}
 	for _, call := range calls {
 		kind := UnmarshalDynamic
 		if !call.Dynamic {
@@ -234,6 +236,7 @@ func ClassifyUnmarshaler(node *CTypeNode, calls []golang.FuncParamCall) {
 				kind = UnmarshalDynamic
 			case *types.Map:
 				kind = UnmarshalMap
+				map_kinds[GetValueKind(u)] = true
 			default:
 				// Compare printed types, not types.Identical: the method's package may be type-checked separately from
 				// the node's, so the same named types are different objects
@@ -245,7 +248,8 @@ func ClassifyUnmarshaler(node *CTypeNode, calls []golang.FuncParamCall) {
 					kind = UnmarshalStruct
 					for i := range st.NumFields() {
 						raw := StructRawField(st, i)
-						decoded[raw.Name] = DecodedField{Tag: raw.Tag, Embedded: raw.Embedded, IsMap: raw.IsMap}
+						decoded[raw.Name] = DecodedField{Tag: raw.Tag, Embedded: raw.Embedded, IsMap: raw.IsMap,
+							Kind: GetValueKind(st.Field(i).Type())}
 					}
 				}
 			}
@@ -266,6 +270,11 @@ func ClassifyUnmarshaler(node *CTypeNode, calls []golang.FuncParamCall) {
 	node.ScalarLike = only(UnmarshalScalar)
 	if only(UnmarshalMap) {
 		node.IsMap = true // decoded as a map: any key
+		if len(map_kinds) == 1 {
+			for k := range map_kinds {
+				node.Kind = k // the map's values (e.g. labels.Labels stores strings)
+			}
+		}
 	}
 	// Decoded struct fields are the keys, unless the type's own fields may also apply
 	if kinds[UnmarshalStruct] && !kinds[UnmarshalPlain] && !kinds[UnmarshalDynamic] {
@@ -310,4 +319,69 @@ func KeyFieldNames(n CTypeNode) []string {
 	}
 	slices.Sort(names)
 	return names
+}
+
+// Kind of the Go value that a config file value (a leaf of the document) is stored as, from the underlying type of
+// the field or node holding it, after stripping pointers, and slices/arrays and maps (whose elements/values are the
+// document's leaves). []byte is a string.
+type ValueKind string
+
+const (
+	KindString    ValueKind = "string"
+	KindNumber    ValueKind = "number"
+	KindBool      ValueKind = "bool"
+	KindStruct    ValueKind = "struct"    // e.g. config.URL, relabel.Regexp (decoded by a custom unmarshaler)
+	KindInterface ValueKind = "interface" // depends on the value (go-yaml decodes into its resolved type)
+	KindOther     ValueKind = "other"     // e.g. func, chan
+)
+
+func GetValueKind(typ types.Type) ValueKind {
+	for {
+		switch u := typ.Underlying().(type) {
+		case *types.Pointer:
+			typ = u.Elem()
+		case *types.Slice:
+			if isByte(u.Elem()) {
+				return KindString
+			}
+			typ = u.Elem()
+		case *types.Array:
+			if isByte(u.Elem()) {
+				return KindString
+			}
+			typ = u.Elem()
+		case *types.Map:
+			typ = u.Elem()
+		case *types.Basic:
+			switch {
+			case u.Info()&types.IsString != 0:
+				return KindString
+			case u.Info()&types.IsBoolean != 0:
+				return KindBool
+			case u.Info()&types.IsNumeric != 0:
+				return KindNumber
+			}
+			return KindOther
+		case *types.Struct:
+			return KindStruct
+		case *types.Interface:
+			return KindInterface
+		default:
+			return KindOther
+		}
+	}
+}
+
+func isByte(typ types.Type) bool {
+	b, ok := typ.Underlying().(*types.Basic)
+	return ok && b.Kind() == types.Byte
+}
+
+// Kind of the values stored in a node's field (of the decoded struct, if a custom unmarshaler decodes into another
+// struct); "" if unknown (e.g. graph serialized before kinds were recorded)
+func NodeFieldKind(n CTypeNode, field string) ValueKind {
+	if n.DecodedFields != nil {
+		return n.DecodedFields[field].Kind
+	}
+	return n.FieldKinds[field]
 }
