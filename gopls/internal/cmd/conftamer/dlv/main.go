@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -17,6 +16,7 @@ import (
 	"github.com/go-delve/delve/service/api"
 	"github.com/go-delve/delve/service/rpc2"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
+	parse "golang.org/x/tools/gopls/internal/cmd/conftamer/parse"
 )
 
 func main() {
@@ -67,16 +67,29 @@ type ClientInfo struct {
 	msg_taint            parsetests.AllTaint
 }
 
+// The serialized list isn't prefix-cut (so it can be queried by full type name), but the serialized graph's
+// vertex hashes are => map both full and cut type names to the cut hash, so GetHash returns a vertex
+func shortHashList(list ct.CTypeList, module_prefix string) ct.CTypeList {
+	short_list := make(ct.CTypeList)
+	for name, hash := range list {
+		short_hash, _ := strings.CutPrefix(string(hash), module_prefix)
+		short_name, _ := strings.CutPrefix(string(name), module_prefix)
+		short_list[name] = ct.CTypeHash(short_hash)
+		short_list[ct.FullTypeName(short_name)] = ct.CTypeHash(short_hash)
+	}
+	return short_list
+}
+
 func Run(dlv_port int, module_prefix string, test_pkg string, test_name_arg string,
 	unmarshaler_subgraph_file string, accessors_file string, msg_send_funcs []string, output_path string, dump_params string) {
 
 	// 1. Load the CTypes graphs
 	g, m := ct.Deserialize(unmarshaler_subgraph_file)
-	unmarshaler_subgraph := ct.CTypes{Graph: g, List: m.List}
+	unmarshaler_subgraph := ct.CTypes{Graph: g, List: shortHashList(m.List, module_prefix)}
 	if accessors_file != "" {
 		g, m = ct.Deserialize(accessors_file)
 	}
-	accessors := ct.CTypes{Graph: g, List: m.List} // if dump_params, will reuse the US which is fine
+	accessors := ct.CTypes{Graph: g, List: shortHashList(m.List, module_prefix)} // if dump_params, will reuse the US which is fine
 
 	// 2. Parse info from CTypes graphs
 	methods := make(map[string]struct{})
@@ -159,7 +172,7 @@ func GetCTypesInfo(g ct.CTypeGraph, module_prefix string, methods map[string]str
 		}
 		for _, orig_method := range node.Methods {
 			method := string(orig_method)
-			sanitizeMethod(&method, module_prefix)
+			parse.SanitizeMethod(&method)
 			methods[method] = struct{}{}
 		}
 	}
@@ -188,26 +201,6 @@ Thus:
   - Check DF from the CType method that sent the msg
 */
 
-func sanitizeMethod(method *string, module_prefix string) {
-	// gopls and dlv put the * and () in different places in method names => remove them
-	*method = strings.ReplaceAll(*method, "*", "")
-	*method = strings.ReplaceAll(*method, "(", "")
-	*method = strings.ReplaceAll(*method, ")", "")
-
-	// if appears to be an anonymous function, switch to the function that defined it
-	parts := strings.Split(*method, ".")
-	maybe_anon := parts[len(parts)-1]
-	if n, ok := strings.CutPrefix(maybe_anon, "func"); ok {
-		if _, err := strconv.Atoi(n); err == nil {
-			// ends with ".funcX", where X is a number => remove that postfix
-			*method = strings.Join(parts[:len(parts)-1], ".")
-		}
-	}
-
-	short_method, _ := strings.CutPrefix(*method, module_prefix)
-	*method = short_method
-}
-
 func recvrType(method string) string {
 	parts := strings.Split(method, ".")
 	return strings.Join(parts[:len(parts)-1], ".")
@@ -231,7 +224,7 @@ func HandleMessageSend(client *rpc2.RPCClient, args ClientInfo, bp *api.Breakpoi
 
 		for _, frame := range stack {
 			fn := frame.Function.Name()
-			sanitizeMethod(&fn, args.module_prefix)
+			parse.SanitizeMethod(&fn)
 
 			if _, ok := args.methods[fn]; ok {
 				// TODO(CT) ignore the same types in the Unmarshaler Subgraph that we do when finding Accessors
