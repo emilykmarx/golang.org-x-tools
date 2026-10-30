@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	graph "github.com/emilykmarx/dominikbraun-graph"
 	ct "golang.org/x/tools/gopls/internal/cmd/conftamer"
@@ -40,11 +42,58 @@ type finder struct {
 	full    map[string]bool // path string => true
 	n_full  int             // number of times a full path was recorded (including duplicates)
 	partial map[string]bool // path string (with matched suffix) => true
+	section map[string]bool // keys in the sections containing the key, across full paths
 }
 
-func (f *finder) recordFull(path_str string) {
+func (f *finder) recordFull(path_str string, section_keys []string) {
 	f.full[path_str] = true
 	f.n_full++
+	for _, k := range section_keys {
+		f.section[k] = true
+	}
+}
+
+// Join key parts with ".", skipping empty ones
+func joinKey(parts ...string) string {
+	return strings.Join(slices.DeleteFunc(slices.Clone(parts), func(p string) bool { return p == "" }), ".")
+}
+
+// Keys in the section of `node` at `prefix` that are reachable without following any edge out of `node`:
+// the key itself (already matched by the path), plus the node's fields that have no edge out.
+// So fields of inlined structs, yaml:"-" fields, and fields whose type is a node in the graph are excluded.
+// Unexported fields are skipped (go-yaml skips them). MAP_KEY stands for any key of an inline map.
+func (f *finder) sectionKeys(node ct.CTypeHash, prefix string, key string) []string {
+	keys := []string{key}
+	n, err := f.g.Vertex(node)
+	ct.CheckErr(err)
+
+	// Field keys with an edge out
+	edge_keys := map[string]bool{}
+	for _, e := range f.adj[node] {
+		for _, seg := range e.segments {
+			edge_keys[strings.Split(seg.pattern, ".")[0]] = true
+		}
+	}
+
+	for field, tag := range n.Tags {
+		if r, _ := utf8.DecodeRuneInString(field); !unicode.IsUpper(r) {
+			continue // unexported
+		}
+		switch {
+		case yamlDash(tag):
+			// only populated via an edge (custom unmarshaler fills the field's type)
+		case yamlInline(tag):
+			if n.MapFields[field] && !edge_keys[MAP_KEY] {
+				keys = append(keys, joinKey(prefix, MAP_KEY)) // inline map with non-CType values
+			} // inline structs are only reachable via an edge
+		default:
+			if field_key := ct.FieldToParamKey(field, tag); !edge_keys[field_key] {
+				keys = append(keys, joinKey(prefix, field_key))
+			}
+		}
+	}
+	slices.Sort(keys)
+	return slices.Compact(keys)
 }
 
 // Whether the node has a custom UnmarshalYAML (go-yaml calls it instead of applying its default rules)
@@ -152,9 +201,18 @@ func (f *finder) pathString(path []ct.CTypeHash, module_prefix string) string {
 // DFS from node, with `remaining` the part of the key not yet matched.
 // path[:consumed_len] is the path up to the last edge that consumed part of the key.
 // via_inline: whether we reached node via an inline field (so go-yaml won't call its custom unmarshaler).
-func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHash, consumed_len int, via_inline bool, on_path map[ct.CTypeHash]bool, module_prefix string) {
+// last: the last edge that consumed part of the key (to find the section containing the key if an edge consumes the rest).
+func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHash, consumed_len int, via_inline bool, last lastConsume, on_path map[ct.CTypeHash]bool, module_prefix string) {
+	prefix := strings.TrimSuffix(strings.TrimSuffix(key, remaining), ".") // part of the key consumed so far
 	if remaining == "" {
-		f.recordFull(f.pathString(path, module_prefix))
+		// An edge consumed the rest: the key is in the section of the edge's source (or in a map, if it ended with a map key)
+		var section []string
+		if pattern_parts := strings.Split(last.pattern, "."); pattern_parts[len(pattern_parts)-1] == MAP_KEY {
+			section = []string{joinKey(last.prefix, joinKey(pattern_parts[:len(pattern_parts)-1]...), MAP_KEY)}
+		} else {
+			section = f.sectionKeys(last.src, last.prefix, key)
+		}
+		f.recordFull(f.pathString(path, module_prefix), section)
 		return
 	}
 	n_full_before := f.n_full
@@ -167,7 +225,7 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 	ct.CheckErr(err)
 	for field, tag := range n.Tags {
 		if ct.FieldToParamKey(field, tag) == remaining {
-			f.recordFull(f.pathString(path, module_prefix))
+			f.recordFull(f.pathString(path, module_prefix), f.sectionKeys(node, prefix, key))
 			return
 		}
 	}
@@ -175,10 +233,14 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 	matched := false
 	consumed := false // whether an edge that consumes part of the key matched
 
-	follow := func(e outEdge, seg segment, next string, next_consumed_len int) {
+	follow := func(e outEdge, seg segment, next string, next_consumed_len int, pattern string) {
 		matched = true
+		next_last := last
+		if pattern != "" {
+			next_last = lastConsume{src: node, prefix: prefix, pattern: pattern}
+		}
 		on_path[e.target] = true
-		f.dfs(e.target, key, next, append(slices.Clone(path), e.target), next_consumed_len, seg.inline, on_path, module_prefix)
+		f.dfs(e.target, key, next, append(slices.Clone(path), e.target), next_consumed_len, seg.inline, next_last, on_path, module_prefix)
 		delete(on_path, e.target)
 	}
 
@@ -200,15 +262,17 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 			} else {
 				continue
 			}
-			follow(e, seg, next, next_consumed_len)
+			follow(e, seg, next, next_consumed_len, seg.pattern)
 		}
 	}
 
 	// No field or key-consuming edge matched => remaining key may be a map key of a map whose value type isn't a CType
 	// (so no edge with MapType.Value): a map node + one segment, or a map field's key + one segment
-	if !consumed && f.mapKeyMatch(n, remaining) {
-		f.recordFull(f.pathString(path, module_prefix))
-		return
+	if !consumed {
+		if map_section, ok := f.mapKeyMatch(n, remaining); ok {
+			f.recordFull(f.pathString(path, module_prefix), []string{joinKey(prefix, map_section)})
+			return
+		}
 	}
 
 	// Nothing found yet (including via inline fields) => try yaml:"-" fields, if this node has a custom unmarshaler
@@ -222,7 +286,7 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 				}
 				for _, seg := range e.segments {
 					if seg.dash {
-						follow(e, seg, rest, len(path)+1)
+						follow(e, seg, rest, len(path)+1, MAP_KEY)
 					}
 				}
 			}
@@ -233,7 +297,8 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 	// default go-yaml rules (tags etc) don't say how its keys map to types, so attribute the rest of the key to it.
 	// (Structs with custom unmarshalers are assumed to use the `type plain T` pattern, so their tags still apply.)
 	if f.n_full == n_full_before && customUnmarshaler(n) && n.Tags == nil && !via_inline && remaining != key {
-		f.recordFull(f.pathString(path, module_prefix) + CUSTOM_SUFFIX)
+		// The custom unmarshaler decides the section's keys
+		f.recordFull(f.pathString(path, module_prefix)+CUSTOM_SUFFIX, []string{joinKey(prefix, MAP_KEY)})
 		return
 	}
 
@@ -251,30 +316,38 @@ func yamlInline(tag string) bool {
 	return ok && slices.Contains(strings.Split(yaml_tag, ",")[1:], "inline")
 }
 
-// Whether `remaining` is a map key of the node (if a map), or a map field's key followed by a map key
-func (f *finder) mapKeyMatch(n ct.CTypeNode, remaining string) bool {
+// Whether `remaining` is a map key of the node (if a map), or a map field's key followed by a map key.
+// If so, also return the map's section key relative to the node (MAP_KEY, or <field key>.MAP_KEY).
+func (f *finder) mapKeyMatch(n ct.CTypeNode, remaining string) (string, bool) {
 	field_key, map_key, found := strings.Cut(remaining, ".")
 	if !found {
 		// One segment: map key of the node itself, or of an inline map field
 		if n.IsMap {
-			return true
+			return MAP_KEY, true
 		}
 		for field := range n.MapFields {
 			if yamlInline(n.Tags[field]) {
-				return true
+				return MAP_KEY, true
 			}
 		}
-		return false
+		return "", false
 	}
 	if strings.Contains(map_key, ".") {
-		return false
+		return "", false
 	}
 	for field := range n.MapFields {
 		if ct.FieldToParamKey(field, n.Tags[field]) == field_key {
-			return true
+			return joinKey(field_key, MAP_KEY), true
 		}
 	}
-	return false
+	return "", false
+}
+
+// The last edge that consumed part of the key: its source, the key consumed before it, and its segment pattern
+type lastConsume struct {
+	src     ct.CTypeHash
+	prefix  string
+	pattern string
 }
 
 // If edge segment `seg` (dot-separated, possibly with MAP_KEY parts) is a prefix of `remaining`,
@@ -298,13 +371,15 @@ type result struct {
 	unmarshalers []string
 	paths        []string
 	full         bool
+	section_keys []string // keys in the sections containing the key (full paths only)
 }
 
 func (f *finder) find(key, module_prefix string) result {
 	f.full = map[string]bool{}
 	f.partial = map[string]bool{}
+	f.section = map[string]bool{}
 	for _, root := range f.roots {
-		f.dfs(root, key, key, []ct.CTypeHash{root}, 1, false, map[ct.CTypeHash]bool{root: true}, module_prefix)
+		f.dfs(root, key, key, []ct.CTypeHash{root}, 1, false, lastConsume{}, map[ct.CTypeHash]bool{root: true}, module_prefix)
 	}
 
 	// Drop partial paths that another partial path extends (found by a sibling branch that dead-ended sooner)
@@ -330,6 +405,12 @@ func (f *finder) find(key, module_prefix string) result {
 			last = last[i+len(" => "):]
 		}
 		res.unmarshalers = append(res.unmarshalers, last)
+	}
+	if res.full {
+		for k := range f.section {
+			res.section_keys = append(res.section_keys, k)
+		}
+		slices.Sort(res.section_keys)
 	}
 	slices.Sort(res.paths)
 	slices.Sort(res.unmarshalers)
@@ -431,7 +512,7 @@ func main() {
 	ct.CheckErr(err)
 	defer fd.Close()
 	w := csv.NewWriter(fd)
-	ct.CheckErr(w.Write([]string{"param_key", "Unmarshaler", "Num Unmarshalers", "Unmarshaler Path"}))
+	ct.CheckErr(w.Write([]string{"param_key", "Unmarshaler", "Num Unmarshalers", "Unmarshaler Path", "section keys"}))
 	for _, group := range groups {
 		for _, res := range group {
 			// Unmarshalers of partial paths don't count
@@ -439,7 +520,7 @@ func main() {
 			if res.full {
 				num_unmarshalers = len(res.unmarshalers)
 			}
-			ct.CheckErr(w.Write([]string{res.key, strings.Join(res.unmarshalers, "; "), strconv.Itoa(num_unmarshalers), strings.Join(res.paths, "; ")}))
+			ct.CheckErr(w.Write([]string{res.key, strings.Join(res.unmarshalers, "; "), strconv.Itoa(num_unmarshalers), strings.Join(res.paths, "; "), strings.Join(res.section_keys, "; ")}))
 		}
 	}
 	w.Flush()

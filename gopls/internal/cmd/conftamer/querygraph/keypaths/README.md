@@ -19,10 +19,23 @@ Pass the keys in one of two ways:
 Keys are deduplicated.
 
 ## Output
-One row per key, with columns `param_key,Unmarshaler,Num Unmarshalers,Unmarshaler Path`:
+One row per key, with columns `param_key,Unmarshaler,Num Unmarshalers,Unmarshaler Path,section keys`:
 - `Unmarshaler`: the distinct last types on the key's paths, joined with `; `
 - `Num Unmarshalers`: the number of distinct Unmarshalers. It's 0 for keys with no full path, even though `Unmarshaler` then lists the last types of the partial paths.
 - `Unmarshaler Path`: all paths for the key, joined with `; `, e.g. `/config.Config => /config.ScrapeConfig`
+- `section keys`: the keys in the section directly containing the key that can be reached without following any edge beyond the key's own paths in `Unmarshaler Path`. Joined with `; `.
+  - It's the union over the key's full paths, and empty for keys with no full path.
+  - It always includes the key itself, plus the Unmarshaler's fields that have no outgoing edge in the graph.
+  - Following go-yaml, unexported fields are skipped.
+  - Everything that needs an edge is excluded:
+    - fields whose type is a node in the graph, e.g. `scrape_configs.params` (`url.Values`) and `scrape_configs.scrape_interval` (`model.Duration`)
+    - fields of inlined structs, e.g. `HTTPClientConfig`'s `scrape_configs.bearer_token_file`
+    - `yaml:"-"` fields
+  - For example, `scrape_configs.scrape_failure_log_file` gets `scrape_configs.job_name` but not `scrape_configs.params`.
+  - `*` stands for any map key.
+  - Keys whose path ends in a map key, or in a custom unmarshaler absorbing the rest of the key, get just the map's or type's `<prefix>.*`, e.g. `remote_write.headers.*` or `global.external_labels.*`.
+  - If an edge used up the rest of the key, the section is that edge's source. If the edge ended with a map key, it's the map's `.*` instead, e.g. `scrape_configs.proxy_connect_header.*`.
+  - Where several Unmarshalers are possible, their sections are combined. For example, `scrape_configs.kubernetes_sd_configs.role` gets the combined sections of all 6 SD configs that have a `role` field.
 
 Type names have the module prefix removed.
 
