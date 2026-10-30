@@ -125,3 +125,58 @@ func StructRawField(st *types.Struct, i int) RawField {
 func NodeRawField(n CTypeNode, field string) RawField {
 	return RawField{Name: field, Tag: n.Tags[field], Embedded: n.EmbeddedFields[field], IsMap: n.MapFields[field]}
 }
+
+// Whether go-yaml v2 calls the type's own UnmarshalYAML instead of applying its default rules:
+// whether *T implements gopkg.in/yaml.v2's Unmarshaler, i.e. has UnmarshalYAML(func(interface{}) error) error,
+// possibly promoted from an embedded field. (go-yaml checks this on every value it decodes into, before anything else.)
+func ImplementsYAMLUnmarshaler(typ types.Type) bool {
+	sig := lookupMethod(typ, "UnmarshalYAML")
+	if sig == nil || sig.Params().Len() != 1 || !returnsOnlyError(sig) {
+		return false
+	}
+	unmarshal, ok := sig.Params().At(0).Type().Underlying().(*types.Signature)
+	if !ok || unmarshal.Params().Len() != 1 || !returnsOnlyError(unmarshal) {
+		return false
+	}
+	iface, ok := unmarshal.Params().At(0).Type().Underlying().(*types.Interface)
+	return ok && iface.Empty()
+}
+
+// Whether *T implements encoding.TextUnmarshaler (UnmarshalText([]byte) error), possibly promoted.
+// go-yaml v2 uses this for scalar values (after checking for Unmarshaler).
+func ImplementsTextUnmarshaler(typ types.Type) bool {
+	sig := lookupMethod(typ, "UnmarshalText")
+	if sig == nil || sig.Params().Len() != 1 || !returnsOnlyError(sig) {
+		return false
+	}
+	slice, ok := sig.Params().At(0).Type().Underlying().(*types.Slice)
+	if !ok {
+		return false
+	}
+	elem, ok := slice.Elem().Underlying().(*types.Basic)
+	return ok && elem.Kind() == types.Byte
+}
+
+// Signature of the exported method `name` in *T's method set (or T's, if T is already a pointer), or nil.
+// Interfaces have none: decoding into an interface field doesn't call its dynamic type's methods.
+func lookupMethod(typ types.Type, name string) *types.Signature {
+	if _, ok := typ.Underlying().(*types.Interface); ok {
+		return nil
+	}
+	if _, ok := typ.Underlying().(*types.Pointer); !ok {
+		typ = types.NewPointer(typ)
+	}
+	sel := types.NewMethodSet(typ).Lookup(nil, name)
+	if sel == nil {
+		return nil
+	}
+	fn, ok := sel.Obj().(*types.Func)
+	if !ok {
+		return nil
+	}
+	return fn.Signature()
+}
+
+func returnsOnlyError(sig *types.Signature) bool {
+	return sig.Results().Len() == 1 && types.Identical(sig.Results().At(0).Type(), types.Universe.Lookup("error").Type())
+}

@@ -51,11 +51,14 @@ type MarshalableNode struct {
 	IsMap          bool            `json:",omitempty"`
 	MapFields      map[string]bool `json:",omitempty"`
 	EmbeddedFields map[string]bool `json:",omitempty"`
+	// Custom unmarshalers (see CTypeNode)
+	YAMLUnmarshaler bool `json:",omitempty"`
+	TextUnmarshaler bool `json:",omitempty"`
 }
 
 func (n *CTypeNode) MarshalJSON() ([]byte, error) {
 	m := MarshalableNode{Names: n.Names, Methods: n.Methods, Tags: n.Tags, IsMap: n.IsMap, MapFields: n.MapFields,
-		EmbeddedFields: n.EmbeddedFields}
+		EmbeddedFields: n.EmbeddedFields, YAMLUnmarshaler: n.YAMLUnmarshaler, TextUnmarshaler: n.TextUnmarshaler}
 	return json.Marshal(m)
 
 	// marshal without error to empty string (probably bc interesting fields aren't exported): types.Type, *types.Named, types.Named
@@ -72,6 +75,8 @@ func (n *CTypeNode) UnmarshalJSON(b []byte) error {
 	n.IsMap = m.IsMap
 	n.MapFields = m.MapFields
 	n.EmbeddedFields = m.EmbeddedFields
+	n.YAMLUnmarshaler = m.YAMLUnmarshaler
+	n.TextUnmarshaler = m.TextUnmarshaler
 
 	return nil
 }
@@ -97,6 +102,7 @@ func (c *CTypes) Marshal(cutprefix string) ([]byte, Marshalable) {
 			edge_attrs := c.edgeDataToAttributes(edge)
 			err := c.Graph.UpdateEdge(edge.Source, edge.Target, graph.EdgeAttributes(edge_attrs))
 			CheckErr(err)
+			edge.Properties.Attributes = edge_attrs // edge is a copy from before the update
 		}
 
 		// 2. Cut prefix

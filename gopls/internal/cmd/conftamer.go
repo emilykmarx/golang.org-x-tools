@@ -454,6 +454,7 @@ func (c *Conftamer) FindUnmarshalers() []golang.TypeInfo {
 func (c *Conftamer) FindUnmarshalerSubgraph() {
 	start := time.Now()
 	c.unmarshaler_subgraph = ct.New(c.log)
+	c.unmarshaler_subgraph.Format = c.format
 
 	// 1. Find "Unmarshalers" by configured strategy
 	unmarshalers := c.FindUnmarshalers()
@@ -556,6 +557,7 @@ func (c *Conftamer) FindAccessors() {
 	graph.Logf(c.log, slog.LevelInfo, "Finding Accessors: Types containing types in Unmarshaler Subgraph")
 	// Wait to create until now, since other functions switch from editing unmarshaler subgraph to accessors once it's created
 	c.accessors = ct.New(c.log)
+	c.accessors.Format = c.format
 
 	unmarshaler_subnodes, err := c.unmarshaler_subgraph.Graph.Vertices()
 	ct.CheckErr(err)

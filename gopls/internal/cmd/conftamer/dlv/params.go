@@ -19,7 +19,8 @@ import (
 // PERF cache the results for other method calls with same receiver (or precompute and persist with graph)
 func UnmarshalerIngressParams(args ClientInfo, ingress_hash ct.CTypeHash) []string {
 	// XXX(CT) Ignore types only defined in tests to reduce fake keys
-	// (need conftamer to record the defn loc in TypeInfo, which it currently doesn't)
+	// (need conftamer to record the defn loc in TypeInfo, which it currently doesn't) -
+	// update I think we do this now for unmarshal_fn strat, but not the others
 
 	// 1. Get key prefixes for all paths from a root to the ingress
 	key_prefixes := []string{}
@@ -29,7 +30,7 @@ func UnmarshalerIngressParams(args ClientInfo, ingress_hash ct.CTypeHash) []stri
 	for ctype_path_i, ctype_path := range ctype_paths {
 		for _, ast_path := range ast_paths[ctype_path_i] {
 			// Don't include non-custom fields (not part of the key prefix) or ingress keys (will be handled below)
-			key_prefixes = append(key_prefixes, ASTPathToParams(ctype_path, nil, ast_path, false)...)
+			key_prefixes = append(key_prefixes, ASTPathToParams(ctype_path, nil, ast_path, false, args.format)...)
 		}
 	}
 
@@ -41,7 +42,7 @@ func UnmarshalerIngressParams(args ClientInfo, ingress_hash ct.CTypeHash) []stri
 
 	for ctype_path_i, ctype_path := range ctype_paths {
 		for _, ast_path := range ast_paths[ctype_path_i] {
-			key_postfixes = append(key_postfixes, ASTPathToParams(ctype_path, ctype_paths, ast_path, true)...)
+			key_postfixes = append(key_postfixes, ASTPathToParams(ctype_path, ctype_paths, ast_path, true, args.format)...)
 		}
 	}
 
@@ -163,54 +164,88 @@ func nonCustomField(field string, ctype_edge graph.Edge[ct.CTypeNode], all_ctype
 	return !found
 }
 
+// TODO put a context timeout on AllPathsBetween (which will save us if we hit a slow query)
+
 // Given an AST path (indexed by CType edge) and corresponding CType path,
-// get the corresponding parameter key(s) from CType info.
-// If `leaf_keys`: Append all of the last node's tags to the final key (won't have corresponding AST edges in given path).
+// get the corresponding parameter key(s) from CType info, following the unmarshaling library for `format`
+// (key segments via ct.ASTPathKeySegment; fields via ct.NodeFieldKey, including our untagged-field exception).
+// If `leaf_keys`: Append all of the last node's key fields to the final key (won't have corresponding AST edges in given path).
 // If `all_ctype_paths`: Also include non-custom fields.
-// Assume the default behavior of UnmarshalYAML wrt mapping file keys to types.
+// ct.MAP_KEY ("*") stands for any map key, or the key a custom unmarshaler picks for a yaml:"-" field.
+// Returns nil if the path can't produce a key (e.g. goes through a field that isn't a key).
 func ASTPathToParams(ctype_path []graph.Edge[ct.CTypeNode], all_ctype_paths [][]graph.Edge[ct.CTypeNode],
-	ast_path []ct.ASTPath, leaf_keys bool) []string {
+	ast_path []ct.ASTPath, leaf_keys bool, format ct.Format) []string {
 
 	keys := []string{} // add when find a non-custom field or leaf
 	key_prefix := ""   // append as add fields
+
+	// Key(s) for a field of `node` at `prefix`, if it's a key that isn't inline (inline maps take any key)
+	field_keys := func(node ct.CTypeNode, field string, prefix string) []string {
+		field_key := ct.NodeFieldKey(node, field, false, format)
+		switch {
+		case !field_key.IsKey():
+			return nil
+		case field_key.Inline:
+			if field_key.InlineMap {
+				return []string{ct.JoinKey(prefix, ct.MAP_KEY)}
+			}
+			return nil // inline struct: its fields are reached via its edge
+		case node.MapFields[field]:
+			return []string{ct.JoinKey(prefix, field_key.Key, ct.MAP_KEY)}
+		default:
+			return []string{ct.JoinKey(prefix, field_key.Key)}
+		}
+	}
 
 	// Don't concatenate the ast_path since then we can't recover
 	// the CType edge corresponding to an index (due to empty edge AST paths)
 	for ctype_edge_i, edge_ast_path := range ast_path {
 		// For each CType edge
+		ctype_edge := ctype_path[ctype_edge_i]
+		seg, ok := ct.ASTPathKeySegment(ctype_edge.Source, ctype_edge.Target, edge_ast_path, format)
+		if !ok {
+			return nil
+		}
+		pattern := seg.Pattern
+		if seg.Dash {
+			if !ctype_edge.Source.YAMLUnmarshaler {
+				return nil // nothing populates the yaml:"-" field
+			}
+			pattern = ct.JoinKey(pattern, ct.MAP_KEY) // key chosen by the custom unmarshaler
+		}
+
+		// Check for any non-custom fields of the source - won't have an AST edge out, but are params if the node is a CType.
+		path_fields := []string{}
 		for _, ast_edge := range edge_ast_path {
-			// For each AST edge on the CType edge
 			if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
-				ctype_edge := ctype_path[ctype_edge_i]
-				tags := ctype_edge.Source.Tags
-
-				// Check for any non-custom fields - won't have an AST edge out, but are params if the node is a CType.
-				for other_field := range tags {
-					if other_field != field {
-						if nonCustomField(other_field, ctype_edge, all_ctype_paths) {
-							full_key := ct.AppendFieldTag(other_field, tags[other_field], key_prefix)
-							keys = append(keys, full_key)
-						}
-					}
-				}
-
-				// Append corresponding field tag to key
-				key_prefix = ct.AppendFieldTag(field, tags[field], key_prefix)
+				path_fields = append(path_fields, field)
 			}
 		}
+		if len(path_fields) > 0 {
+			for other_field := range ctype_edge.Source.Tags {
+				if !slices.Contains(path_fields, other_field) && nonCustomField(other_field, ctype_edge, all_ctype_paths) {
+					keys = append(keys, field_keys(ctype_edge.Source, other_field, key_prefix)...)
+				}
+			}
+		}
+
+		key_prefix = ct.JoinKey(key_prefix, pattern)
 	}
 
 	// Reached end of AST path => record key(s)
 	last_node := ctype_path[len(ctype_path)-1].Target
 	if !leaf_keys || len(last_node.Tags) == 0 {
-		keys = append(keys, key_prefix)
+		if leaf_keys && last_node.IsMap {
+			keys = append(keys, ct.JoinKey(key_prefix, ct.MAP_KEY))
+		} else {
+			keys = append(keys, key_prefix)
+		}
 	} else {
-		for field, tag := range last_node.Tags {
-			// Append tag to key
-			full_key := ct.AppendFieldTag(field, tag, key_prefix)
-			keys = append(keys, full_key)
+		for field := range last_node.Tags {
+			keys = append(keys, field_keys(last_node, field, key_prefix)...)
 		}
 	}
 
-	return keys
+	slices.Sort(keys)
+	return slices.Compact(keys)
 }

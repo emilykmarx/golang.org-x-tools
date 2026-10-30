@@ -24,6 +24,8 @@ type CTypes struct {
 	Graph   CTypeGraph
 	List    CTypeList
 	Latency map[string]telemetry.LatencyTotal // operation => timing
+	// Config file format whose unmarshaling library determines edges' key segments (for DOT labels); "" means YAML
+	Format Format
 }
 
 type CTypeGraph graph.Graph[CTypeHash, CTypeNode]
@@ -77,6 +79,9 @@ type CTypeNode struct {
 	IsMap          bool
 	MapFields      map[string]bool // Field name => true if field is a map (populated if struct)
 	EmbeddedFields map[string]bool // Field name => true if field is embedded (populated if struct)
+	// Whether *T has a custom unmarshaler that the library calls instead of its default rules (see fieldkeys.go)
+	YAMLUnmarshaler bool // gopkg.in/yaml.v2 Unmarshaler
+	TextUnmarshaler bool // encoding.TextUnmarshaler (used by go-yaml for scalars)
 
 	// Parameters this CType can access, and via which fields
 	Stored_down  map[Stored]struct{} // becomes irrelevant once entire push down pass is done
@@ -246,7 +251,7 @@ func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_info *NeighInfo) (TypeNameE
 	// TODO(CT) if we combine nodes, do we need to add the methods of the new type?
 	CopyMethods(&new_ctype)
 	CopyTags(&new_ctype)
-	CopyMapInfo(&new_ctype)
+	CopyKeyInfo(&new_ctype)
 
 	err := c.Graph.AddVertex(new_ctype, func(vp *graph.VertexProperties) {})
 	// Shouldn't have existed - checked that above
@@ -264,44 +269,11 @@ const (
 	Field EdgeAttrKey = "Field"
 )
 
-// Param key corresponding to struct field:
-// tag key if `tag` contains a yaml tag, else lowercase field name.
-func FieldToParamKey(field string, tag string) string {
-	param_key := ""
-
-	// Get yaml tag key, if any
-	// `(...) yaml:"[<key>][,<flag1>[,<flag2>]]" (...)`
-
-	yaml_prefix := "yaml:\""
-	yaml_idx := strings.Index(tag, yaml_prefix)
-	if yaml_idx != -1 {
-		key_idx := yaml_idx + len(yaml_prefix)
-		end_tag_idx := strings.Index(tag[key_idx:], "\"")
-		yaml_tag := tag[key_idx : key_idx+end_tag_idx]
-		tag_parts := strings.Split(yaml_tag, ",")
-		param_key = tag_parts[0]
-		if param_key == "-" {
-			param_key = ""
-		}
-	} else {
-		// No yaml tag => take key as lowercased field name:
-		// Field could either be a key in the raw content (iff field name is uppercase, and lowercased version is in raw content),
-		// or copied/otherwise derived from the raw content after unmarshaling
-		param_key = strings.ToLower(field)
-	}
-	return param_key
-}
-
-func AppendFieldTag(field string, tag string, key string) string {
-	key_part := FieldToParamKey(field, tag)
-	key = fmt.Sprintf("%v.%v", key, key_part)
-	return strings.Trim(key, ".")
-}
-
 // Convert edge data (any type) to DOT attributes (map[string]string)
 func (c *CTypes) edgeDataToAttributes(edge graph.Edge[CTypeHash]) map[string]string {
-	// Assume already done (e.g. serializing a graph produced by deserializing)
-	if edge.Properties.Attributes != nil {
+	// Assume already done (e.g. serializing a graph produced by deserializing).
+	// (Check length, not nil: the graph library creates edges with an empty Attributes map.)
+	if len(edge.Properties.Attributes) > 0 {
 		return edge.Properties.Attributes
 	}
 
@@ -310,23 +282,26 @@ func (c *CTypes) edgeDataToAttributes(edge graph.Edge[CTypeHash]) map[string]str
 	all_tags := []string{}
 	parent_node, err := c.Graph.Vertex(edge.Source)
 	CheckErr(err)
+	child_node, err := c.Graph.Vertex(edge.Target)
+	CheckErr(err)
+	format := c.Format
+	if format == "" {
+		format = YAML
+	}
 
 	for _, edge_ast_path := range edge_data {
-		// For each possible AST path from one CType to another: get field name(s)
-		ast_path_tags := ""
-		for _, ast_edge := range edge_ast_path {
-			if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
-				tag := parent_node.Tags[field]
-				if tag != "" {
-					// Is it possible to have multiple fields in same AST path? Concatenate them all for now
-					ast_path_tags = AppendFieldTag(field, tag, ast_path_tags)
-				} else {
-					// Check for empty tag already done when adding node - ignore
-				}
-			}
-			if ast_path_tags != "" {
-				all_tags = append(all_tags, ast_path_tags)
-			}
+		// For each possible AST path from one CType to another: get its config file key segment, as for param keys
+		// (MAP_KEY for map keys, and for yaml:"-" fields, whose key a custom unmarshaler picks)
+		seg, ok := ASTPathKeySegment(parent_node, child_node, edge_ast_path, format)
+		if !ok {
+			continue // can't produce a key (e.g. field isn't a key)
+		}
+		label := seg.Pattern
+		if seg.Dash {
+			label = JoinKey(label, MAP_KEY)
+		}
+		if label != "" {
+			all_tags = append(all_tags, label)
 		}
 	}
 

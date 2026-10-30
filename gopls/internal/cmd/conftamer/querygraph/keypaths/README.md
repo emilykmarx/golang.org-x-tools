@@ -1,7 +1,7 @@
 # keypaths
 
 For each param key in a csv, find the path(s) through a serialized Unmarshaler Subgraph that produce that key.
-This is roughly the inverse of `ASTPathToParams` in `dlv/params.go` (which goes path => key).
+This is roughly the inverse of `ASTPathToParams` in `dlv/params.go` (which goes path => key). Both build each edge's key segment with `ct.ASTPathKeySegment` (`conftamer/keysegments.go`), so they follow the same rules.
 
 ## Usage
 ```
@@ -54,14 +54,14 @@ The search runs depth-first from every root of the graph, consuming the key one 
   - `yaml:"-"` fields are skipped by go-yaml. See "Custom unmarshalers" below for when they're followed anyway.
   - `,inline` fields contribute no key segment of their own. An inline map collects all other keys.
   - Fields with no tag for the format are excluded (see "Untagged fields").
-- **Edge segment:** an edge's key segment is built from its AST paths, keying each field on the path with `ct.GetFieldKey`. An AST path through a field that isn't a key gives no segment, so that path isn't followed. An edge with no field segment, such as an inline field or a slice element, is followed without consuming any of the key.
+- **Edge segment:** an edge's key segment is built from its AST paths by `ct.ASTPathKeySegment`, keying each field on the path with `ct.GetFieldKey`. An AST path through a field that isn't a key gives no segment, so that path isn't followed. An edge with no field segment, such as an inline field or a slice element, is followed without consuming any of the key.
   - **Embedded fields** (`T`, `*T`, `pkg.T`) are keyed like any other field: by their yaml tag if they have one, so `""` for `yaml:",inline"`. Untagged embedded fields are excluded (see "Untagged fields"). go-yaml only inlines an embedded field with `,inline`, unlike encoding/json.
     - The graph's AST path for an embedded field has no `Field:` entry, because `ASTPath` only records field names and embedded fields have none.
     - So an edge is treated as an embedded field when its AST path starts `StructType.Fields`, `FieldList.List` and has no `Field:` entry. The field name is the target's type name, which must appear in the source's tags. (Graphs now also record each node's `EmbeddedFields`.)
 - **Map keys:** these are matched as go-yaml matches them.
   - A `MapType.Value` entry in an edge's AST path consumes exactly one key segment, whatever it is: the map key. For example, `scrape_configs.http_headers.X-Fuzz-Source.files` goes `HTTPClientConfig =http_headers=> Headers =(inline field, map key X-Fuzz-Source)=> Header`, then ends at field `files`.
   - An AST path with `MapType.Key` isn't followed, because the key type decodes the key's name, not a config section. In Prometheus this is `model.LabelSet => model.LabelName`.
-  - A map whose value type isn't a CType has no `MapType.Value` edge. For these, the graph records which nodes are maps (`IsMap`) and which struct fields are maps (`MapFields`), in both cases after stripping pointers, slices and arrays. They are populated by `CopyMapInfo` in `conftamer/gopls.go`.
+  - A map whose value type isn't a CType has no `MapType.Value` edge. For these, the graph records which nodes are maps (`IsMap`) and which struct fields are maps (`MapFields`), in both cases after stripping pointers, slices and arrays. They are populated by `CopyKeyInfo` in `conftamer/gopls.go`.
     - If no field and no key-consuming edge matches at a node, one remaining segment matches as a map key when the node is a map or has an inline map field. A map field's key followed by one segment also matches. The path ends at that node.
     - For example, `scrape_configs.params.fuzz_job` ends at `net/url.Values`. `remote_write.headers.X-SINK-SOURCE` ends at `/config.RemoteWriteConfig`, the struct holding the `map[string]string` field, consistent with the "section containing that key" overapproximation above.
     - Only one level of map is handled: `map[string]map[string]string` matches one segment, not two.

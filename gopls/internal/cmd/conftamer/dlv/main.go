@@ -22,7 +22,7 @@ import (
 func main() {
 	var dlv_port int
 	var msg_send_funcs arrayFlags
-	var test_pkg, test_name, unmarshaler_subgraph, accessors, module_prefix, output_path, dump_params string
+	var test_pkg, test_name, unmarshaler_subgraph, accessors, module_prefix, output_path, dump_params, format_arg string
 	flag.IntVar(&dlv_port, "dlv-port", 4040, "Listening port for dlv - if multiple tests running, will increment for each")
 	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
 	flag.StringVar(&test_pkg, "test-pkg", "", "Package of test to run (full name)")
@@ -32,6 +32,7 @@ func main() {
 	flag.Var(&msg_send_funcs, "send-funcs", "Functions that send messages (format: --send-funcs='f1' --send-funcs='f2'")
 	flag.StringVar(&dump_params, "dump-params", "", "Whether to just dump all params reachable from the given type, rather than tracking sends")
 	flag.StringVar(&output_path, "output-path", "", "Filename for final output")
+	flag.StringVar(&format_arg, "format", string(ct.YAML), "Config file format: yaml (follow gopkg.in/yaml.v2) or json (follow encoding/json; not yet supported) - use the format the graph was generated with")
 	flag.Parse()
 
 	if module_prefix == "" || unmarshaler_subgraph == "" || output_path == "" || // always used
@@ -40,7 +41,12 @@ func main() {
 		log.Fatalf("Missing mandatory argument")
 	}
 
-	Run(dlv_port, module_prefix, test_pkg, test_name, unmarshaler_subgraph, accessors, msg_send_funcs, output_path, dump_params)
+	format, err := ct.ParseFormat(format_arg)
+	if err != nil {
+		log.Fatalf("--format: %v", err)
+	}
+
+	Run(dlv_port, module_prefix, test_pkg, test_name, unmarshaler_subgraph, accessors, msg_send_funcs, output_path, dump_params, format)
 }
 
 // Allow array CLI arg
@@ -65,6 +71,7 @@ type ClientInfo struct {
 	test_name            string
 	msg_send_funcs       []string
 	msg_taint            parsetests.AllTaint
+	format               ct.Format
 }
 
 // The serialized list isn't prefix-cut (so it can be queried by full type name), but the serialized graph's
@@ -81,7 +88,8 @@ func shortHashList(list ct.CTypeList, module_prefix string) ct.CTypeList {
 }
 
 func Run(dlv_port int, module_prefix string, test_pkg string, test_name_arg string,
-	unmarshaler_subgraph_file string, accessors_file string, msg_send_funcs []string, output_path string, dump_params string) {
+	unmarshaler_subgraph_file string, accessors_file string, msg_send_funcs []string, output_path string, dump_params string,
+	format ct.Format) {
 
 	// 1. Load the CTypes graphs
 	g, m := ct.Deserialize(unmarshaler_subgraph_file)
@@ -103,7 +111,7 @@ func Run(dlv_port int, module_prefix string, test_pkg string, test_name_arg stri
 	_, accessor_leaves, err := graph.RootsLeaves(accessors.Graph)
 	ct.CheckErr(err)
 	msg_taints := []parsetests.AllTaint{}
-	client_info := ClientInfo{module_prefix: module_prefix, unmarshaler_subgraph: unmarshaler_subgraph,
+	client_info := ClientInfo{module_prefix: module_prefix, format: format, unmarshaler_subgraph: unmarshaler_subgraph,
 		accessors: accessors, accessor_leaves: accessor_leaves,
 		methods: methods, test_pkg: test_pkg, msg_send_funcs: msg_send_funcs, msg_taint: make(parsetests.AllTaint)}
 

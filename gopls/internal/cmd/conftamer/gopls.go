@@ -61,9 +61,12 @@ func CopyTags(node *CTypeNode) {
 	node.Tags = tags
 }
 
-// Populate whether n and its fields (if struct) are maps, and which fields are embedded
-func CopyMapInfo(node *CTypeNode) {
+// Populate info needed to map config file keys to the node: whether it and its fields (if struct) are maps,
+// which fields are embedded, and whether it has custom unmarshalers
+func CopyKeyInfo(node *CTypeNode) {
 	node.IsMap = IsMap(node.TypeInfo)
+	node.YAMLUnmarshaler = ImplementsYAMLUnmarshaler(node.TypeInfo)
+	node.TextUnmarshaler = ImplementsTextUnmarshaler(node.TypeInfo)
 	struct_info := IsStruct(node.TypeInfo)
 	if struct_info == nil {
 		return
