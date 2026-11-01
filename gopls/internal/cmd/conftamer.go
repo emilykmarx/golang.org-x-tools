@@ -33,6 +33,7 @@ type Conftamer struct {
 	accessors            *ct.CTypes
 	log                  *slog.Logger
 	format               ct.Format
+	scalar_like          map[ct.FullTypeName]bool // cache for scalarLike
 
 	ConfigPath string `flag:"c,config" help:"YAML file specifying the config fields (alternative to passing them as flags)"`
 	ConftamerConfig
@@ -221,6 +222,26 @@ func (c *Conftamer) classifyUnmarshaler(node *ct.CTypeNode) {
 	graph.Logf(c.log, slog.LevelInfo, "UnmarshalYAML of %v decodes into: %v (decoded fields %v)", ct.CTypeNodeHash(*node), node.UnmarshalKinds, ct.KeyFieldNames(*node))
 }
 
+// Whether config values of the type are scalars (see ct.CTypeNode.ScalarLike), as its node would be classified if added:
+// from ct.CopyKeyInfo, or for types with a custom UnmarshalYAML, from classifyUnmarshaler
+func (c *Conftamer) scalarLike(typ golang.TypeInfo) bool {
+	name := ct.TypeName(typ.TypeInfo)
+	if scalar, ok := c.scalar_like[name]; ok {
+		return scalar
+	}
+	if _, exists := c.graph().GetHash(name); exists {
+		return false // only non-scalar types are added
+	}
+	node := ct.CTypeNode{TypeInfo: typ.TypeInfo.Type(), Names: []ct.FullTypeName{name}, GoplsInfo: []golang.TypeInfo{typ}}
+	ct.CopyKeyInfo(&node)
+	c.classifyUnmarshaler(&node)
+	if c.scalar_like == nil {
+		c.scalar_like = map[ct.FullTypeName]bool{}
+	}
+	c.scalar_like[name] = node.ScalarLike
+	return node.ScalarLike
+}
+
 // Whether the parent field(s) on the AST path from parent to child aren't keys in the config file,
 // following the unmarshaling library for c.format (see ct.GetFieldKey). That includes our deliberate exception
 // for untagged fields (see ct.FieldKey.Untagged; querygraph/configkeys makes the same exception).
@@ -307,6 +328,13 @@ func (c *Conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 		return nil
 	}
 
+	// For the Unmarshaler Subgraph, don't add types whose config values are scalars (e.g. a custom unmarshaler decodes
+	// a string): no config keys are at or below them, so they're values of their parents' fields, not CTypes
+	if !c.findingAccessors() && c.scalarLike(typ) {
+		graph.Logf(c.log, slog.LevelInfo, "Not adding scalar-like type %v", cur_name)
+		return nil
+	}
+
 	// 1. Add the CType to the graph, combining with neighbor node if they're the same type.
 	graph.Logf(c.log, slog.LevelDebug, "ADD CTYPE %v", cur_name)
 
@@ -345,18 +373,6 @@ func (c *Conftamer) addReachableCTypes(typ golang.TypeInfo, neigh_find NeighFind
 	// now that we've handled what we needed to (combining and adding edges)
 	if existed == ct.TypeNameExists {
 		return nil
-	}
-
-	// For the Unmarshaler Subgraph, don't look for children of types whose config values are scalars
-	// (e.g. a custom unmarshaler decodes a string): no config keys are below them
-	if !c.findingAccessors() && neigh_find.children {
-		own_hash, _ := c.graph().GetHash(cur_name)
-		own_node, err := c.graph().Graph.Vertex(own_hash)
-		ct.CheckErr(err)
-		if own_node.ScalarLike {
-			graph.Logf(c.log, slog.LevelInfo, "Not finding children of scalar-like type %v (unmarshal kinds %v)", cur_name, own_node.UnmarshalKinds)
-			neigh_find.children = false
-		}
 	}
 
 	// 3. Find new neighbors (direct parents and/or children), and nodes reachable from them -
