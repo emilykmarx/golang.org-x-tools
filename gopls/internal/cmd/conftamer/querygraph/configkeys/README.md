@@ -1,10 +1,20 @@
 # configkeys
 
-Step (2) of the config-tracing workflow: map config keys to their paths through a serialized Unmarshaler Subgraph (from `gopls conftamer`), with each key's `section keys` and the kind of value it holds. It also writes the config file's values and keys for step (1), which searches the module's memory for them.
+Finds every config key in the two input files:
+- An Unmarshaler Subgraph
+  - Key = pattern the graph allows, e.g.:
+    - `global.external_labels.*`
+    - `scrape_configs.*.role`
+    - `global.scrape_interval`
+- A concrete config file (or a keys file)
+  - Key = concrete key, e.g.:
+    - `global.external_labels.cluster`
+    - `scrape_configs.kubernetes_sd_configs.role`
+    - `global.scrape_interval`
 
-Keys come from two places:
-- **Concrete keys** from a config file (or a keys file): each is matched depth-first through the graph (see "How concrete keys are matched").
-- **Patterns** for all keys the graph allows, enumerated from the roots, with `*` for any one segment: map keys, and keys a custom unmarshaler picks for `yaml:"-"` fields (see "How patterns are enumerated"). Useful for statistics on keys that aren't in the config. This replaces `dlv --dump-params`.
+For each key, find other keys in the same section.
+
+For each concrete key, output the corresponding values.
 
 Each edge's key segment comes from `ct.ASTPathKeySegment` (`conftamer/keysegments.go`), which the DOT edge labels also use, so they follow the same rules.
 
