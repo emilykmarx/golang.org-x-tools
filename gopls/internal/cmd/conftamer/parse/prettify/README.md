@@ -8,7 +8,9 @@ With `--split-roots`, it also splits the graph into smaller subgraphs that are e
 go run . --infile <graph serialized by Serialize, e.g. unmarshaler_subgraph.text> \
   --outfile <output .gv, e.g. unmarshaler_subgraph_pretty.gv> \
   [--module-prefix <module as in go.mod, e.g. github.com/prometheus/prometheus>] \
-  [--split-roots] [--misc-max-nodes <n, default 10>]
+  [--split-roots] [--misc-max-nodes <n, default 10>] \
+  [--node-attrs <csv of extra node attributes> [--keep-nodes-with <column of that csv>]] \
+  [--exclude-nodes <regex>]
 ```
 Requires `dot` (graphviz), and for `--split-roots`, the Python packages `igraph` and `pydot`.
 
@@ -18,6 +20,14 @@ Below, `<stem>` is `--outfile` without its extension.
   - `pkg`: the node's package
   - `label`: a short label
   - `type`: the full type name. This is a copy of the node ID, because gephi only shows the ID in Data Lab, not Overview.
+  - With `--node-attrs`: the csv's other columns, for the node in its `node` column (named as in `--infile`, i.e. with the module prefix cut). Rows for nodes not in the graph are ignored, and nodes without a row get none. Columns named like DOT attributes take effect in graphviz, e.g. `fillcolor`, `style`, `fontcolor`; gephi imports all of them as node attributes (e.g. to partition or size by). For example, `querygraph/configkeys/stats/stats.py` writes `node_coverage.csv`.
+
+With `--keep-nodes-with <column>`, only nodes whose `--node-attrs` value in that column is set and not `0` or `false` are kept, e.g. `--keep-nodes-with full_keys` with `node_coverage.csv` keeps the nodes that have full keys. The other nodes are contracted away rather than just deleted, so the kept nodes stay connected:
+- Each path from a kept node through removed nodes to another kept node becomes one edge. Its `Field` joins the `Field`s along the path with `.`, e.g. `/config.Config -> /config.AlertmanagerConfig` gets `Field=alerting.alertmanagers` (a `Field` with alternatives is written `{a,b}`, and several paths' labels are comma-separated). Its `contracted` attribute lists the removed nodes on the paths, e.g. `/config.AlertingConfig,/config.AlertmanagerConfigs`.
+- If the two kept nodes already have a direct edge, it's left as it is.
+- It's applied before `--split-roots`, so the split works on the reduced graph.
+
+With `--exclude-nodes <regex>`, nodes whose name (as in `--infile`) matches the regex aren't graphed, and neither are the nodes that are only reachable through them: those reachable from a root of the graph before, but not once the matching nodes are removed. A node also reachable some other way stays. E.g. excluding the unmatched Docker SD configs also drops `moby.Filter`, which only they use, but not `HTTPClientConfig`. It's applied before `--keep-nodes-with`.
 
 Every `.gv` that gets a `dot` layout is deleted afterwards, leaving only the `.gv.dot`.
 
