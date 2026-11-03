@@ -57,18 +57,25 @@ One row per key, with columns `param_key,source,pattern,values,value kind,Unmars
 - `Unmarshaler`: the distinct last types on the key's paths, joined with `; `
 - `Num Unmarshalers`: the number of distinct Unmarshalers. It's 0 for keys with no full path, even though `Unmarshaler` then lists the last types of the partial paths.
 - `Unmarshaler Path`: all paths for the key, joined with `; `, e.g. `/config.Config => /config.ScrapeConfig`
-- `section keys`: the keys in the section directly containing the key that can be reached without following any edge beyond the key's own paths in `Unmarshaler Path`. Joined with `; `.
-  - It's the union over the key's full paths, and empty for keys with no full path.
-  - It always includes the key itself, plus the Unmarshaler's key fields (its decoded fields, if it has `DecodedFields`) that have no outgoing edge in the graph, or whose edge goes to a scalar-like type.
-  - Following go-yaml, unexported fields are skipped.
-  - Everything that needs an edge is excluded:
-    - fields whose type is a non-scalar node in the graph, e.g. `scrape_configs.params` (`url.Values`). Fields of scalar-like types, e.g. `scrape_configs.scrape_interval` (`model.Duration`), are included.
-    - fields of inlined structs, e.g. `HTTPClientConfig`'s `scrape_configs.bearer_token_file`
-    - `yaml:"-"` fields
-  - For example, `scrape_configs.scrape_failure_log_file` gets `scrape_configs.job_name` and `scrape_configs.scrape_interval`, but not `scrape_configs.params`.
-  - `*` stands for any map key. Map fields are listed as `<field key>.*`, and an inline map as `<prefix>.*`.
-  - Keys whose path ends in a map key, or in a dynamic custom unmarshaler absorbing the rest of the key, get just the map's or type's `<prefix>.*`, e.g. `remote_write.headers.*` or `global.external_labels.*`.
-  - If an edge used up the rest of the key, the section is that edge's source. If the edge ended with a map key, it's the map's `.*` instead, e.g. `scrape_configs.proxy_connect_header.*`.
+- `section keys`: the keys in the section containing the key, joined with `; `.
+  - **A section** is the keys of one Unmarshaler (the last type on a key's path: the struct whose field holds the value) at one place in the file, i.e. with the same **parent key** (the key minus its last segment, e.g. `alerting.alertmanagers` for `alerting.alertmanagers.timeout`). Its keys are the Unmarshaler's key fields (its decoded fields, if it has `DecodedFields`) that hold scalar values themselves, i.e. that need no edge beyond the key's own paths in `Unmarshaler Path`.
+  - It always includes the key itself. It's the union over the key's full paths, and empty for keys with no full path.
+  - These fields of the Unmarshaler are excluded:
+    - fields whose type is another node in the graph, other than a map of scalars (see Maps below): their keys are in that node's sections, e.g. `scrape_configs.relabel_configs` (`relabel.Config`). Fields of scalar-like types have no node, so they're included, e.g. `scrape_configs.scrape_interval` (`model.Duration`). (In older graphs with scalar-like nodes, fields with an edge to one are included too.)
+    - fields of inlined structs: their keys have the inlined type as Unmarshaler, so they form their own section at the same parent key, e.g. `HTTPClientConfig`'s `scrape_configs.bearer_token_file`
+    - fields that aren't keys: unexported (following go-yaml), untagged (our exception), and `yaml:"-"`
+  - For example, `scrape_configs.scrape_failure_log_file` gets `scrape_configs.job_name`, `scrape_configs.scrape_interval` and `scrape_configs.params.*`, but not `scrape_configs.relabel_configs.action`.
+  - Another example: the section of `alerting.alertmanagers.timeout` is the 4 keys `alerting.alertmanagers.api_version`, `.path_prefix`, `.scheme` and `.timeout`, of `/config.AlertmanagerConfig`. Its other fields aren't in it:
+    - `RelabelConfigs`, `AlertRelabelConfigs` and `SigV4Config` are other nodes: e.g. `alerting.alertmanagers.relabel_configs.action` is in the section of `/model/relabel.Config` at `alerting.alertmanagers.relabel_configs`.
+    - `HTTPClientConfig` is inlined: `alerting.alertmanagers.bearer_token_file` is in `HTTPClientConfig`'s section at `alerting.alertmanagers`.
+    - `ServiceDiscoveryConfigs` is `yaml:"-"`: its keys come from the SD configs, e.g. `alerting.alertmanagers.kubernetes_sd_configs.role`.
+  - **Maps:** `*` stands for any map key.
+    - A map's values (`<field key>.*`, or `<prefix>.*` for an inline map) are in the section of the struct holding the map, like its other fields; so for a map field, the parent key is the key minus its last two segments. A section is meant to group keys a user would consider closely related, so this holds whether or not the map type is its own node in the graph (it is if it's a named map type, like `type ProxyHeader map[string][]Secret`, or a type whose custom unmarshaler decodes a map, like `labels.Labels`; an unnamed `map[...]...` field type has no node).
+      - E.g. `remote_read.headers.*` (an unnamed map) and its instances, like `remote_read.headers.X-Fuzz-Remote-Read`, are in `RemoteReadConfig`'s section at `remote_read`, with `remote_read.url`.
+      - E.g. `scrape_configs.proxy_connect_header.*` (`config.ProxyHeader`) is in `ProxyConfig`'s section at `scrape_configs`, with `scrape_configs.proxy_url`; and `global.external_labels.*` (`labels.Labels`) is in `GlobalConfig`'s section. The key's path and Unmarshaler are still the map's node.
+    - Only maps of scalars end a key. If a map's values are another node, its keys continue below, e.g. `scrape_configs.http_headers.*.values` is in the section of `config.Header`.
+  - Keys whose path ends in a dynamic custom unmarshaler absorbing the rest of the key get just the type's `<prefix>.*`.
+  - In older graphs with scalar-like nodes, a key whose last edge used up the rest of it is in the section of that edge's source.
   - Where several Unmarshalers are possible, their sections are combined. For example, `scrape_configs.kubernetes_sd_configs.role` gets the combined sections of all 6 SD configs that have a `role` field.
 
 Type names have the module prefix removed.
@@ -140,8 +147,8 @@ The search runs depth-first from every root of the graph, consuming the key one 
 
 ## How patterns are enumerated
 Depth-first from every root (or `--root`), never revisiting a node already on the current path, following the same rules as matching (`enumerate.go` mirrors `dfs` in `match.go`), so that each concrete key's full path is also a path of the pattern it instantiates:
-- At each node, its `section keys` fields are patterns ending at the node: `<prefix>.<field key>`, `<prefix>.<map field key>.*`, or `<prefix>.*` for an inline map. Map fields whose values are scalar-like nodes are reached via their edge instead, as matching does.
-- A map node with no key-consuming map edge (`IsMap`) gives `<prefix>.*`.
+- At each node, its `section keys` fields are patterns ending at the node: `<prefix>.<field key>`, `<prefix>.<map field key>.*`, or `<prefix>.*` for an inline map. Fields whose type is a map node, and map fields whose values are scalar-like nodes, are reached via their edge instead, as matching does.
+- A map node with no key-consuming map edge (`IsMap`) gives `<prefix>.*`, in the section of the node holding the map field.
 - Edges are followed with their key segment appended. `yaml:"-"` edges are followed only from dynamic unmarshalers, as a `*` segment. An edge to a scalar-like node ends a pattern there, unless the node's field already gave that key (matching stops at the field) or the edge consumes nothing.
 - A dynamic non-struct (e.g. `discovery.Configs`) also gives `<prefix>.*` with the ` (custom UnmarshalYAML)` suffix, e.g. `scrape_configs.*.*`.
 - So keys built at runtime appear as `*`: e.g. Prometheus `<Name()>_sd_configs` (`RegisterConfig` and `reflect.StructOf` in `discovery/registry.go`) are `scrape_configs.*`, so `scrape_configs.*.role` is one pattern for all 6 SD configs with a `role` field.

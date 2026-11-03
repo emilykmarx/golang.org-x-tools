@@ -76,32 +76,69 @@ type sectionField struct {
 	key         string // with MAP_KEY for any key of a map field or inline map
 	kind        ct.ValueKind
 	scalar_edge bool // the field has an edge out to a scalar-like type
+	map_node    bool // the field has an edge out to a leaf map node (see leafMap): its values are keys here
+}
+
+// Whether the node is a map whose values are scalars, so no edge goes on from its map keys
+// (e.g. config.ProxyHeader, url.Values, or labels.Labels, whose custom unmarshaler decodes a map)
+func (f *finder) leafMap(node ct.CTypeHash) bool {
+	n, err := f.g.Vertex(node)
+	ct.CheckErr(err)
+	if !n.IsMap {
+		return false
+	}
+	for _, e := range f.adj[node] {
+		for _, seg := range e.segments {
+			if strings.Split(seg.Pattern, ".")[0] == MAP_KEY {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // Keys in the section of `node` at `prefix` that are reachable without following any edge out of `node`:
 // the node's key fields that have no edge out - except edges to scalar-like types (e.g. model.Duration), whose
-// values are scalars, so they're keys of this section.
-// So fields of inlined structs, yaml:"-" fields, and fields whose type is a non-scalar node in the graph are excluded.
+// values are scalars, and to leaf map nodes (see leafMap), whose values are in the section of the struct holding the
+// map, as for a map field with no node - so they're keys of this section.
+// So fields of inlined structs, yaml:"-" fields, and fields whose type is another node in the graph are excluded.
 // Fields that aren't keys (see fieldKey) are skipped. MAP_KEY stands for any key of a map field or inline map.
 func (f *finder) sectionFields(node ct.CTypeHash, prefix string) []sectionField {
 	n, err := f.g.Vertex(node)
 	ct.CheckErr(err)
 
-	// Field keys with an edge out, by whether the edge's target is scalar-like
-	edge_keys := map[bool]map[string]bool{false: {}, true: {}}
+	// Field keys with an edge out, by what the edge's target is
+	scalar_edge, other_edge := map[string]bool{}, map[string]bool{}
+	map_edge := map[string]ct.ValueKind{} // => kind of the map's values
 	for _, e := range f.adj[node] {
 		target, err := f.g.Vertex(e.target)
 		ct.CheckErr(err)
 		for _, seg := range e.segments {
-			edge_keys[target.ScalarLike][strings.Split(seg.Pattern, ".")[0]] = true
+			edge_key := strings.Split(seg.Pattern, ".")[0]
+			switch {
+			case target.ScalarLike:
+				scalar_edge[edge_key] = true
+			case f.leafMap(e.target):
+				map_edge[edge_key] = target.Kind
+			default:
+				other_edge[edge_key] = true
+			}
 		}
 	}
 
 	fields := []sectionField{}
 	add := func(edge_key string, key string, field string) {
-		if !edge_keys[false][edge_key] {
-			fields = append(fields, sectionField{key: key, kind: ct.NodeFieldKind(n, field), scalar_edge: edge_keys[true][edge_key]})
+		if other_edge[edge_key] {
+			return
 		}
+		sf := sectionField{key: key, kind: ct.NodeFieldKind(n, field), scalar_edge: scalar_edge[edge_key]}
+		if kind, ok := map_edge[edge_key]; ok {
+			sf.map_node, sf.kind = true, kind
+			if !strings.HasSuffix(key, "."+MAP_KEY) {
+				sf.key = ct.JoinKey(key, MAP_KEY) // e.g. labels.Labels, a struct decoded as a map
+			}
+		}
+		fields = append(fields, sf)
 	}
 	for _, field := range ct.KeyFieldNames(n) {
 		field_key := f.fieldKey(n, field, false)
@@ -131,11 +168,13 @@ func (f *finder) sectionKeys(node ct.CTypeHash, prefix string, key string) []str
 	return slices.Compact(keys)
 }
 
-// Section containing `key`, when the last edge followed consumed the rest of it: the section of the edge's source,
-// or a map's section, if the edge's segment ended with a map key
+// Section containing `key`, when the last edge followed consumed the rest of it, or ended at a leaf map node whose
+// map key is the rest of it: the section of the edge's source (the struct holding the field, or the map field).
+// If no edge consumed part of the key, just the key's `<prefix>.*`.
 func (f *finder) consumedSection(last lastConsume, key string) []string {
-	if pattern_parts := strings.Split(last.pattern, "."); pattern_parts[len(pattern_parts)-1] == MAP_KEY {
-		return []string{ct.JoinKey(last.prefix, ct.JoinKey(pattern_parts[:len(pattern_parts)-1]...), MAP_KEY)}
+	if last.src == "" {
+		parts := strings.Split(key, ".")
+		return []string{ct.JoinKey(ct.JoinKey(parts[:len(parts)-1]...), MAP_KEY)}
 	}
 	return f.sectionKeys(last.src, last.prefix, key)
 }
@@ -266,7 +305,14 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 	// (so no edge with MapType.Value): a map node + one segment, or a map field's key + one segment
 	if !consumed {
 		if map_section, kind, ok := f.mapKeyMatch(n, remaining); ok {
-			f.acc.recordFull(f.pathString(path, module_prefix), []string{ct.JoinKey(prefix, map_section)}, kind)
+			// A map's values are in the section of the struct holding the map, as for the struct's other fields:
+			// this node's, for a map field or inline map, or for a map that's its own node, the node holding the
+			// field that led here (as in enumerate)
+			section := f.sectionKeys(node, prefix, key)
+			if n.IsMap && map_section == MAP_KEY {
+				section = f.consumedSection(last, key)
+			}
+			f.acc.recordFull(f.pathString(path, module_prefix), section, kind)
 			return
 		}
 	}
@@ -314,7 +360,7 @@ func (f *finder) recordPartial(path []ct.CTypeHash, key, remaining string, modul
 }
 
 // Whether `remaining` is a map key of the node (if a map), or a map field's key followed by a map key.
-// If so, also return the map's section key relative to the node (MAP_KEY, or <field key>.MAP_KEY),
+// If so, also return the map's key pattern relative to the node (MAP_KEY, or <field key>.MAP_KEY),
 // and the kind of the map's values.
 func (f *finder) mapKeyMatch(n ct.CTypeNode, remaining string) (string, ct.ValueKind, bool) {
 	field_key, map_key, found := strings.Cut(remaining, ".")

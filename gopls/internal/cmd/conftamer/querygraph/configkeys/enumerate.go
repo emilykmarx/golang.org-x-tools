@@ -59,7 +59,7 @@ func (e *enumerator) visit(node ct.CTypeHash, prefix string, path []ct.CTypeHash
 	}
 
 	// Keys of the node's own fields (dfs: the rest of the key is a field, or a map field's key + a map key).
-	// Map fields whose values are scalar-like nodes are reached via their edges instead.
+	// Map fields whose values are scalar-like nodes, and fields of leaf map types, are reached via their edges instead.
 	fields := e.sectionFields(node, prefix)
 	section := []string{}
 	for _, field := range fields {
@@ -68,8 +68,8 @@ func (e *enumerator) visit(node ct.CTypeHash, prefix string, path []ct.CTypeHash
 	slices.Sort(section)
 	at_node := map[string]bool{}
 	for _, field := range fields {
-		if field.scalar_edge && strings.HasSuffix(field.key, MAP_KEY) {
-			continue
+		if field.map_node || (field.scalar_edge && strings.HasSuffix(field.key, MAP_KEY)) {
+			continue // emitted at the map's node, via the edge
 		}
 		e.emit(field.key, path_str, section, field.kind)
 		at_node[field.key] = true
@@ -83,8 +83,9 @@ func (e *enumerator) visit(node ct.CTypeHash, prefix string, path []ct.CTypeHash
 		}
 	}
 	if n.IsMap && !has_map_edge && prefix != "" {
+		// In the section of the struct holding the map (see sectionFields)
 		map_key := ct.JoinKey(prefix, MAP_KEY)
-		e.emit(map_key, path_str, []string{map_key}, n.Kind)
+		e.emit(map_key, path_str, e.consumedSection(last, map_key), n.Kind)
 	}
 
 	// Edges
