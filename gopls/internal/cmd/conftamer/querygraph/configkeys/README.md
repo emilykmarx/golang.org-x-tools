@@ -38,7 +38,7 @@ go run . --config .../prom-test-infra/prombench/fuzzed_prometheus.yaml --txt-dir
 - `--root` names the node as it appears in the serialized graph, i.e. with the module prefix cut. By default matching and enumeration start from every root of the graph. Other roots can be types for other files in the same format, e.g. promtool's test files, and they can add spurious matches and patterns.
 - `--through` keeps only keys with a path through the given node, and only those paths: the keys accessible from a (possibly non-root) type, e.g. `github.com/prometheus/common/config.TLSConfig`.
 - Concrete keys come from one of:
-  - `--config`: the config file, parsed with the format's own parser (`gopkg.in/yaml.v3` nodes, or `encoding/json` tokens). Keys are the dot-separated map keys down to each scalar; list indices aren't part of keys. YAML aliases are followed (each use is a separate occurrence) and merge keys (`<<`) add the merged mapping's keys. Empty values are skipped.
+  - `--config`: the config file, parsed with the format's own parser (`gopkg.in/yaml.v3` nodes, or `encoding/json` tokens). Keys are the dot-separated map keys down to each scalar (a single value in the document, i.e. not a mapping or a list: e.g. a string, number, bool or null. A **scalar-like** type is one whose config values are always written as scalars, or lists of scalars, so no keys are at or below it, whatever Go type it's decoded into: a basic type, a slice, or a struct holding a parsed form of the value, e.g. `model.Duration`, `model.LabelNames`, `config.URL`, `relabel.Regexp`); list indices aren't part of keys. YAML aliases are followed (each use is a separate occurrence) and merge keys (`<<`) add the merged mapping's keys. Empty values are skipped.
   - `--keys-txt`: lines `<value>:<key>[,<key>...]`, e.g. `param_keys.txt`. The keys come after the last colon on each line. No values.
   - `--keys-csv`: a csv whose `param_keys` column holds comma-separated keys. No values.
 - `--txt-dir` (with `--config`) writes, as `extract_param_values.py` did:
@@ -50,6 +50,7 @@ go run . --config .../prom-test-infra/prombench/fuzzed_prometheus.yaml --txt-dir
 
 ## Output
 One row per key, with columns `param_key,source,pattern,values,value kind,Unmarshaler,Num Unmarshalers,Unmarshaler Path,section keys`:
+- `param_key`: the key, which is a concrete key or a pattern, as `source` says
 - `source`: `config` (a concrete key), `graph` (a pattern), or `both` (a pattern with no `*` that's also in the config)
 - `pattern`: for concrete keys, the patterns they instantiate via the same path, joined with `; `. Every concrete key with a full path should have one; the tool warns about any that don't.
 - `values`: for concrete keys from `--config`, their distinct values as a JSON array, in document order
@@ -121,7 +122,7 @@ The search runs depth-first from every root of the graph, consuming the key one 
     - **dynamic**: `interface{}`, or `unmarshal` used any other way, e.g. passed to a helper. The type's tags are assumed to apply, and the unmarshaler may also populate `yaml:"-"` fields under keys it picks. Examples: `ScrapeConfig` and `AlertmanagerConfig` (`discovery.UnmarshalYAMLWithInlineConfigs`) and `discovery.Configs`.
   - Types without a custom unmarshaler are scalar-like if they're a basic type, a slice of scalars, or a `TextUnmarshaler`, e.g. `config.ScrapeProtocol` and `model.LabelNames`.
   - **How the matching uses this:**
-    - **Scalar-like nodes:** never descended into. No key matches below them, and the graph builder doesn't look for their children. In `section keys`, fields of scalar-like types count as direct keys, e.g. `scrape_configs.scrape_interval`.
+    - **Scalar-like types aren't in the graph:** the graph builder doesn't add them (or anything below them), so a field of a scalar-like type is a plain field of its struct, with no edge, e.g. `scrape_configs.scrape_interval` (`model.Duration`). Its value kind is in the struct's `FieldKinds`. (Graphs built before this have scalar-like nodes marked `ScalarLike`; configkeys still handles them: they're never descended into, and fields with edges to them count as direct keys in `section keys`.)
     - **`yaml:"-"` edges:** followed only when the source's unmarshaler is dynamic, as a wildcard for one key segment. It's only tried when nothing else under the node matched, and never for the last segment, since param keys are scalar leaves. For example, `scrape_configs.kubernetes_sd_configs.api_server` goes `ScrapeConfig =(yaml:"-", any segment: kubernetes_sd_configs)=> discovery.Configs => discovery.Config => kubernetes.SDConfig`, then ends at field `api_server`.
     - **Dynamic non-structs:** if nothing below matches, the rest of the key is attributed to the node, with a ` (custom UnmarshalYAML)` suffix. That only applies when the node wasn't reached through an inline field, and some of the key was already consumed.
   - **Limitations:**
