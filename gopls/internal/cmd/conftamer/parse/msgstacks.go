@@ -113,10 +113,18 @@ func AddMsgNode(dst string, conn ConnLog, sending_types *ct.CTypes) {
 	sending_types.Graph.UpdateVertex(hash, msg_node, nil, graph.VertexAttributes(attrs))
 }
 
-// Shorten fn
+// Shorten fn: cut the module name (e.g. github.com/prometheus/prometheus), or else its organization (e.g.
+// github.com/prometheus, as in IgnoreFn), leaving a leading "/"
 func (p *Parser) ShortLabel(full string, pkg string) string {
-	label, _ := strings.CutPrefix(full, p.ModulePrefix) // always cut the module name
-	return label
+	if label, ok := strings.CutPrefix(full, p.ModulePrefix); ok {
+		return label
+	}
+	if module_org := filepath.Dir(p.ModulePrefix); module_org != "." {
+		if label, ok := strings.CutPrefix(full, module_org); ok {
+			return label
+		}
+	}
+	return full
 }
 
 // Get pkg of a fully-qualified name
@@ -253,8 +261,10 @@ func (p *Parser) IgnoreFn(fn string) bool {
 // ParserConfig holds the Parser fields that are also conftamer verb config fields
 // (embedded in both, so the verb can pass them through as a unit)
 type ParserConfig struct {
-	ModulePrefix       string         `yaml:"module_prefix" flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print and possibly ignore unmarshaler subgraph nodes)"`
-	OutputPath         string         `yaml:"output_path" flag:"out,output_path" help:"Output path for graph files"`
+	// Used by both Unmarshaler/Accessor producing and ancestry log parsing
+	ModulePrefix string `yaml:"module_prefix" flag:"m,module_prefix" help:"module as in go.mod (used to pretty-print and possibly ignore unmarshaler subgraph nodes)"`
+	OutputPath   string `yaml:"output_path" flag:"out,output_path" help:"Output path for graph files"`
+	// Specific to ancestry log parsing
 	AncestryLog        string         `yaml:"ancestry_log" flag:"s,ancestry_log" help:"A log of message sends and receives - if passed, will find send/receive ancestors from the log (rather than finding the Unmarshaler Subgraph and Accessors from the module source)"`
 	ModuleIPFiles      StringList     `yaml:"module_ip_files" flag:"ips,module_ip_files" help:"Files containing module IPs (e.g. pods and services)"`
 	ShouldFindArgTypes bool           `yaml:"find_arg_types" flag:"arg-types,find_arg_types" help:"Whether to find arg types of message ancestors"`
