@@ -242,6 +242,23 @@ func splitName(s string) []string {
 	return append(segs, s[start:])
 }
 
+// IsClosureFrame reports whether fn, a stack frame's function name, is a
+// closure, a go statement or defer wrapper, or a method value wrapper (one
+// that EnclosingFns maps to another function), rather than a declared
+// function or method.
+func IsClosureFrame(fn string) bool {
+	rest, ok := strings.CutPrefix(fn, Pkg(fn)+".")
+	if !ok {
+		return false
+	}
+	for _, s := range splitName(rest) {
+		if isClosureSeg(s) || strings.HasSuffix(s, "-fm") {
+			return true
+		}
+	}
+	return false
+}
+
 // isClosureSeg reports whether s is funcN, gowrapN or deferwrapN.
 func isClosureSeg(s string) bool {
 	for _, prefix := range []string{"func", "gowrap", "deferwrap"} {

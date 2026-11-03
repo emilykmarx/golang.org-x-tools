@@ -44,3 +44,26 @@ func TestEnclosingFns(t *testing.T) {
 		}
 	}
 }
+
+func TestIsClosureFrame(t *testing.T) {
+	for _, test := range []struct {
+		fn   string
+		want bool
+	}{
+		{"main.main", false},
+		{"github.com/prometheus/prometheus/web.(*Handler).testReady", false},
+		{"github.com/prometheus/prometheus/web.(*Handler).testReady.func1", true},
+		{"net/http.(*Server).Serve.gowrap3", true},
+		{"pkg.F.deferwrap1", true},
+		{"pkg.F.func1.2", true},
+		{"github.com/prometheus/common/route.(*Router).handle.func1", true},
+		{"pkg.(*T).Run.helper.func5", true},
+		{"pkg.T.M-fm", true},
+		{"pkg.(*T[...]).M", false},
+		{"pkg.functional", false},
+	} {
+		if got := IsClosureFrame(test.fn); got != test.want {
+			t.Errorf("IsClosureFrame(%q) = %v, want %v", test.fn, got, test.want)
+		}
+	}
+}
