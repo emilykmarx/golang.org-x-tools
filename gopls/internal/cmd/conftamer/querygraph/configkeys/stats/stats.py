@@ -9,6 +9,7 @@ Run with: uv run --with pandas --with matplotlib python stats.py [flags]
 
 import argparse
 import collections
+import fnmatch
 import glob
 import json
 import os
@@ -168,6 +169,32 @@ def load_configkeys(path, sd):
                     info["unmarshalers"].add(path_nodes(p)[-1])
         config[r.param_key] = info
     return full, config, catchall
+
+
+def read_ignore(path):
+    """Patterns of full keys to leave out of every statistic (--ignore): one per line, matched with fnmatch, so `*`
+    matches anything, dots included (e.g. `scrape_configs.azure_sd_configs.*`); blank lines and # comments skipped"""
+    if not path:
+        return []
+    return [line.strip() for line in open(path) if line.strip() and not line.lstrip().startswith("#")]
+
+
+def apply_ignore(full, config, patterns):
+    """Remove the full keys matching patterns from full, and from each concrete key's full keys; drop the concrete
+    keys left with none. Returns the numbers of full keys and concrete keys removed."""
+    ignored = {fk for fk in full if any(fnmatch.fnmatchcase(fk, p) for p in patterns)}
+    for fk in ignored:
+        del full[fk]
+    dropped = 0
+    for k in list(config):
+        c = config[k]
+        if c["full_keys"] & ignored:
+            c["full_keys"] -= ignored
+            c["unmarshalers"] = set().union(*(full[fk]["unmarshalers"] for fk in c["full_keys"]))
+            if not c["full_keys"]:
+                del config[k]
+                dropped += 1
+    return len(ignored), dropped
 
 
 def check_sections(fkdf, configkeys_csv, out):
@@ -474,6 +501,63 @@ def stacked_barh(df, cols, colors, labels, title, xlabel, path):
     plt.close(fig)
 
 
+# Confidence bins: half-open tenths ([0.5, 0.6) is 50-<60%), then exactly 1 (an inferred key whose section's
+# eligible keys are all evidence)
+CONF_BINS = [f"{10 * i}-<{10 * (i + 1)}%" for i in range(10)] + ["100%"]
+
+
+def conf_bin(c):
+    return CONF_BINS[-1] if c >= 1 else CONF_BINS[min(int(c * 10), 9)]
+
+
+def confidence(path, out, chart):
+    """The confidence of paramtrack's message => full key mappings (its label_keys.csv; paramtrack's README): one
+    mapping per (message kind, message label, full key, section); evidence mappings have confidence 1, inferred ones
+    the share of their section's keys that are evidence for the message, out of all its keys and out of its eligible
+    ones. Writes the distribution of both for the inferred mappings, and a grouped bar chart of it."""
+    lk = pd.read_csv(path, keep_default_na=False, dtype=str)
+    lk = lk[lk.full_key != ""]
+    m = lk.groupby(["message_kind", "message_label", "full_key", "section"]).agg(
+        evidence=("evidence", lambda e: (e == "True").any()), eligible=("eligible", "first"),
+        confidence_all=("confidence_all", "first"), confidence_eligible=("confidence_eligible", "first")).reset_index()
+    inf = m[~m.evidence].copy()
+    for c in ("confidence_all", "confidence_eligible"):
+        inf[c] = inf[c].astype(float)
+    out.p(f"- Mappings (message, full key, section): {len(m)}; evidence (confidence 1): {m.evidence.sum()}; "
+          f"inferred: {len(inf)}, of them eligible (could have been evidence): {(inf.eligible == 'True').sum()}; "
+          f"messages: {m[['message_kind', 'message_label']].drop_duplicates().shape[0]}")
+    for c in ("confidence_all", "confidence_eligible"):
+        out.p(f"- Inferred `{c}`: median {inf[c].median():.2f}, mean {inf[c].mean():.2f}; exactly 1: "
+              f"{pct((inf[c] >= 1).sum(), len(inf))}")
+    dist = pd.DataFrame({c: inf[c].map(conf_bin).value_counts().reindex(CONF_BINS, fill_value=0)
+                         for c in ("confidence_all", "confidence_eligible")}).rename_axis("confidence")
+    out.p("\nInferred mappings by confidence:")
+    out.table(dist, index=True)
+
+    fig, ax = plt.subplots(figsize=(9, 3.6), facecolor="#fcfcfb")
+    ax.set_facecolor("#fcfcfb")
+    x = range(len(CONF_BINS))
+    w = 0.4
+    for i, (c, color, label) in enumerate([("confidence_all", BLUE, "out of all the section's keys"),
+                                           ("confidence_eligible", ORANGE,
+                                            "out of its eligible keys (set in the config, with a searched value)")]):
+        ax.bar([j + (i - 0.5) * w for j in x], dist[c], width=w, color=color, label=label, edgecolor="#fcfcfb",
+               linewidth=2)
+    ax.set_xticks(list(x), CONF_BINS, rotation=0)
+    ax.set_xlabel("confidence (share of the section's keys that are evidence for the message)", color=INK2,
+                  fontsize=9)
+    ax.set_ylabel("inferred mappings", color=INK2, fontsize=9)
+    style(ax, f"Confidence of the {len(inf)} inferred message => full key mappings "
+              f"(plus {m.evidence.sum()} evidence mappings, all 1)")
+    ax.grid(axis="x", visible=False)
+    ax.grid(axis="y", color="#ecebe7", linewidth=0.8)
+    ax.set_ylim(0, 1.3 * dist.values.max())  # room for the legend above the bars
+    ax.legend(frameon=False, fontsize=9, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(chart, dpi=150)
+    plt.close(fig)
+
+
 # ---------------------------------------------------------------------------------------------------------------
 
 
@@ -490,6 +574,10 @@ def main():
     ap.add_argument("--argmatch", default=f"{CT}/dump_ancestors/argmatch-experiment/sweep-c30-1/needle_types.csv",
                     help="needle_types.csv of an argmatch run (step (1) results)")
     ap.add_argument("--out", default=RESULTS)
+    ap.add_argument("--label-keys", help="paramtrack's label_keys.csv (step 7): adds the distribution of its mappings' "
+                                         "confidence (STATISTICS.md, \"TO BE CATEGORIZED\")")
+    ap.add_argument("--ignore", help="File of full key patterns to leave out of every statistic, one per line, "
+                                     "matched with fnmatch (e.g. scrape_configs.azure_sd_configs.*)")
     ap.add_argument("--config-only", action="store_true",
                     help="Only the statistics the concrete config controls (STATISTICS.md, \"Statistics the concrete "
                          "config controls\"), to config_stats.md; --argmatch is unused")
@@ -506,6 +594,7 @@ def main():
     MAP_FIELDS.update(map_field_keys(args.graph))
     sd = sd_names(args.prometheus)
     full, config, catchall = load_configkeys(args.configkeys, sd)
+    n_ignored, n_dropped = apply_ignore(full, config, read_ignore(args.ignore))
     docs = read_docs(args.docs)
 
     # Per full key: section, top-level section, coverage by the config
@@ -543,6 +632,9 @@ def main():
     out.p(f"- Full keys (graph patterns, SD `*` resolved by Name()): {len(full)}; excluded catch-all patterns of "
           f"discovery.Configs' dynamic unmarshaler: {', '.join(sorted(catchall))}")
     out.p(f"- SD config types found (Name()): {len(set(sd.values()))}")
+    if args.ignore:
+        out.p(f"- Ignored (--ignore {args.ignore}): {n_ignored} full keys; {n_dropped} concrete keys left with no "
+              f"full key dropped")
     out.p(f"- Concrete keys: {len(config)}; with a full key: {sum(1 for c in config.values() if c['full_keys'])}")
     unresolved = sorted(k for k, c in config.items() if not c["full_keys"])
     if unresolved:
@@ -570,7 +662,8 @@ def main():
     secs = fkdf.groupby("section").agg(size=("key", "nunique"), in_config=("in_config", "sum"),
                                        top=("top", "first"), searchable=("searchable", "sum")).reset_index()
     secs["covered"] = secs.in_config > 0
-    check_sections(fkdf, args.configkeys, out)
+    if not args.ignore:  # (it compares with configkeys' sections, which combine ignored SD configs' keys)
+        check_sections(fkdf, args.configkeys, out)
     out.p(f"- Sections (keys with the same parent key and Unmarshaler) with at least one key in the config: "
           f"{pct(secs.covered.sum(), len(secs))}")
     sec_top = secs.groupby("top").agg(sections=("section", "size"), covered=("covered", "sum"))
@@ -862,6 +955,9 @@ def main():
     cfg_undoc = sorted(k for k, c in config.items() if not any(fk in docs for fk in c["full_keys"]))
     out.p(f"- Concrete keys whose full key isn't documented: {len(cfg_undoc)}: " + ", ".join(f"`{k}`" for k in cfg_undoc))
 
+    if args.label_keys:
+        out.h("Confidence of message => full key mappings (paramtrack's label_keys.csv)")
+        confidence(args.label_keys, out, f"{args.out}/confidence_distribution.png")
     write_visuals(fkdf, config, covered_by, searched, matched, sd, args, out)
 
     out.write()
