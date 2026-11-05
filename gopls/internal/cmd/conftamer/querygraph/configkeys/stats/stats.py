@@ -618,6 +618,13 @@ def main():
           f"{pct(keys.searchable.sum(), len(keys))}; of those in the config: "
           f"{pct(keys[keys.in_config].searchable.sum(), keys.in_config.sum())}")
 
+    # How much of each section it touches the concrete config sets (Q1: coverage)
+    cov = secs[secs.covered].copy()
+    cov["fraction_in_config"] = (cov.in_config / cov["size"]).round(2)
+    out.p(f"- In sections with a concrete key, fraction of the section's keys in the config: median "
+          f"{cov.fraction_in_config.median():.2f}, mean {cov.fraction_in_config.mean():.2f}")
+    out.p(f"- Sections where the config sets exactly one key: {pct((cov.in_config == 1).sum(), len(cov))}")
+
     # =============================================================================================================
     out.h("Q2. One key vs its section")
     out.p("Section sizes (number of full keys in the section):")
@@ -625,11 +632,6 @@ def main():
         "all sections": secs["size"].describe(),
         "sections with a concrete key": secs[secs.covered]["size"].describe()}).round(1)
     out.table(size_desc, index=True)
-    cov = secs[secs.covered].copy()
-    cov["fraction_in_config"] = (cov.in_config / cov["size"]).round(2)
-    out.p(f"- In sections with a concrete key, fraction of the section's keys in the config: median "
-          f"{cov.fraction_in_config.median():.2f}, mean {cov.fraction_in_config.mean():.2f}")
-    out.p(f"- Sections where the config sets exactly one key: {pct((cov.in_config == 1).sum(), len(cov))}")
     out.p(f"- Sections with no key step (1) could find (no string/struct kind): "
           f"{pct((secs.searchable == 0).sum(), len(secs))}, holding {secs[secs.searchable == 0]['size'].sum()} keys")
     out.p(f"  - of the sections with a concrete key: {pct((cov.searchable == 0).sum(), len(cov))}")
