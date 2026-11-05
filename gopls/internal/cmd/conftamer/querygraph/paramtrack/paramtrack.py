@@ -103,8 +103,7 @@ class Workflow:
     # Analysis phase
 
     def label_keys(self, d):
-        """Message label => Full keys: each (message, needle) row of the join, with every concrete key whose value
-        the needle is, and its full key and section"""
+        """Message label => Full keys, with a confidence for each (README.md, "label_keys.csv")"""
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
         stats.MAP_FIELDS.update(stats.map_field_keys(graph))
         sd = stats.sd_names(self.a.module_dir)
@@ -122,31 +121,54 @@ class Workflow:
             value, _, keys = line.rpartition(":")
             value_keys[value] = keys.split(",")
 
+        # Full keys that could have been evidence: set by the concrete config, with a value step 5 searched for
+        searched = set(open(self.file("3-configkeys", "param_values.txt")).read().splitlines())
+        eligible = {fk for c in config.values() if any(v.replace("\n", "\\n") in searched for v in c["values"])
+                    for fk in c["full_keys"]}
+
+        # Evidence rows: each (message, needle) row of the join, with every concrete key whose value the needle is
         rows, no_key, no_full_key = [], set(), set()
         for r in csv.DictReader(open(self.file("6-label-values", "joined.csv"), newline="")):
             base = [r["message_kind"], r["message_label"], r["needle"]]
             if r["needle"] not in value_keys:
                 no_key.add(r["needle"])
-                rows.append(base + ["", "", "", ""])
+                rows.append(base + ["", "", "", "", "", "", "", ""])
                 continue
             for k in value_keys[r["needle"]]:
                 fks = sorted(config[k]["full_keys"]) if k in config else []
                 if not fks:
                     no_full_key.add(k)
-                    rows.append(base + [k, "", "", ""])
+                    rows.append(base + [k, "", "", "", True, True, 1, 1])
                 for fk in fks:
-                    for s in sections[fk]:
-                        rows.append(base + [k, fk, s, "; ".join(sorted(section_keys[s]))])
+                    for sec in sections[fk]:
+                        rows.append(base + [k, fk, sec, "; ".join(sorted(section_keys[sec])), True, True, 1, 1])
+
+        # Inferred rows: every other full key in a section with evidence for the message, with the share of the
+        # section's keys that are evidence for it, out of all its keys and out of those that could have been
+        evidence = collections.defaultdict(set)  # (kind, label, section) => its full keys that are evidence
+        for r in rows:
+            if r[5]:
+                evidence[(r[0], r[1], r[5])].add(r[4])
+        for (kind, label, sec), ev in sorted(evidence.items()):
+            keys = section_keys[sec]
+            conf_all = round(len(ev) / len(keys), 3)
+            conf_eligible = round(len(ev) / len(keys & eligible), 3)
+            for fk in sorted(keys - ev):
+                rows.append([kind, label, "", "", fk, sec, "; ".join(sorted(keys)), False, fk in eligible,
+                             conf_all, conf_eligible])
+        rows.sort(key=lambda r: (r[0], r[1], r[5], not r[7], r[4], r[3], r[2]))
         with open(f"{d}/label_keys.csv", "w", newline="") as f:
             w = csv.writer(f, lineterminator="\n")
             w.writerow(["message_kind", "message_label", "needle", "concrete_key", "full_key", "section",
-                        "section_keys"])
+                        "section_keys", "evidence", "eligible", "confidence_all", "confidence_eligible"])
             w.writerows(rows)
 
         labels = {(r[0], r[1]) for r in rows}
-        summary = [f"{len(rows)} rows; {len(labels)} messages (kind, label); "
-                   f"{len({r[4] for r in rows if r[4]})} distinct full keys; {len({r[5] for r in rows if r[5]})} "
-                   f"sections"]
+        n_ev = sum(1 for r in rows if r[7] is True)
+        summary = [f"{len(rows)} rows ({n_ev} evidence, {len(rows) - n_ev} inferred from sections); {len(labels)} "
+                   f"messages (kind, label); {len({r[4] for r in rows if r[4]})} distinct full keys "
+                   f"({len({r[4] for r in rows if r[7] is True and r[4]})} evidence); "
+                   f"{len({r[5] for r in rows if r[5]})} sections"]
         if no_key:
             summary.append(f"needles not in param_keys.txt (no concrete key): {sorted(no_key)}")
         if no_full_key:

@@ -32,16 +32,27 @@ Runs 1 and 2 are argmatch-labels' bootstrapping ([README](../../../../../../../d
 **Resuming:** a step whose directory exists is skipped. A step writes into `<step>.partial` and renames it when it's done, so a failed or interrupted step reruns. `--redo <step>` reruns that step and the later ones. Once any step runs, the later ones rerun too, since their inputs changed. Steps can be named by number (`5`), name (`matches`) or both (`5-matches`). `--until <step>` stops after a step, e.g. `--until 3` for the static phase only.
 
 ## `label_keys.csv`
-One row per (message, needle, concrete key, full key, section), with columns:
-- `message_kind`, `message_label`, `needle`: a row of `joined.csv`
-- `concrete_key`: a key at which the needle is a value in the concrete config (from `param_keys.txt`). A needle that stands for several concrete keys gets a row for each.
-- `full_key`: the concrete key's full key; empty if it has none
+Each message's full keys, with a confidence for each. Two kinds of row:
+- **Evidence rows:** one per (message, needle, concrete key, full key, section), for the keys whose values argmatch matched in calls that join with the message. These keys are *evidence* for the message.
+- **Inferred rows:** for each section with evidence for a message, one per other full key in the section. The key wasn't matched for the message, but its section was.
+
+Columns:
+- `message_kind`, `message_label`, `needle`: a row of `joined.csv` (`needle` is empty in inferred rows)
+- `concrete_key`: a key at which the needle is a value in the concrete config (from `param_keys.txt`). A needle that stands for several concrete keys gets a row for each. Empty in inferred rows.
+- `full_key`: the concrete key's full key (empty if it has none), or the inferred key
 - `section`: the full key's section (`<parent key> @ <Unmarshaler>`); a row per section, if it has several
 - `section_keys`: the full keys in that section, joined with `; `
+- `evidence`: whether the key is evidence for the message
+- `eligible`: whether the key could have been evidence: the concrete config sets it, with a value argmatch searched for (`param_values.txt`)
+- `confidence_all`, `confidence_eligible`: 1 for evidence. For an inferred key, the share of its section's keys that are evidence for the message: out of all the section's keys, and out of its eligible keys. Reading the two together separates the causes of a low score:
+  - both low: the section's eligible keys were searched for, and most weren't found for this message;
+  - `confidence_all` low but `confidence_eligible` high: most of the section is unset, or unsearchable (numbers, bools), so the concrete config or argmatch's strings-only search is the gap.
 
-These terms are defined in STATISTICS.md. Unlike configkeys' `section keys` column, an SD key's section is that of its own SD config, not combined over every SD config with the same field.
+  E.g. for the remote write request in the Prombench run, `remote_write.sigv4`'s `access_key`, `region` and `secret_key` are evidence. Its other 3 keys aren't set, so they get 0.5 out of all 6 keys, and 1.0 out of the 3 eligible.
 
-`summary.txt` counts rows, messages, full keys and sections, and lists needles with no concrete key and concrete keys with no full key.
+These terms are defined in STATISTICS.md. Unlike configkeys' `section keys` column, an SD key's section is that of its own SD config, not combined over every SD config with the same field. Every evidence key counts fully, even when its needle stands for several concrete keys or is also a string literal in the code.
+
+`summary.txt` counts rows (evidence and inferred), messages, full keys and sections, and lists needles with no concrete key and concrete keys with no full key.
 
 ## Step 8: statistics
 Step 8 computes STATISTICS.md's statistics and visuals for this run. Where its inputs differ from STATISTICS.md's "Scope and inputs":
