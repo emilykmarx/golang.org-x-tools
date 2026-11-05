@@ -47,7 +47,6 @@ These terms are defined in STATISTICS.md. Unlike configkeys' `section keys` colu
 Step 8 computes STATISTICS.md's statistics and visuals for this run. Where its inputs differ from STATISTICS.md's "Scope and inputs":
 - the graph, configkeys output and searched values are this run's (steps 2 and 3);
 - argmatch's results are this run's `matches.csv` (step 5). stats.py only uses their needles, so step 8 writes the distinct needles to its own `5-matches/matched_needles.csv`. stats.py names the argmatch run after that directory, `5-matches`;
-- prometheus/common is the version the module checkout uses (`go list -m`);
 - the documented keys are `--docs`.
 
 ## Testbeds

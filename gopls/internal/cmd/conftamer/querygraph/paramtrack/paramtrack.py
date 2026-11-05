@@ -176,11 +176,9 @@ class Workflow:
 
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
         shutil.copy(graph, d)  # visualize.sh reads it from its results directory
-        common = run(["go", "list", "-m", "-f", "{{.Dir}}", "github.com/prometheus/common"], cwd=self.a.module_dir,
-                     timeout=120).strip()
         run([sys.executable, f"{STATS}/stats.py", "--configkeys", self.file("3-configkeys", "configkeys.csv"),
              "--param-values", self.file("3-configkeys", "param_values.txt"), "--graph", graph, "--docs", self.a.docs,
-             "--prometheus", self.a.module_dir, "--common", common,
+             "--prometheus", self.a.module_dir,
              "--argmatch", f"{d}/5-matches/matched_needles.csv", "--out", d], log=f"{d}/stats.log", timeout=900)
         run(["bash", f"{STATS}/visualize.sh", d], log=f"{d}/visualize.log", timeout=1200)
         say(f"{len(matched)} distinct needles matched; tables in {self.dir('8-stats')}/stats_tables.md")
