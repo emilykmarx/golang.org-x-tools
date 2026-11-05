@@ -120,6 +120,8 @@ To run this skill unattended (e.g. so it survives the session closing), use `scr
 `agent.jsonl` (the transcript) and, when it's done, `agent.exit` to the output dir. The prompt should invoke
 `/concreteconfig`, give the inputs and the output dir, and say no one can answer questions. In a headless run:
 - write logs and files with the Write tool rather than shell redirects (`>`, `| tee`), which need approval;
+- write absolute paths in commands rather than shell variables (`S=...; ls $S` needs approval, since the variable
+  can't be checked before the command runs);
 - use `cp` without flags (`cp` with flags needs approval), and `cd` only within the allowed directories (the repo,
   `/home/emily/projects/config_tracing`, `/tmp` and the Go module cache);
 - files under `.claude/` can't be written, which is why the state directory is elsewhere.

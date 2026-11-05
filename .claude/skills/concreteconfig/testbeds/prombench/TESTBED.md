@@ -7,9 +7,12 @@ prombench at `prometheus-test-infra/prombench` (locally `prom-test-infra/promben
 the argmatch experiment's README (`dump_ancestors/argmatch/experiment/README.md`) and paramtrack's README
 ("Testbeds").
 
-- **Shipped concrete config:** the `prometheus.yaml` key of the `prometheus-meta` ConfigMap, in
-  `prombench/manifests/cluster-infra/3b_prometheus-meta.yaml`; the same file locally as
-  `prom-test-infra/prombench/fuzzed_prometheus.yaml`.
+- **Shipped concrete config:** the config upstream prombench shipped when the user's fork (prom-test-infra, branch
+  `argmatch-prom`) branched off: the `prometheus.yaml` key of the `prometheus-meta` ConfigMap at commit `e85cac548`,
+  `git -C prom-test-infra show e85cac548:prombench/manifests/cluster-infra/3b_prometheus-meta.yaml` (141 lines, no
+  template placeholders; identical on upstream master as of 2026-11-05). The deployed testbed's ConfigMap instead
+  holds the fork's fuzzed config (`prom-test-infra/prombench/fuzzed_prometheus.yaml`): apply the shipped config
+  before taking a baseline, as paramtrack does with `--config`.
 - **Information about the testbed:** `prombench/` (manifests, deploy.sh), and the other components' manifests there:
   what they are tells you which endpoints exist for new entries to target.
 
@@ -57,6 +60,9 @@ After each applied config, for a minute or so, through `kubectl exec ... wget -q
 
 ## Message labels (constraint 2)
 The authoritative check, at the end (each run takes about 6 minutes, most of it the 240 s workload):
+Run paramtrack as its README says, from its directory, with its Python packages:
+`uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out <dir> --config <config>
+--testbed prombench --until 4` (plain `python3` fails at import).
 1. **Baseline**, once per testbed deployment: paramtrack with the shipped config, `--testbed prombench --until 4`
    (its run 1: contexttrack records events, argmatch instruments nothing). The events are in
    `<out>/4-chains/events.jsonl`.

@@ -15,7 +15,7 @@ allow=(Read Write Edit Glob Grep Skill
   'Bash(mkdir:*)' 'Bash(cp:*)' 'Bash(mv:*)' 'Bash(rm:*)' 'Bash(chmod:*)' 'Bash(md5sum:*)' 'Bash(sort:*)'
   'Bash(uniq:*)' 'Bash(echo:*)' 'Bash(printf:*)' 'Bash(date:*)' 'Bash(find:*)' 'Bash(sed:*)' 'Bash(awk:*)'
   'Bash(tee:*)' 'Bash(sleep:*)' 'Bash(cut:*)' 'Bash(tr:*)' 'Bash(openssl:*)' 'Bash(base64:*)' 'Bash(jq:*)'
-  'Bash(test:*)')
+  'Bash(test:*)' 'Bash(ps:*)')
 setsid nohup bash -c '
   timeout "$1" claude -p "$(cat "$2")" --output-format stream-json --verbose --allowedTools "${@:5}" \
     --add-dir /home/emily/projects/config_tracing --add-dir /tmp --add-dir "$HOME/go/pkg/mod" \

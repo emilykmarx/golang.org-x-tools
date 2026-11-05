@@ -2,7 +2,8 @@
 
 - **Checkout:** `/home/emily/projects/config_tracing/prometheus` (v3.2.1; on the prombench VM, the same path).
 - **Module and root:** `github.com/prometheus/prometheus`, `/config.Config` (paramtrack's defaults).
-- **Ignore file:** `ignore.txt` here: the 53 (parent, SD config) pairs the shipped config doesn't use. In scope:
+- **Ignore file:** `ignore.txt` here: the 53 (parent, SD config) pairs the user's fuzzed config doesn't use (a fixed
+  scope; the shipped config uses only `kubernetes_sd_configs`). In scope:
   `kubernetes_sd_configs` under `scrape_configs` and `alerting.alertmanagers`, and `dns_sd_configs`,
   `file_sd_configs` and `static_configs` under `scrape_configs`. Pass it to `stats.py` and `scripts/score.py`.
 
@@ -16,6 +17,12 @@ In the checkout, and in prometheus/common at the version it uses (`go list -m -f
 - The parsing and validation code, for what the docs leave out: `UnmarshalYAML` and `Validate` methods in
   `config/config.go`, `discovery/<sd>/`, `model/relabel/relabel.go`, and prometheus/common's `config/http_config.go`.
 - configkeys/stats/STATISTICS.md, Q4: the keys the graph has but the docs don't, and why.
+- Earlier configs for this testbed, as examples only (decide for yourself; don't copy their choices as decisions):
+  - `prom-test-infra/prombench/fuzzed_prometheus.yaml`: the user's hand-fuzzed config, which extends the shipped
+    config with many more keys, each with a value meant to be distinctive and inert;
+  - `gopls/internal/cmd/conftamer/querygraph/paramtrack/concreteconfig/prometheus-prombench-fuzzed-base-2026-11-04/`:
+    an earlier run of this skill that extended the fuzzed config (its `decisions.md` records what it learned about
+    the testbed, e.g. which endpoints accept which credentials).
 
 ## Checking a config
 - `promtool check config <file>`: parses and validates, and checks that files the config names exist, so run it
@@ -46,7 +53,7 @@ prometheus/common's `HTTPClientConfig.Validate` allows at most one auth method p
 `remote_write` entries.
 
 ## Values known to be safe (inert, but stored)
-The shipped config (`prom-test-infra/prombench/fuzzed_prometheus.yaml` locally) already uses these patterns:
+The fuzzed config (`prom-test-infra/prombench/fuzzed_prometheus.yaml`) uses these patterns:
 - a `proxy_url` that `no_proxy` bypasses for every address Prometheus contacts, so it's never dialed;
 - extra HTTP headers (`http_headers`, `X-Fuzz-*`) and URL `params` that the targets ignore;
 - relabel rules that only write new target labels (`action: replace` into an unused label), never drop targets;
