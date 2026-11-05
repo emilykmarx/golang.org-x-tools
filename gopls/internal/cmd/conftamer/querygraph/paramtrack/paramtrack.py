@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runs the end-to-end param tracking workflow (../WORKFLOW.md) and joins its outputs into Message label => Full keys.
+"""Runs the end-to-end param tracking workflow (WORKFLOW.md) and joins its outputs into Message label => Full keys.
 See README.md.
 
 Run with: uv run --with pandas --with matplotlib python paramtrack.py --out DIR --config CONFIG [flags]
@@ -60,7 +60,7 @@ class Workflow:
 
     def testbed(self):
         overrides = dict(kv.split("=", 1) for kv in self.a.argmatch_arg)
-        return TESTBEDS[self.a.testbed](wait=self.a.wait, argmatch_args=overrides)
+        return TESTBEDS[self.a.testbed](wait=self.a.wait, argmatch_args=overrides, vm=self.a.vm)
 
     def chains(self, d):
         """Run 1: contexttrack records message chains; argmatch instruments nothing"""
@@ -189,6 +189,7 @@ def main():
     ap.add_argument("--root", default="/config.Config", help="configkeys --root (empty: all roots)")
     ap.add_argument("--format", default="yaml", help="Config format (yaml; json not yet supported by configkeys)")
     ap.add_argument("--testbed", default="docker", choices=sorted(TESTBEDS))
+    ap.add_argument("--vm", default="paramtrack-e2e", help="GCE VM for --testbed prombench")
     ap.add_argument("--wait", type=int, default=240, help="Seconds to run the module under the workload, per run")
     ap.add_argument("--argmatch-arg", action="append", default=[], metavar="KEY=VALUE",
                     help="Override an argmatch build arg (ARGMATCH_KEY), e.g. DEPTH=5; repeatable")
