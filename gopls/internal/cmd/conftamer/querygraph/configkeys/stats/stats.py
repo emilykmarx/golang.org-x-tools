@@ -268,20 +268,10 @@ def key_tier(r):
     return 4 if r.matched else 3 if r.searched else 2 if r.in_config else 1 if r.documented else 0
 
 
-def write_visuals(fkdf, config, covered_by, searched, matched, args, out):
-    """Write full_keys.csv with searched/matched columns, node_coverage.csv (attributes per graph node, for
-    prettify's --node-attrs) and full_keys.yaml (a keys-only YAML of the full keys, annotated)"""
-    def values_of(fk):
-        return {v.replace("\n", "\\n") for k in covered_by.get(fk, ()) for v in config[k]["values"]}
-
-    fkdf["searched"] = fkdf.key.map(lambda fk: bool(values_of(fk) & searched))
-    fkdf["matched"] = fkdf.key.map(lambda fk: bool(values_of(fk) & matched))
-    fkdf["tier"] = [TIERS[key_tier(r)] for r in fkdf.itertuples()]
-    fkdf.to_csv(f"{args.out}/full_keys.csv", index=False)
-    keys = fkdf.drop_duplicates("key")
-
-    # Graph nodes: tier of the furthest full key ending at the node
-    graph = json.load(open(args.graph))
+def node_rows(fkdf, graph_path):
+    """Attributes per graph node (for prettify's --node-attrs), from the full keys in fkdf: each node's full keys are
+    those whose Unmarshaler it is"""
+    graph = json.load(open(graph_path))
     adj = collections.defaultdict(set)
     for e in graph["Edges"]:
         adj[e["Source"]].add(e["Target"])
@@ -313,8 +303,50 @@ def write_visuals(fkdf, config, covered_by, searched, matched, args, out):
                      # so a type shared by many sections, like TLSConfig, is "matched" if any one of its keys is)
                      "in_config_fraction": round(ks.in_config.mean(), 3) if len(ks) else 0,
                      "matched_fraction": matched_fraction})
-    nodes = pd.DataFrame(rows).sort_values("node")
+    return pd.DataFrame(rows).sort_values("node")
+
+
+def sd_key_of(fk, sd_keys):
+    """The SD config key (e.g. azure_sd_configs) a full key is under, or None"""
+    s = segs(fk)
+    if s[0] == "scrape_configs" and len(s) > 2 and s[1] in sd_keys:
+        return s[1]
+    if s[:2] == ["alerting", "alertmanagers"] and len(s) > 3 and s[2] in sd_keys:
+        return s[2]
+    return None
+
+
+def write_visuals(fkdf, config, covered_by, searched, matched, sd, args, out):
+    """Write full_keys.csv with searched/matched columns, node_coverage.csv and node_coverage_keyed.csv (attributes
+    per graph node, for prettify's --node-attrs), sd_configs.csv, and full_keys.yaml (a keys-only YAML of the full
+    keys, annotated)"""
+    def values_of(fk):
+        return {v.replace("\n", "\\n") for k in covered_by.get(fk, ()) for v in config[k]["values"]}
+
+    fkdf["searched"] = fkdf.key.map(lambda fk: bool(values_of(fk) & searched))
+    fkdf["matched"] = fkdf.key.map(lambda fk: bool(values_of(fk) & matched))
+    fkdf["tier"] = [TIERS[key_tier(r)] for r in fkdf.itertuples()]
+    fkdf.to_csv(f"{args.out}/full_keys.csv", index=False)
+    keys = fkdf.drop_duplicates("key")
+
+    # Graph nodes: tier of the furthest full key ending at the node
+    nodes = node_rows(fkdf, args.graph)
     nodes.to_csv(f"{args.out}/node_coverage.csv", index=False)
+
+    # For the keyed graph: leave out the SD configs none of whose full keys argmatch matched (all the keys under the
+    # SD config's key, wherever they end: e.g. static_configs' keys all end at targetgroup.Group), and every full key
+    # under them (e.g. scrape_configs.azure_sd_configs.tls_config.ca_file, whose Unmarshaler is TLSConfig).
+    sd_keys = set(sd.values())
+    under = keys.assign(sd_key=keys.key.map(lambda fk: sd_key_of(fk, sd_keys)))
+    sd_df = pd.DataFrame([{"node": n, "sd_key": k, "keys": int((under.sd_key == k).sum()),
+                           "keys_matched": int(under[under.sd_key == k].matched.sum())} for n, k in sorted(sd.items())
+                          if n in set(nodes.node)])
+    sd_df["left_out"] = sd_df.keys_matched == 0
+    sd_df.to_csv(f"{args.out}/sd_configs.csv", index=False)
+    left_out_keys = set(sd_df[sd_df.left_out].sd_key)
+    keyed = fkdf[fkdf.key.map(lambda fk: sd_key_of(fk, sd_keys) not in left_out_keys)]
+    node_rows(keyed, args.graph).to_csv(f"{args.out}/node_coverage_keyed.csv", index=False)
+
     # Legend entries for the node colours, in order (for visualize.sh)
     pd.DataFrame([(text, c) for _, text, c in MATCHED_BINS] + list(NODE_GREYS.items()),
                  columns=["matched_bin", "color"]).to_csv(f"{args.out}/node_legend.csv", index=False)
@@ -781,7 +813,7 @@ def main():
     cfg_undoc = sorted(k for k, c in config.items() if not any(fk in docs for fk in c["full_keys"]))
     out.p(f"- Concrete keys whose full key isn't documented: {len(cfg_undoc)}: " + ", ".join(f"`{k}`" for k in cfg_undoc))
 
-    write_visuals(fkdf, config, covered_by, searched, matched, args, out)
+    write_visuals(fkdf, config, covered_by, searched, matched, sd, args, out)
 
     out.write()
     print(f"wrote {out.path}")
