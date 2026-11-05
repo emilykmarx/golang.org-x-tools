@@ -1,0 +1,57 @@
+# Full keys the concreteconfig skill leaves alone for Prometheus, and stats.py --ignore leaves out:
+# the service discovery configs the shipped prombench config doesn't set (each (parent, SD config) pair).
+# Kept: kubernetes_sd_configs under both parents; dns_sd_configs, file_sd_configs and static_configs under
+# scrape_configs. One fnmatch pattern per line.
+scrape_configs.azure_sd_configs.*
+scrape_configs.consul_sd_configs.*
+scrape_configs.digitalocean_sd_configs.*
+scrape_configs.docker_sd_configs.*
+scrape_configs.dockerswarm_sd_configs.*
+scrape_configs.ec2_sd_configs.*
+scrape_configs.eureka_sd_configs.*
+scrape_configs.gce_sd_configs.*
+scrape_configs.hetzner_sd_configs.*
+scrape_configs.http_sd_configs.*
+scrape_configs.ionos_sd_configs.*
+scrape_configs.kuma_sd_configs.*
+scrape_configs.lightsail_sd_configs.*
+scrape_configs.linode_sd_configs.*
+scrape_configs.marathon_sd_configs.*
+scrape_configs.nerve_sd_configs.*
+scrape_configs.nomad_sd_configs.*
+scrape_configs.openstack_sd_configs.*
+scrape_configs.ovhcloud_sd_configs.*
+scrape_configs.puppetdb_sd_configs.*
+scrape_configs.scaleway_sd_configs.*
+scrape_configs.serverset_sd_configs.*
+scrape_configs.triton_sd_configs.*
+scrape_configs.uyuni_sd_configs.*
+scrape_configs.vultr_sd_configs.*
+alerting.alertmanagers.azure_sd_configs.*
+alerting.alertmanagers.consul_sd_configs.*
+alerting.alertmanagers.digitalocean_sd_configs.*
+alerting.alertmanagers.dns_sd_configs.*
+alerting.alertmanagers.docker_sd_configs.*
+alerting.alertmanagers.dockerswarm_sd_configs.*
+alerting.alertmanagers.ec2_sd_configs.*
+alerting.alertmanagers.eureka_sd_configs.*
+alerting.alertmanagers.file_sd_configs.*
+alerting.alertmanagers.gce_sd_configs.*
+alerting.alertmanagers.hetzner_sd_configs.*
+alerting.alertmanagers.http_sd_configs.*
+alerting.alertmanagers.ionos_sd_configs.*
+alerting.alertmanagers.kuma_sd_configs.*
+alerting.alertmanagers.lightsail_sd_configs.*
+alerting.alertmanagers.linode_sd_configs.*
+alerting.alertmanagers.marathon_sd_configs.*
+alerting.alertmanagers.nerve_sd_configs.*
+alerting.alertmanagers.nomad_sd_configs.*
+alerting.alertmanagers.openstack_sd_configs.*
+alerting.alertmanagers.ovhcloud_sd_configs.*
+alerting.alertmanagers.puppetdb_sd_configs.*
+alerting.alertmanagers.scaleway_sd_configs.*
+alerting.alertmanagers.serverset_sd_configs.*
+alerting.alertmanagers.static_configs.*
+alerting.alertmanagers.triton_sd_configs.*
+alerting.alertmanagers.uyuni_sd_configs.*
+alerting.alertmanagers.vultr_sd_configs.*
