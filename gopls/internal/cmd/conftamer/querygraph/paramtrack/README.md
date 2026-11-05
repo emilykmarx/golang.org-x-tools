@@ -18,8 +18,8 @@ Each step writes one subdirectory of `--out`, named after the step:
 
 | Step | Program | Main output |
 |---|---|---|
-| `1-concrete-config` | (copies `--config`, until the /concreteconfig skill exists) | `config.yaml` |
-| `2-unmarshaler-graph` | `gopls conftamer`, built from this checkout | `unmarshaler_subgraph.text` |
+| `1-unmarshaler-graph` | `gopls conftamer`, built from this checkout | `unmarshaler_subgraph.text` |
+| `2-concrete-config` | configkeys without a config, then `stats.py --full-keys-only`; then copies `--config`, until the /concreteconfig skill generates it from `full_keys.yaml` | `full_keys.yaml`, `config.yaml` |
 | `3-configkeys` | [configkeys](../configkeys/README.md) `--strings-only` | `configkeys.csv`, `param_values.txt`, `param_keys.txt` |
 | `4-chains` | testbed run 1: contexttrack, with argmatch instrumenting nothing; then `events_to_stacklog.py` | `events.jsonl`, `stacklog.txt` |
 | `5-matches` | testbed run 2: argmatch instruments `stacklog.txt`'s functions and searches for `param_values.txt`; contexttrack records the messages | `matches.csv`, `matches.calls.csv`, `events.jsonl` |

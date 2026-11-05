@@ -34,10 +34,6 @@ class Workflow:
     # ---------------------------------------------------------------------------------------------------------------
     # Static phase
 
-    def concrete_config(self, d):
-        # TODO: generate it from the full keys YAML with the /concreteconfig skill (WORKFLOW.md); for now, the input
-        shutil.copy(self.a.config, f"{d}/config.yaml")
-
     def unmarshaler_graph(self, d):
         gopls = f"{self.out}/bin/gopls"
         run(["go", "build", "-o", gopls, "."], cwd=GOPLS, log=f"{d}/build.log", timeout=600)
@@ -46,12 +42,32 @@ class Workflow:
         if not os.path.exists(f"{d}/unmarshaler_subgraph.text"):
             raise RuntimeError(f"gopls conftamer wrote no {d}/unmarshaler_subgraph.text; see {d}/conftamer.log")
 
-    def configkeys(self, d):
+    def configkeys_bin(self):
         bin = f"{self.out}/bin/configkeys"
-        run(["go", "build", "-o", bin, "."], cwd=f"{QUERYGRAPH}/configkeys", log=f"{d}/build.log", timeout=600)
-        cmd = [bin, "--config", self.file("1-concrete-config", "config.yaml"), "--txt-dir", d, "--strings-only",
-               "--unmarshaler-subgraph", self.file("2-unmarshaler-graph", "unmarshaler_subgraph.text"),
-               "--module-prefix", self.a.module, "--format", self.a.format, "--output", f"{d}/configkeys.csv"]
+        os.makedirs(os.path.dirname(bin), exist_ok=True)
+        run(["go", "build", "-o", bin, "."], cwd=f"{QUERYGRAPH}/configkeys", log=f"{bin}.build.log", timeout=600)
+        return bin
+
+    def concrete_config(self, d):
+        """The full keys YAML (every full key the graph allows: configkeys without a config, then stats.py's SD
+        resolution), and the concrete config"""
+        graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
+        cmd = [self.configkeys_bin(), "--unmarshaler-subgraph", graph, "--module-prefix", self.a.module, "--format",
+               self.a.format, "--output", f"{d}/configkeys_graph.csv"]
+        if self.a.root:
+            cmd += ["--root", self.a.root]
+        run(cmd, log=f"{d}/configkeys.log", timeout=600)
+        run([sys.executable, f"{STATS}/stats.py", "--full-keys-only", "--configkeys", f"{d}/configkeys_graph.csv",
+             "--graph", graph, "--docs", self.a.docs, "--prometheus", self.a.module_dir, "--out", d],
+            log=f"{d}/stats.log", timeout=600)
+        # TODO: generate it from full_keys.yaml with the /concreteconfig skill (WORKFLOW.md); for now, the input
+        shutil.copy(self.a.config, f"{d}/config.yaml")
+
+    def configkeys(self, d):
+        graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
+        cmd = [self.configkeys_bin(), "--config", self.file("2-concrete-config", "config.yaml"), "--txt-dir", d,
+               "--strings-only", "--unmarshaler-subgraph", graph, "--module-prefix", self.a.module,
+               "--format", self.a.format, "--output", f"{d}/configkeys.csv"]
         if self.a.root:
             cmd += ["--root", self.a.root]
         run(cmd, log=f"{d}/configkeys.log", timeout=600)
@@ -65,14 +81,14 @@ class Workflow:
 
     def chains(self, d):
         """Run 1: contexttrack records message chains; argmatch instruments nothing"""
-        self.testbed().run(d, self.file("1-concrete-config", "config.yaml"))
+        self.testbed().run(d, self.file("2-concrete-config", "config.yaml"))
         run([sys.executable, f"{ARGMATCH_LABELS}/events_to_stacklog.py", f"{d}/events.jsonl"],
             log=f"{d}/stacklog.txt", timeout=300)
 
     def matches(self, d):
         """Run 2: argmatch instruments the functions in run 1's chains and searches for the values; contexttrack
         records the messages to label"""
-        self.testbed().run(d, self.file("1-concrete-config", "config.yaml"),
+        self.testbed().run(d, self.file("2-concrete-config", "config.yaml"),
                            stacklog=self.file("4-chains", "stacklog.txt"),
                            matchfile=self.file("3-configkeys", "param_values.txt"))
         if os.path.getsize(f"{d}/matches.calls.csv") == 0:
@@ -89,7 +105,7 @@ class Workflow:
     def label_keys(self, d):
         """Message label => Full keys: each (message, needle) row of the join, with every concrete key whose value
         the needle is, and its full key and section"""
-        graph = self.file("2-unmarshaler-graph", "unmarshaler_subgraph.text")
+        graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
         stats.MAP_FIELDS.update(stats.map_field_keys(graph))
         sd = stats.sd_names(self.a.module_dir)
         full, config, _ = stats.load_configkeys(self.file("3-configkeys", "configkeys.csv"), sd)
@@ -158,7 +174,7 @@ class Workflow:
             w.writerow(["needle"])
             w.writerows([n] for n in sorted(matched))
 
-        graph = self.file("2-unmarshaler-graph", "unmarshaler_subgraph.text")
+        graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
         shutil.copy(graph, d)  # visualize.sh reads it from its results directory
         common = run(["go", "list", "-m", "-f", "{{.Dir}}", "github.com/prometheus/common"], cwd=self.a.module_dir,
                      timeout=120).strip()
@@ -171,7 +187,7 @@ class Workflow:
 
     # ---------------------------------------------------------------------------------------------------------------
 
-    STEPS = ["1-concrete-config", "2-unmarshaler-graph", "3-configkeys", "4-chains", "5-matches", "6-label-values",
+    STEPS = ["1-unmarshaler-graph", "2-concrete-config", "3-configkeys", "4-chains", "5-matches", "6-label-values",
              "7-label-keys", "8-stats"]
 
     def file(self, step, name):
@@ -179,7 +195,7 @@ class Workflow:
 
     def run(self):
         os.makedirs(self.out, exist_ok=True)
-        fns = [self.concrete_config, self.unmarshaler_graph, self.configkeys, self.chains, self.matches,
+        fns = [self.unmarshaler_graph, self.concrete_config, self.configkeys, self.chains, self.matches,
                self.label_values, self.label_keys, self.stats]
         redo = self.step_index(self.a.redo) if self.a.redo else len(self.STEPS)
         until = self.step_index(self.a.until) if self.a.until else len(self.STEPS) - 1
@@ -220,7 +236,7 @@ def main():
     ap.add_argument("--root", default="/config.Config", help="configkeys --root (empty: all roots)")
     ap.add_argument("--format", default="yaml", help="Config format (yaml; json not yet supported by configkeys)")
     ap.add_argument("--docs", default=f"{CT}/prom-test-infra/prombench/prometheus_config_keys.txt",
-                    help="Documented keys, for step 8 (stats.py --docs)")
+                    help="Documented keys, for steps 2 and 8 (stats.py --docs)")
     ap.add_argument("--testbed", default="docker", choices=sorted(TESTBEDS))
     ap.add_argument("--vm", default="paramtrack-e2e", help="GCE VM for --testbed prombench")
     ap.add_argument("--wait", type=int, default=240, help="Seconds to run the module under the workload, per run")
