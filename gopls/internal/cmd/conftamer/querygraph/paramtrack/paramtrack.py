@@ -2,7 +2,7 @@
 """Runs the end-to-end param tracking workflow (WORKFLOW.md) and joins its outputs into Message label => Full keys.
 See README.md.
 
-Run with: uv run --with pandas --with matplotlib python paramtrack.py --out DIR --config CONFIG [flags]
+Run with: uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out DIR --config CONFIG [flags]
 """
 
 import argparse
@@ -15,8 +15,9 @@ import sys
 from common import ARGMATCH_LABELS, CT, GOPLS, QUERYGRAPH, run, say
 from testbeds import TESTBEDS
 
-# stats.py's full key and section rules (STATISTICS.md)
-sys.path.insert(0, f"{QUERYGRAPH}/configkeys/stats")
+# stats.py's full key and section rules (STATISTICS.md); step 8 runs it
+STATS = f"{QUERYGRAPH}/configkeys/stats"
+sys.path.insert(0, STATS)
 import stats  # noqa: E402
 
 csv.field_size_limit(1 << 30)
@@ -138,10 +139,40 @@ class Workflow:
         for line in summary:
             say(line)
 
+    def stats(self, d):
+        """stats.py's statistics and visuals (../configkeys/stats/STATISTICS.md) on this run's outputs, then
+        visualize.sh's coloured graphs"""
+        # stats.py only uses the needles of its argmatch input. matches.csv is too big for pandas, and its rows have
+        # more fields than its header, so write its distinct needles. (In a directory named after step 5, which
+        # stats.py prints as the argmatch run's name.)
+        matched = set()
+        with open(self.file("5-matches", "matches.csv"), newline="") as f:
+            r = csv.reader(f)
+            ni = next(r).index("needle")
+            for row in r:
+                if len(row) > ni:
+                    matched.add(row[ni])
+        os.makedirs(f"{d}/5-matches")
+        with open(f"{d}/5-matches/matched_needles.csv", "w", newline="") as f:
+            w = csv.writer(f, lineterminator="\n")
+            w.writerow(["needle"])
+            w.writerows([n] for n in sorted(matched))
+
+        graph = self.file("2-unmarshaler-graph", "unmarshaler_subgraph.text")
+        shutil.copy(graph, d)  # visualize.sh reads it from its results directory
+        common = run(["go", "list", "-m", "-f", "{{.Dir}}", "github.com/prometheus/common"], cwd=self.a.module_dir,
+                     timeout=120).strip()
+        run([sys.executable, f"{STATS}/stats.py", "--configkeys", self.file("3-configkeys", "configkeys.csv"),
+             "--param-values", self.file("3-configkeys", "param_values.txt"), "--graph", graph, "--docs", self.a.docs,
+             "--prometheus", self.a.module_dir, "--common", common,
+             "--argmatch", f"{d}/5-matches/matched_needles.csv", "--out", d], log=f"{d}/stats.log", timeout=900)
+        run(["bash", f"{STATS}/visualize.sh", d], log=f"{d}/visualize.log", timeout=1200)
+        say(f"{len(matched)} distinct needles matched; tables in {self.dir('8-stats')}/stats_tables.md")
+
     # ---------------------------------------------------------------------------------------------------------------
 
     STEPS = ["1-concrete-config", "2-unmarshaler-graph", "3-configkeys", "4-chains", "5-matches", "6-label-values",
-             "7-label-keys"]
+             "7-label-keys", "8-stats"]
 
     def file(self, step, name):
         return f"{self.dir(step)}/{name}"
@@ -149,7 +180,7 @@ class Workflow:
     def run(self):
         os.makedirs(self.out, exist_ok=True)
         fns = [self.concrete_config, self.unmarshaler_graph, self.configkeys, self.chains, self.matches,
-               self.label_values, self.label_keys]
+               self.label_values, self.label_keys, self.stats]
         redo = self.step_index(self.a.redo) if self.a.redo else len(self.STEPS)
         until = self.step_index(self.a.until) if self.a.until else len(self.STEPS) - 1
         ran = False
@@ -188,6 +219,8 @@ def main():
     ap.add_argument("--module-dir", default=f"{CT}/prometheus", help="Module source checkout")
     ap.add_argument("--root", default="/config.Config", help="configkeys --root (empty: all roots)")
     ap.add_argument("--format", default="yaml", help="Config format (yaml; json not yet supported by configkeys)")
+    ap.add_argument("--docs", default=f"{CT}/prom-test-infra/prombench/prometheus_config_keys.txt",
+                    help="Documented keys, for step 8 (stats.py --docs)")
     ap.add_argument("--testbed", default="docker", choices=sorted(TESTBEDS))
     ap.add_argument("--vm", default="paramtrack-e2e", help="GCE VM for --testbed prombench")
     ap.add_argument("--wait", type=int, default=240, help="Seconds to run the module under the workload, per run")

@@ -5,13 +5,13 @@ Runs the end-to-end param tracking workflow in [WORKFLOW.md](WORKFLOW.md), from 
 ## Usage
 ```
 cd gopls/internal/cmd/conftamer/querygraph/paramtrack
-uv run --with pandas --with matplotlib python paramtrack.py --out <dir> --config <concrete config> \
+uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out <dir> --config <concrete config> \
   [--module github.com/prometheus/prometheus] [--module-dir <checkout>] [--root /config.Config] [--format yaml] \
-  [--testbed docker] [--wait 240] [--argmatch-arg KEY=VALUE ...] [--redo <step>] [--until <step>]
+  [--docs <documented keys>] [--testbed docker|prombench] [--vm paramtrack-e2e] [--wait 240] [--argmatch-arg KEY=VALUE ...] [--redo <step>] [--until <step>]
 ```
 The defaults are for Prometheus. A full run takes about 20–25 minutes, mostly the two builds and runs of the dynamic phase.
 
-pandas is needed because step 7 uses stats.py's rules for full keys and sections ([../configkeys/stats/STATISTICS.md](../configkeys/stats/STATISTICS.md)), and matplotlib because stats.py imports it.
+pandas, matplotlib and tabulate are for stats.py ([../configkeys/stats/STATISTICS.md](../configkeys/stats/STATISTICS.md)): step 7 uses its rules for full keys and sections, and step 8 runs it.
 
 ## Steps and outputs
 Each step writes one subdirectory of `--out`, named after the step:
@@ -25,6 +25,7 @@ Each step writes one subdirectory of `--out`, named after the step:
 | `5-matches` | testbed run 2: argmatch instruments `stacklog.txt`'s functions and searches for `param_values.txt`; contexttrack records the messages | `matches.csv`, `matches.calls.csv`, `events.jsonl` |
 | `6-label-values` | argmatch-labels' `join.py` | `joined.csv` |
 | `7-label-keys` | paramtrack | `label_keys.csv`, `summary.txt` |
+| `8-stats` | stats.py, then visualize.sh | `stats_tables.md` and the other outputs STATISTICS.md lists |
 
 Runs 1 and 2 are argmatch-labels' bootstrapping ([README](../../../../../../../dump_ancestors/argmatch-labels/README.md#bootstrapping)).
 
@@ -41,6 +42,13 @@ One row per (message, needle, concrete key, full key, section), with columns:
 These terms are defined in STATISTICS.md. Unlike configkeys' `section keys` column, an SD key's section is that of its own SD config, not combined over every SD config with the same field.
 
 `summary.txt` counts rows, messages, full keys and sections, and lists needles with no concrete key and concrete keys with no full key.
+
+## Step 8: statistics
+Step 8 computes STATISTICS.md's statistics and visuals for this run. Where its inputs differ from STATISTICS.md's "Scope and inputs":
+- the graph, configkeys output and searched values are this run's (steps 2 and 3);
+- argmatch's results are this run's `matches.csv` (step 5). stats.py only uses their needles, so step 8 writes the distinct needles to its own `5-matches/matched_needles.csv`. stats.py names the argmatch run after that directory, `5-matches`;
+- prometheus/common is the version the module checkout uses (`go list -m`);
+- the documented keys are `--docs`.
 
 ## Testbeds
 `--testbed` chooses where the module runs (`testbeds.py`):
