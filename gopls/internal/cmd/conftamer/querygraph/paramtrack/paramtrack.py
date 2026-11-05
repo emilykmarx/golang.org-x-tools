@@ -48,6 +48,18 @@ class Workflow:
         run(["go", "build", "-o", bin, "."], cwd=f"{QUERYGRAPH}/configkeys", log=f"{bin}.build.log", timeout=600)
         return bin
 
+    def config_files(self):
+        """The files the concrete config refers to: --config-files, or a files/ directory next to --config"""
+        if self.a.config_files:
+            return self.a.config_files
+        sibling = os.path.join(os.path.dirname(os.path.abspath(self.a.config)), "files")
+        return sibling if os.path.isdir(sibling) else None
+
+    def step_files(self):
+        """Step 2's copy of the config's files, if any"""
+        d = self.file("2-concrete-config", "files")
+        return d if os.path.isdir(d) else None
+
     def concrete_config(self, d):
         """The full keys YAML (every full key the graph allows: configkeys without a config, then stats.py's SD
         resolution), and the concrete config"""
@@ -62,6 +74,8 @@ class Workflow:
             log=f"{d}/stats.log", timeout=600)
         # TODO: generate it from full_keys.yaml with the /concreteconfig skill (WORKFLOW.md); for now, the input
         shutil.copy(self.a.config, f"{d}/config.yaml")
+        if self.config_files():
+            shutil.copytree(self.config_files(), f"{d}/files")
 
     def configkeys(self, d):
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
@@ -81,14 +95,14 @@ class Workflow:
 
     def chains(self, d):
         """Run 1: contexttrack records message chains; argmatch instruments nothing"""
-        self.testbed().run(d, self.file("2-concrete-config", "config.yaml"))
+        self.testbed().run(d, self.file("2-concrete-config", "config.yaml"), files=self.step_files())
         run([sys.executable, f"{ARGMATCH_LABELS}/events_to_stacklog.py", f"{d}/events.jsonl"],
             log=f"{d}/stacklog.txt", timeout=300)
 
     def matches(self, d):
         """Run 2: argmatch instruments the functions in run 1's chains and searches for the values; contexttrack
         records the messages to label"""
-        self.testbed().run(d, self.file("2-concrete-config", "config.yaml"),
+        self.testbed().run(d, self.file("2-concrete-config", "config.yaml"), files=self.step_files(),
                            stacklog=self.file("4-chains", "stacklog.txt"),
                            matchfile=self.file("3-configkeys", "param_values.txt"))
         if os.path.getsize(f"{d}/matches.calls.csv") == 0:
@@ -201,7 +215,8 @@ class Workflow:
         run([sys.executable, f"{STATS}/stats.py", "--configkeys", self.file("3-configkeys", "configkeys.csv"),
              "--param-values", self.file("3-configkeys", "param_values.txt"), "--graph", graph, "--docs", self.a.docs,
              "--prometheus", self.a.module_dir,
-             "--argmatch", f"{d}/5-matches/matched_needles.csv", "--out", d], log=f"{d}/stats.log", timeout=900)
+             "--argmatch", f"{d}/5-matches/matched_needles.csv",
+             "--label-keys", self.file("7-label-keys", "label_keys.csv"), "--out", d], log=f"{d}/stats.log", timeout=900)
         run(["bash", f"{STATS}/visualize.sh", d], log=f"{d}/visualize.log", timeout=1200)
         say(f"{len(matched)} distinct needles matched; tables in {self.dir('8-stats')}/stats_tables.md")
 
@@ -251,6 +266,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True, help="Directory for every step's output (one subdirectory per step)")
     ap.add_argument("--config", required=True, help="Concrete config (until /concreteconfig generates it)")
+    ap.add_argument("--config-files", help="Directory of files the concrete config refers to, which the testbed "
+                                           "installs (default: a files/ directory next to --config, if any)")
     ap.add_argument("--module", default="github.com/prometheus/prometheus", help="Module as in go.mod")
     ap.add_argument("--module-dir", default=f"{CT}/prometheus", help="Module source checkout")
     ap.add_argument("--root", default="/config.Config", help="configkeys --root (empty: all roots)")

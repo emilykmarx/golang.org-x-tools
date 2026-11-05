@@ -5,6 +5,7 @@ Also run on the VM by PrombenchVM: testbeds.py prombench --out DIR --config FILE
 """
 
 import argparse
+import base64
 import json
 import os
 import shlex
@@ -32,8 +33,9 @@ class Testbed:
         self.argmatch_args = {**ARGMATCH_ARGS, **(argmatch_args or {})}
         self.vm = vm
 
-    def run(self, out_dir, config, stacklog=None, matchfile=None):
-        """Runs the module with `config`. With stacklog, argmatch instruments its functions and searches for the
+    def run(self, out_dir, config, stacklog=None, matchfile=None, files=None):
+        """Runs the module with `config`, and the files it refers to (`files`: a directory, or None) where the config
+        expects them (each testbed says where). With stacklog, argmatch instruments its functions and searches for the
         strings in matchfile; without, it instruments nothing (contexttrack still records events)."""
         raise NotImplementedError
 
@@ -103,7 +105,7 @@ class PrometheusDocker(PrometheusImage):
         os.makedirs(f"{out_dir}/fixtures/data", exist_ok=True)
         return sa, f"{out_dir}/fixtures/data"
 
-    def run(self, out_dir, config, stacklog=None, matchfile=None):
+    def run(self, out_dir, config, stacklog=None, matchfile=None, files=None):
         tag = "paramtrack-instrumented:latest" if stacklog else "paramtrack-uninstrumented:latest"
         self.build(tag, out_dir, stacklog, matchfile)
 
@@ -117,6 +119,8 @@ class PrometheusDocker(PrometheusImage):
         run(["docker", "run", "-d", "--name", name, "-p", f"{self.PORT}:9090",
              "-v", f"{argmatch_out}:/argmatch-out", "-v", f"{os.path.abspath(config)}:/etc/prometheus/prometheus.yml:ro",
              "-v", f"{sa}:{self.SA_DIR}:ro", "-v", f"{data}:/data",
+             # The config's files, where prombench's ConfigMap puts them (see Prombench.restart)
+             *(["-v", f"{os.path.abspath(files)}:{Prombench.CONFIG_DIR}:ro"] if files else []),
              "-e", "CONFTAMER_EVENTS=/argmatch-out/events.jsonl", tag,
              "--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus",
              "--web.enable-lifecycle"], timeout=60)
@@ -184,6 +188,7 @@ class Prombench(PrometheusImage):
     CTX = "kind-prombench"
     TAG = "prometheus-conftamer:v3.2.1"
     OUTDIR = f"{CT}/dump_ancestors/argmatch-out"  # mounted at /argmatch-out in prometheus-meta
+    CONFIG_DIR = "/etc/prometheus/config"  # where prometheus-meta mounts its ConfigMap
     EXPERIMENT = f"{CT}/dump_ancestors/argmatch/experiment"
     RELOAD_AFTER = 30
 
@@ -200,14 +205,24 @@ class Prombench(PrometheusImage):
                     subprocess.run(["docker", "exec", "-i", n.removeprefix("node/"), "ctr", "-n", "k8s.io", "images",
                                     "import", "-"], stdin=f, check=True, capture_output=True, timeout=600)
 
-    def restart(self, config):
-        """Restarts prometheus-meta with the config, CONFTAMER_EVENTS set and no earlier outputs. Scaling to 0 first
-        means the old pod is gone (no more writes, TSDB unlocked) before the new one starts."""
+    def restart(self, config, files=None):
+        """Restarts prometheus-meta with the config, the files it refers to (added to the ConfigMap, so they appear in
+        CONFIG_DIR), CONFTAMER_EVENTS set and no earlier outputs. Scaling to 0 first means the old pod is gone (no more
+        writes, TSDB unlocked) before the new one starts."""
         self.k("scale", "deploy/prometheus-meta", "--replicas=0")
         subprocess.run(["kubectl", "--context", self.CTX, "wait", "--for=delete", "pod", "-l", "app=prometheus-meta",
                         "--timeout=600s"], capture_output=True, timeout=660)
-        patch = json.dumps({"data": {"prometheus.yaml": open(config).read()}})
-        self.k("patch", "configmap", "prometheus-meta", "--type", "merge", "-p", patch)
+        data, binary = {"prometheus.yaml": open(config).read()}, {}
+        for name in sorted(os.listdir(files)) if files else []:
+            content = open(f"{files}/{name}", "rb").read()
+            try:
+                data[name] = content.decode()
+            except UnicodeDecodeError:
+                binary[name] = base64.b64encode(content).decode()
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:  # (can be too long for a command line)
+            json.dump({"data": data, "binaryData": binary}, f)
+            f.flush()
+            self.k("patch", "configmap", "prometheus-meta", "--type", "merge", "--patch-file", f.name)
         self.k("set", "env", "deploy/prometheus-meta", "-c", "prometheus", "CONFTAMER_EVENTS=/argmatch-out/events.jsonl")
         run(["sudo", "rm", "-f"] + [f"{self.OUTDIR}/{f}" for f in OUTPUTS], timeout=60)
         self.k("scale", "deploy/prometheus-meta", "--replicas=1")
@@ -219,10 +234,10 @@ class Prombench(PrometheusImage):
                            timeout=60)
         return p.returncode == 0
 
-    def run(self, out_dir, config, stacklog=None, matchfile=None):
+    def run(self, out_dir, config, stacklog=None, matchfile=None, files=None):
         self.build(self.TAG, out_dir, stacklog, matchfile)
         self.load()
-        self.restart(config)
+        self.restart(config, files)
         start = time.time()
         helpers = []  # background processes, stopped at the capture
         ready = reload = None
@@ -313,7 +328,7 @@ class PrombenchVM(Testbed):
             say(f"ssh to {self.vm} failed ({err.splitlines()[-1] if err else 'exit 255'}); retrying")
             time.sleep(self.POLL)
 
-    def run(self, out_dir, config, stacklog=None, matchfile=None):
+    def run(self, out_dir, config, stacklog=None, matchfile=None, files=None):
         if not self.vm:
             raise RuntimeError("the prombench testbed needs --vm")
         here = os.path.dirname(os.path.abspath(__file__))
@@ -323,6 +338,8 @@ class PrombenchVM(Testbed):
         with tempfile.TemporaryDirectory() as tmp:
             for name, path in inputs.items():
                 shutil.copy(path, f"{tmp}/{name}")
+            if files:
+                shutil.copytree(files, f"{tmp}/files")
             tar = subprocess.run(["tar", "-C", tmp, "-cf", "-", "."], capture_output=True, check=True).stdout
         say(f"copying inputs to {self.vm}")
         self.ssh(f"rm -rf {self.REMOTE} && mkdir -p {self.REMOTE}/out && tar -C {self.REMOTE} -xf -", timeout=300,
@@ -331,6 +348,8 @@ class PrombenchVM(Testbed):
                 str(self.wait)]
         if stacklog:
             args += ["--stacklog", "stacklog.txt", "--matchfile", "matches.txt"]
+        if files:
+            args += ["--files", "files"]
         for k, v in self.argmatch_args.items():
             if ARGMATCH_ARGS.get(k) != v:
                 args += ["--argmatch-arg", f"{k}={v}"]
@@ -390,13 +409,14 @@ def main():
     ap.add_argument("--config", required=True)
     ap.add_argument("--stacklog")
     ap.add_argument("--matchfile")
+    ap.add_argument("--files")
     ap.add_argument("--wait", type=int, default=240)
     ap.add_argument("--argmatch-arg", action="append", default=[])
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     Prombench(wait=a.wait, argmatch_args=dict(kv.split("=", 1) for kv in a.argmatch_arg)).run(
         os.path.abspath(a.out), os.path.abspath(a.config), a.stacklog and os.path.abspath(a.stacklog),
-        a.matchfile and os.path.abspath(a.matchfile))
+        a.matchfile and os.path.abspath(a.matchfile), a.files and os.path.abspath(a.files))
 
 
 if __name__ == "__main__":

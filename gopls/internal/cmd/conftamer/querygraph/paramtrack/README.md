@@ -6,6 +6,7 @@ Runs the end-to-end param tracking workflow in [WORKFLOW.md](WORKFLOW.md), from 
 ```
 cd gopls/internal/cmd/conftamer/querygraph/paramtrack
 uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out <dir> --config <concrete config> \
+  [--config-files <dir>] \
   [--module github.com/prometheus/prometheus] [--module-dir <checkout>] [--root /config.Config] [--format yaml] \
   [--docs <documented keys>] [--testbed docker|prombench] [--vm paramtrack-e2e] [--wait 240] [--argmatch-arg KEY=VALUE ...] [--redo <step>] [--until <step>]
 ```
@@ -19,7 +20,7 @@ Each step writes one subdirectory of `--out`, named after the step:
 | Step | Program | Main output |
 |---|---|---|
 | `1-unmarshaler-graph` | `gopls conftamer`, built from this checkout | `unmarshaler_subgraph.text` |
-| `2-concrete-config` | configkeys without a config, then `stats.py --full-keys-only`; then copies `--config`, until the /concreteconfig skill generates it from `full_keys.yaml` | `full_keys.yaml`, `config.yaml` |
+| `2-concrete-config` | configkeys without a config, then `stats.py --full-keys-only`; then copies `--config` and the files it refers to (`--config-files`, default a `files/` directory next to `--config`, as the /concreteconfig skill writes them) | `full_keys.yaml`, `config.yaml`, `files/` |
 | `3-configkeys` | [configkeys](../configkeys/README.md) `--strings-only` | `configkeys.csv`, `param_values.txt`, `param_keys.txt` |
 | `4-chains` | testbed run 1: contexttrack, with argmatch instrumenting nothing; then `events_to_stacklog.py` | `events.jsonl`, `stacklog.txt` |
 | `5-matches` | testbed run 2: argmatch instruments `stacklog.txt`'s functions and searches for `param_values.txt`; contexttrack records the messages | `matches.csv`, `matches.calls.csv`, `events.jsonl` |
@@ -66,6 +67,8 @@ Step 8 computes STATISTICS.md's statistics and visuals for this run. Where its i
 - `prombench`: prombench's prometheus-meta, on the GCE VM `--vm` (default `paramtrack-e2e`). paramtrack copies `testbeds.py`, `common.py` and the run's inputs to `/tmp/paramtrack-testbed` on the VM, runs the testbed there over ssh, and copies the outputs back. On the VM, it does what the argmatch experiment's `run_on_vm.sh` does ([README](../../../../../../../dump_ancestors/argmatch/experiment/README.md#what-a-run-does)): it builds `prometheus-conftamer:v3.2.1`, loads it into the main node, restarts prometheus-meta, runs the dashboard viewer and the config reloads, and copies `argmatch-out`. It also sets the prometheus-meta config map to the concrete config, and sets `CONFTAMER_EVENTS` on the deployment, before the restart. The VM needs:
   - the checkouts that `prometheus-test-infra/prombench/vm_setup.sh` makes. They're built as they are on the VM, so push the changes you want, or copy them there.
   - prombench deployed with `deploy.sh`, which needs `images/conftamer-images.tar` (see `build_prom_argmatch.sh`).
+
+Both testbeds install step 2's `files/` where the config expects them, `/etc/prometheus/config/`: the `prombench` testbed adds each file to the prometheus-meta ConfigMap before restarting it (it's mounted there), and the `docker` testbed mounts the directory there.
 
 Both testbeds copy the stack log and match file into the Prometheus checkout, as `paramtrack-stacklog.txt` and `paramtrack-matches.txt`, because the build reads them.
 
