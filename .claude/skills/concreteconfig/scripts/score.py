@@ -7,7 +7,8 @@ value's ambiguity, literal and signal columns in <out>/config_values.csv.
 Usage (from anywhere):
   uv run --with pandas --with matplotlib --with tabulate python score.py --config <candidate.yaml> \\
     --graph <unmarshaler_subgraph.text> --ignore <module's ignore file (MODULE.md)> --out <dir> \\
-    [--module github.com/prometheus/prometheus] [--module-dir <checkout>] [--root /config.Config] [--docs <keys>]
+    [--module github.com/prometheus/prometheus] [--module-dir <checkout>] [--root /config.Config] \\
+    [--format yaml] [--docs <keys>]
 The graph is paramtrack's step 1 output (1-unmarshaler-graph/unmarshaler_subgraph.text); the defaults are
 Prometheus'.
 """
@@ -51,6 +52,7 @@ def main():
     ap.add_argument("--module", default="github.com/prometheus/prometheus")
     ap.add_argument("--module-dir", default=f"{CT}/prometheus")
     ap.add_argument("--root", default="/config.Config")
+    ap.add_argument("--format", default="yaml", help="Config format, as paramtrack's --format")
     ap.add_argument("--docs", default=f"{CT}/prom-test-infra/prombench/prometheus_config_keys.txt")
     a = ap.parse_args()
     out = os.path.abspath(a.out)
@@ -59,7 +61,8 @@ def main():
     bin = f"{out}/configkeys"
     run(["go", "build", "-o", bin, "."], f"{out}/configkeys.build.log", cwd=f"{QUERYGRAPH}/configkeys")
     cmd = [bin, "--config", os.path.abspath(a.config), "--txt-dir", out, "--strings-only", "--unmarshaler-subgraph",
-           os.path.abspath(a.graph), "--module-prefix", a.module, "--output", f"{out}/configkeys.csv"]
+           os.path.abspath(a.graph), "--module-prefix", a.module, "--format", a.format,
+           "--output", f"{out}/configkeys.csv"]
     if a.root:
         cmd += ["--root", a.root]
     run(cmd, f"{out}/configkeys.log")
