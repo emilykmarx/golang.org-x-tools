@@ -197,14 +197,14 @@ def apply_ignore(full, config, patterns):
     return len(ignored), dropped
 
 
-def check_sections(fkdf, configkeys_csv, out):
+def check_sections(fkdf, n_full, configkeys_csv, out):
     """Check that the sections computed here (<parent key> @ <Unmarshaler>) have the same keys as configkeys'
     `section keys` column. Comparable where a full key's pattern resolves to just that full key (all keys outside
     service discovery, and SD keys whose pattern is in only one SD config): elsewhere configkeys combines the sections of
-    all SD configs with the key. Compared as patterns (the column has them, with the SD `*`)."""
+    all SD configs with the key. n_full counts each pattern's full keys before --ignore, since configkeys' column
+    still combines the ignored SD configs' sections. Compared as patterns (the column has them, with the SD `*`)."""
     ck = pd.read_csv(configkeys_csv, keep_default_na=False, dtype=str).set_index("param_key")
     pattern_of = dict(zip(fkdf.key, fkdf.pattern))
-    n_full = fkdf.drop_duplicates("key").groupby("pattern").key.size()
     groups = fkdf.groupby("section").key.apply(lambda ks: {pattern_of[k] for k in ks})
     comparable = fkdf.drop_duplicates("key")
     comparable = comparable[comparable.pattern.map(n_full) == 1]
@@ -402,36 +402,36 @@ def write_full_keys_yaml(keys, path, tiers):
     open(path, "w").write("\n".join(lines) + "\n")
 
 
-def write_visuals(fkdf, config, covered_by, searched, matched, sd, args, out):
-    """Write full_keys.csv with searched/matched columns, node_coverage.csv and node_coverage_keyed.csv (attributes
-    per graph node, for prettify's --node-attrs), sd_configs.csv, and full_keys.yaml (a keys-only YAML of the full
-    keys, annotated)"""
+def write_visuals(fkdf, fkdf_all, config, covered_by, searched, matched, sd, args, out):
+    """Write full_keys.csv with searched/matched columns, node_coverage.csv (attributes per graph node, for
+    prettify's --node-attrs, from every full key, --ignore or not) and node_coverage_keyed.csv (from the in-scope
+    ones), sd_configs.csv, and full_keys.yaml (a keys-only YAML of the in-scope full keys, annotated)"""
     def values_of(fk):
         return {v.replace("\n", "\\n") for k in covered_by.get(fk, ()) for v in config[k]["values"]}
 
-    fkdf["searched"] = fkdf.key.map(lambda fk: bool(values_of(fk) & searched))
-    fkdf["matched"] = fkdf.key.map(lambda fk: bool(values_of(fk) & matched))
-    fkdf["tier"] = [TIERS[key_tier(r)] for r in fkdf.itertuples()]
+    for f in (fkdf, fkdf_all):
+        f["searched"] = f.key.map(lambda fk: bool(values_of(fk) & searched))
+        f["matched"] = f.key.map(lambda fk: bool(values_of(fk) & matched))
+        f["tier"] = [TIERS[key_tier(r)] for r in f.itertuples()]
     fkdf.to_csv(f"{args.out}/full_keys.csv", index=False)
     keys = fkdf.drop_duplicates("key")
 
-    # Graph nodes: tier of the furthest full key ending at the node
-    nodes = node_rows(fkdf, args.graph)
+    # Graph nodes: tier of the furthest full key ending at the node. The whole graph counts every full key, even
+    # those --ignore leaves out (shown as not in the config).
+    nodes = node_rows(fkdf_all, args.graph)
     nodes.to_csv(f"{args.out}/node_coverage.csv", index=False)
 
-    # For the keyed graph: leave out the SD configs none of whose full keys argmatch matched (all the keys under the
-    # SD config's key, wherever they end: e.g. static_configs' keys all end at targetgroup.Group), and every full key
-    # under them (e.g. scrape_configs.azure_sd_configs.tls_config.ca_file, whose Unmarshaler is TLSConfig).
+    # For the keyed graph: the in-scope full keys. Leave out the SD config nodes with none of them under the SD
+    # config's key, wherever they end (e.g. static_configs' keys all end at targetgroup.Group): those --ignore leaves
+    # out under every parent key.
     sd_keys = set(sd.values())
     under = keys.assign(sd_key=keys.key.map(lambda fk: sd_key_of(fk, sd_keys)))
     sd_df = pd.DataFrame([{"node": n, "sd_key": k, "keys": int((under.sd_key == k).sum()),
                            "keys_matched": int(under[under.sd_key == k].matched.sum())} for n, k in sorted(sd.items())
                           if n in set(nodes.node)])
-    sd_df["left_out"] = sd_df.keys_matched == 0
+    sd_df["left_out"] = sd_df["keys"] == 0
     sd_df.to_csv(f"{args.out}/sd_configs.csv", index=False)
-    left_out_keys = set(sd_df[sd_df.left_out].sd_key)
-    keyed = fkdf[fkdf.key.map(lambda fk: sd_key_of(fk, sd_keys) not in left_out_keys)]
-    node_rows(keyed, args.graph).to_csv(f"{args.out}/node_coverage_keyed.csv", index=False)
+    node_rows(fkdf, args.graph).to_csv(f"{args.out}/node_coverage_keyed.csv", index=False)
 
     # Legend entries for the node colours, in order (for visualize.sh)
     pd.DataFrame([(text, c) for _, text, c in MATCHED_BINS] + list(NODE_GREYS.items()),
@@ -594,8 +594,12 @@ def main():
     MAP_FIELDS.update(map_field_keys(args.graph))
     sd = sd_names(args.prometheus)
     full, config, catchall = load_configkeys(args.configkeys, sd)
-    n_ignored, n_dropped = apply_ignore(full, config, read_ignore(args.ignore))
-    docs = read_docs(args.docs)
+    full_all = dict(full)  # before --ignore: for the whole-graph visualization
+    n_full = collections.Counter(info["pattern"] for info in full.values())  # (for check_sections)
+    ignore = read_ignore(args.ignore)
+    n_ignored, n_dropped = apply_ignore(full, config, ignore)
+    docs_all = read_docs(args.docs)
+    docs = {k: t for k, t in docs_all.items() if not any(fnmatch.fnmatchcase(k, p) for p in ignore)}
 
     # Per full key: section, top-level section, coverage by the config
     covered_by = collections.defaultdict(set)  # full key => concrete keys
@@ -604,20 +608,17 @@ def main():
             covered_by[fk].add(k)
     sd_keys = set(sd.values())
 
-    def under_sd(fk):
-        """Whether the key is in a service discovery config"""
-        s = segs(fk)
-        return (s[0] == "scrape_configs" and len(s) > 2 and s[1] in sd_keys) or \
-            (s[:2] == ["alerting", "alertmanagers"] and len(s) > 3 and s[2] in sd_keys)
+    def full_key_rows(full, docs):
+        rows = []
+        for fk, info in sorted(full.items()):
+            for u, sec in sorted({(path_nodes(p)[-1], section(fk, p)) for p in info["paths"]}):
+                rows.append({"key": fk, "pattern": info["pattern"], "unmarshaler": u, "kind": info["kind"],
+                             "top": segs(fk)[0], "section": sec, "map_key": segs(fk)[-1] == STAR,
+                             "in_config": fk in covered_by, "documented": fk in docs,
+                             "searchable": searchable(info["kind"]), "sd": sd_key_of(fk, sd_keys) is not None})
+        return pd.DataFrame(rows)
 
-    fk_rows = []
-    for fk, info in sorted(full.items()):
-        for u, sec in sorted({(path_nodes(p)[-1], section(fk, p)) for p in info["paths"]}):
-            fk_rows.append({"key": fk, "pattern": info["pattern"], "unmarshaler": u, "kind": info["kind"],
-                            "top": segs(fk)[0], "section": sec, "map_key": segs(fk)[-1] == STAR,
-                            "in_config": fk in covered_by, "documented": fk in docs,
-                            "searchable": searchable(info["kind"]), "sd": under_sd(fk)})
-    fkdf = pd.DataFrame(fk_rows)
+    fkdf = full_key_rows(full, docs)
     if args.full_keys_only:
         write_full_keys_yaml(fkdf.drop_duplicates("key"), f"{args.out}/full_keys.yaml", tiers=False)
         print(f"wrote {args.out}/full_keys.yaml: {fkdf.key.nunique()} full keys")
@@ -662,8 +663,7 @@ def main():
     secs = fkdf.groupby("section").agg(size=("key", "nunique"), in_config=("in_config", "sum"),
                                        top=("top", "first"), searchable=("searchable", "sum")).reset_index()
     secs["covered"] = secs.in_config > 0
-    if not args.ignore:  # (it compares with configkeys' sections, which combine ignored SD configs' keys)
-        check_sections(fkdf, args.configkeys, out)
+    check_sections(fkdf, n_full, args.configkeys, out)
     out.p(f"- Sections (keys with the same parent key and Unmarshaler) with at least one key in the config: "
           f"{pct(secs.covered.sum(), len(secs))}")
     sec_top = secs.groupby("top").agg(sections=("section", "size"), covered=("covered", "sum"))
@@ -691,23 +691,17 @@ def main():
           + ", ".join(f"{r.parent}.{r.sd} ({r.in_config}/{r.full_keys})" for r in used.itertuples()))
     out.p(f"  - Their keys are {pct(sddf.full_keys.sum(), len(keys))} of all full keys")
 
-    # Summary, with and without service discovery
-    def summary(f):
-        k = f.drop_duplicates("key")
-        s_ = f.groupby("section").in_config.any()
-        t_ = f.groupby("unmarshaler").in_config.any()
-        return pd.DataFrame([
-            ("Full keys", len(k), k.in_config.sum()),
-            ("Sections", len(s_), s_.sum()),
-            ("Unmarshaler types with full keys", len(t_), t_.sum()),
-        ], columns=["", "full config (graph)", "in the config"]).assign(
-            coverage=lambda d: (100 * d["in the config"] / d["full config (graph)"]).round(0).astype(int).astype(str) + "%")
-
-    out.p("\nSummary:")
-    out.table(summary(fkdf))
-    out.p("Summary excluding service discovery (keys in a `*_sd_configs` or `static_configs` block; a type counts if it "
-          "ends a non-SD key):")
-    out.table(summary(fkdf[~fkdf.sd]))
+    # Summary
+    s_ = fkdf.groupby("section").in_config.any()
+    t_ = fkdf.groupby("unmarshaler").in_config.any()
+    summary = pd.DataFrame([
+        ("Full keys", len(keys), keys.in_config.sum()),
+        ("Sections", len(s_), s_.sum()),
+        ("Unmarshaler types with full keys", len(t_), t_.sum()),
+    ], columns=["", "full config (graph)", "in the config"]).assign(
+        coverage=lambda d: (100 * d["in the config"] / d["full config (graph)"]).round(0).astype(int).astype(str) + "%")
+    out.p("\nSummary" + (" (in scope: without the --ignore keys)" if args.ignore else "") + ":")
+    out.table(summary)
 
     # Kinds (not with --config-only: numbers and bools only matter if argmatch searches them)
     if not cfg_only:
@@ -958,7 +952,7 @@ def main():
     if args.label_keys:
         out.h("Confidence of message => full key mappings (paramtrack's label_keys.csv)")
         confidence(args.label_keys, out, f"{args.out}/confidence_distribution.png")
-    write_visuals(fkdf, config, covered_by, searched, matched, sd, args, out)
+    write_visuals(fkdf, full_key_rows(full_all, docs_all), config, covered_by, searched, matched, sd, args, out)
 
     out.write()
     print(f"wrote {out.path}")

@@ -1,8 +1,8 @@
-# Full keys the concreteconfig skill leaves alone for Prometheus, and stats.py --ignore leaves out:
-# the service discovery configs the user's fuzzed config (prom-test-infra/prombench/fuzzed_prometheus.yaml) doesn't
-# set (each (parent, SD config) pair). A fixed scope, kept when the shipped config became upstream's (2026-11-05).
-# Kept: kubernetes_sd_configs under both parents; dns_sd_configs, file_sd_configs and static_configs under
-# scrape_configs. One fnmatch pattern per line.
+# Prometheus' full keys out of scope (stats.py --ignore): paramtrack's steps 2 and 8 and the concreteconfig skill
+# leave them out. They're the service discovery configs the user's fuzzed config
+# (prom-test-infra/prombench/fuzzed_prometheus.yaml) doesn't set, each (parent, SD config) pair: a fixed scope, kept
+# when the concreteconfig skill's shipped config became upstream's (2026-11-05). In scope: kubernetes_sd_configs under
+# both parents; dns_sd_configs, file_sd_configs and static_configs under scrape_configs. One fnmatch pattern per line.
 scrape_configs.azure_sd_configs.*
 scrape_configs.consul_sd_configs.*
 scrape_configs.digitalocean_sd_configs.*

@@ -6,7 +6,7 @@ value's ambiguity, literal and signal columns in <out>/config_values.csv.
 
 Usage (from anywhere):
   uv run --with pandas --with matplotlib --with tabulate python score.py --config <candidate.yaml> \\
-    --graph <unmarshaler_subgraph.text> --ignore <module's ignore.txt> --out <dir> \\
+    --graph <unmarshaler_subgraph.text> --ignore <module's ignore file (MODULE.md)> --out <dir> \\
     [--module github.com/prometheus/prometheus] [--module-dir <checkout>] [--root /config.Config] [--docs <keys>]
 The graph is paramtrack's step 1 output (1-unmarshaler-graph/unmarshaler_subgraph.text); the defaults are
 Prometheus'.
@@ -69,7 +69,7 @@ def main():
          a.module_dir, "--out", out], f"{out}/stats.log", timeout=900)
 
     md = open(f"{out}/config_stats.md").read()
-    print(section(md, r"^Summary:", r"^- |^## "))  # Q1's coverage tables, with and without service discovery
+    print(section(md, r"^Summary", r"^- |^## "))  # Q1's coverage table (in scope)
     print(section(md, r"^- In sections with a concrete key", r"^## "))  # how much of each touched section is set
     print(section(md, r"^Ambiguity:", r"^How similar"))
     print("\n".join(line[:300] for line in md.splitlines() if line.startswith("- Searched values")))

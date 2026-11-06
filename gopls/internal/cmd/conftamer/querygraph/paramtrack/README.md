@@ -1,6 +1,6 @@
 # paramtrack
 
-Runs the end-to-end param tracking workflow in [WORKFLOW.md](WORKFLOW.md), from the concrete config to Message label => Full keys, and joins the outputs (step 7).
+Runs a workflow that outputs a relationship between configuration parameters and messages for a Go module running in a testbed.
 
 ## Usage
 ```
@@ -8,9 +8,14 @@ cd gopls/internal/cmd/conftamer/querygraph/paramtrack
 uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out <dir> --config <concrete config> \
   [--config-files <dir>] \
   [--module github.com/prometheus/prometheus] [--module-dir <checkout>] [--root /config.Config] [--format yaml] \
-  [--docs <documented keys>] [--testbed docker|prombench] [--vm paramtrack-e2e] [--wait 240] [--argmatch-arg KEY=VALUE ...] [--redo <step>] [--until <step>]
+  [--docs <documented keys>] [--ignore <full key patterns>] [--testbed docker|prombench] [--vm paramtrack-e2e] [--wait 240] [--argmatch-arg KEY=VALUE ...] [--redo <step>] [--until <step>]
 ```
 The defaults are for Prometheus. A full run takes about 20–25 minutes, mostly the two builds and runs of the dynamic phase.
+
+**Scope:** `--ignore` is a file of full key patterns out of scope (stats.py's `--ignore`), which steps 2 and 8 leave out, as the /concreteconfig skill does. The default, [ignore/prometheus.txt](ignore/prometheus.txt), leaves out the service discovery configs out of scope for prombench (its header says which and why). Pass `--ignore ''` for every full key.
+
+## Prerequisite: the concrete config
+Before running paramtrack, generate the `--config` with the /concreteconfig skill ([SKILL.md](../../../../../../.claude/skills/concreteconfig/SKILL.md)), for the same module and testbed. The skill uses paramtrack's first steps, never its full run: `--until 4` with the testbed's shipped config gives it the graph, the in-scope full keys YAML and a message label baseline (steps 1, 2 and 4), and `--until 4` with each candidate config checks that no label is lost. It writes `config.yaml` and the `files/` it refers to, which `--config` takes as they are. Its runs on Prometheus and prombench took about 30–45 minutes, not counting the baseline run.
 
 pandas, matplotlib and tabulate are for stats.py ([../configkeys/stats/STATISTICS.md](../configkeys/stats/STATISTICS.md)): step 7 uses its rules for full keys and sections, and step 8 runs it.
 
@@ -20,7 +25,7 @@ Each step writes one subdirectory of `--out`, named after the step:
 | Step | Program | Main output |
 |---|---|---|
 | `1-unmarshaler-graph` | `gopls conftamer`, built from this checkout | `unmarshaler_subgraph.text` |
-| `2-concrete-config` | configkeys without a config, then `stats.py --full-keys-only`; then copies `--config` and the files it refers to (`--config-files`, default a `files/` directory next to `--config`, as the /concreteconfig skill writes them) | `full_keys.yaml`, `config.yaml`, `files/` |
+| `2-concrete-config` | configkeys without a config, then `stats.py --full-keys-only --ignore` (the in-scope full keys); then copies `--config` (see "Prerequisite") and the files it refers to (`--config-files`, default a `files/` directory next to `--config`, as the /concreteconfig skill writes them) | `full_keys.yaml`, `config.yaml`, `files/` |
 | `3-configkeys` | [configkeys](../configkeys/README.md) `--strings-only` | `configkeys.csv`, `param_values.txt`, `param_keys.txt` |
 | `4-chains` | testbed run 1: contexttrack, with argmatch instrumenting nothing; then `events_to_stacklog.py` | `events.jsonl`, `stacklog.txt` |
 | `5-matches` | testbed run 2: argmatch instruments `stacklog.txt`'s functions and searches for `param_values.txt`; contexttrack records the messages | `matches.csv`, `matches.calls.csv`, `events.jsonl` |
@@ -59,7 +64,8 @@ These terms are defined in STATISTICS.md. Unlike configkeys' `section keys` colu
 Step 8 computes STATISTICS.md's statistics and visuals for this run. Where its inputs differ from STATISTICS.md's "Scope and inputs":
 - the graph, configkeys output and searched values are this run's (steps 2 and 3);
 - argmatch's results are this run's `matches.csv` (step 5). stats.py only uses their needles, so step 8 writes the distinct needles to its own `5-matches/matched_needles.csv`. stats.py names the argmatch run after that directory, `5-matches`;
-- the documented keys are `--docs`.
+- the documented keys are `--docs`;
+- the full keys are the in-scope ones (`--ignore`; see "Scope"), except in the whole-graph visualization, which counts every full key.
 
 ## Testbeds
 `--testbed` chooses where the module runs (`testbeds.py`):

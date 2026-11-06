@@ -82,12 +82,12 @@ render() {
 # A node's full keys are those whose Unmarshaler it is (the type holding the value)
 render unmarshaler_subgraph_coverage "$R/node_coverage.csv" \
   "Unmarshaler Subgraph: each node's full keys, and how many of them argmatch matched" \
-  "Area: the number of the node's full keys (keys whose Unmarshaler is the node), counting the keys under every SD config.
+  "Area: the number of the node's full keys (keys whose Unmarshaler is the node), counting the keys under every SD config, in scope (stats.py --ignore) or not.
 E.g. TLSConfig counts scrape_configs.tls_config.ca_file, and also scrape_configs.azure_sd_configs.tls_config.ca_file and its copies in every other SD config.
 Colour: the fraction of those keys whose values argmatch matched. Grey: no full keys." ""
 
 # The SD configs left out (sd_configs.csv): as a regex for --exclude-nodes, and the kept ones' keys for the description
-read -r unmatched_sd kept_sd n_left_out < <(python3 -I - "$R/sd_configs.csv" <<'PY'
+read -r ignored_sd kept_sd n_left_out < <(python3 -I - "$R/sd_configs.csv" <<'PY'
 import csv, re, sys
 rows = list(csv.DictReader(open(sys.argv[1])))
 out = [r for r in rows if r["left_out"] == "True"]
@@ -97,9 +97,9 @@ PY
 )
 # Every node here has full keys, so grey (in the whole graph: no full keys) is free for 0% matched.
 render unmarshaler_subgraph_coverage_keyed "$R/node_coverage_keyed.csv" \
-  "Unmarshaler Subgraph without the unmatched SD configs: each node's remaining full keys, and how many of them argmatch matched" \
-  "Left out: the ${n_left_out} SD configs none of whose full keys argmatch matched, and every full key under them, wherever it ends.
-E.g. scrape_configs.azure_sd_configs.tls_config.ca_file no longer counts for TLSConfig. Kept SD configs: ${kept_sd//,/, }.
+  "Unmarshaler Subgraph in scope: each node's in-scope full keys, and how many of them argmatch matched" \
+  "In scope: every full key but those stats.py --ignore leaves out. Left out with them: the ${n_left_out} SD configs with no in-scope full keys.
+E.g. scrape_configs.azure_sd_configs.tls_config.ca_file doesn't count for TLSConfig. Kept SD configs: ${kept_sd//,/, }.
 Nodes left with no full keys are contracted away (their edges joined up).
-Area: the number of the node's remaining full keys (keys whose Unmarshaler is the node). Colour: the fraction of those whose values argmatch matched." \
-  "#c9c8c2" --keep-nodes-with full_keys --exclude-nodes "$unmatched_sd"
+Area: the number of the node's in-scope full keys (keys whose Unmarshaler is the node). Colour: the fraction of those whose values argmatch matched." \
+  "#c9c8c2" --keep-nodes-with full_keys --exclude-nodes "$ignored_sd"

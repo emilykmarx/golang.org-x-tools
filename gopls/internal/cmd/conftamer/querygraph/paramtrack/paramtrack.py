@@ -55,6 +55,10 @@ class Workflow:
         sibling = os.path.join(os.path.dirname(os.path.abspath(self.a.config)), "files")
         return sibling if os.path.isdir(sibling) else None
 
+    def ignore(self):
+        """stats.py's --ignore: the full keys out of scope, for steps 2 and 8"""
+        return ["--ignore", self.a.ignore] if self.a.ignore else []
+
     def step_files(self):
         """Step 2's copy of the config's files, if any"""
         d = self.file("2-concrete-config", "files")
@@ -70,9 +74,9 @@ class Workflow:
             cmd += ["--root", self.a.root]
         run(cmd, log=f"{d}/configkeys.log", timeout=600)
         run([sys.executable, f"{STATS}/stats.py", "--full-keys-only", "--configkeys", f"{d}/configkeys_graph.csv",
-             "--graph", graph, "--docs", self.a.docs, "--prometheus", self.a.module_dir, "--out", d],
+             "--graph", graph, "--docs", self.a.docs, "--prometheus", self.a.module_dir, "--out", d] + self.ignore(),
             log=f"{d}/stats.log", timeout=600)
-        # TODO: generate it from full_keys.yaml with the /concreteconfig skill (WORKFLOW.md); for now, the input
+        # The concrete config is an input, generated beforehand by the /concreteconfig skill (README.md, "Prerequisite")
         shutil.copy(self.a.config, f"{d}/config.yaml")
         if self.config_files():
             shutil.copytree(self.config_files(), f"{d}/files")
@@ -216,7 +220,8 @@ class Workflow:
              "--param-values", self.file("3-configkeys", "param_values.txt"), "--graph", graph, "--docs", self.a.docs,
              "--prometheus", self.a.module_dir,
              "--argmatch", f"{d}/5-matches/matched_needles.csv",
-             "--label-keys", self.file("7-label-keys", "label_keys.csv"), "--out", d], log=f"{d}/stats.log", timeout=900)
+             "--label-keys", self.file("7-label-keys", "label_keys.csv"), "--out", d] + self.ignore(),
+            log=f"{d}/stats.log", timeout=900)
         run(["bash", f"{STATS}/visualize.sh", d], log=f"{d}/visualize.log", timeout=1200)
         say(f"{len(matched)} distinct needles matched; tables in {self.dir('8-stats')}/stats_tables.md")
 
@@ -265,7 +270,8 @@ class Workflow:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True, help="Directory for every step's output (one subdirectory per step)")
-    ap.add_argument("--config", required=True, help="Concrete config (until /concreteconfig generates it)")
+    ap.add_argument("--config", required=True, help="Concrete config, e.g. the /concreteconfig skill's config.yaml "
+                                                       "(README.md, \"Prerequisite\")")
     ap.add_argument("--config-files", help="Directory of files the concrete config refers to, which the testbed "
                                            "installs (default: a files/ directory next to --config, if any)")
     ap.add_argument("--module", default="github.com/prometheus/prometheus", help="Module as in go.mod")
@@ -274,6 +280,8 @@ def main():
     ap.add_argument("--format", default="yaml", help="Config format (yaml; json not yet supported by configkeys)")
     ap.add_argument("--docs", default=f"{CT}/prom-test-infra/prombench/prometheus_config_keys.txt",
                     help="Documented keys, for steps 2 and 8 (stats.py --docs)")
+    ap.add_argument("--ignore", default=f"{QUERYGRAPH}/paramtrack/ignore/prometheus.txt",
+                    help="Full keys out of scope, which steps 2 and 8 leave out (stats.py --ignore; empty: none)")
     ap.add_argument("--testbed", default="docker", choices=sorted(TESTBEDS))
     ap.add_argument("--vm", default="paramtrack-e2e", help="GCE VM for --testbed prombench")
     ap.add_argument("--wait", type=int, default=240, help="Seconds to run the module under the workload, per run")

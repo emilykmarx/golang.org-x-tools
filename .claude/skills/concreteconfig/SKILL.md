@@ -18,8 +18,8 @@ validates the config. The module's file (below) points to these.
 ## Per-module and per-testbed files
 Read both before starting. They hold everything specific to one module or testbed, so the steps below stay generic:
 - `modules/<module>/MODULE.md`: where the developer knowledge is, how to check a config, how to reload it, keys to
-  skip and why, values known to be safe, and the module's ignore file (`modules/<module>/ignore.txt`: keys out of
-  scope, e.g. Prometheus' unused service discovery configs).
+  skip and why, values known to be safe, and the module's ignore file (keys out of scope, e.g. Prometheus' unused
+  service discovery configs; paramtrack's `--ignore`).
 - `testbeds/<testbed>/TESTBED.md`: how to apply a config, add files, check the module and the rest of the testbed
   are healthy, and collect message labels.
 
@@ -27,12 +27,12 @@ There are files for: Prometheus (`modules/prometheus/`) on prombench (`testbeds/
 testbed, write its file first, following these.
 
 ## Inputs
-- The module source checkout, and paramtrack's static phase for it: run paramtrack with `--until 1` for the
-  Unmarshaler graph (`1-unmarshaler-graph/unmarshaler_subgraph.text`).
-- The in-scope full keys YAML: `stats.py --full-keys-only --ignore modules/<module>/ignore.txt` (configkeys/stats/;
-  needs configkeys' output without a config, as paramtrack's step 2 runs it). Each key's comment gives whether it's
-  documented and its value kind; `"*"` is a map key you choose.
-- The testbed's shipped concrete config (TESTBED.md says where), and a running testbed.
+- The module source checkout, the testbed's shipped concrete config (TESTBED.md says where), and a running testbed.
+- The baseline run: paramtrack with the shipped config, through step 4 (TESTBED.md, "Message labels"; reuse one
+  you're given; its `--ignore` must be the module's ignore file, paramtrack's default for Prometheus). Its step
+  directories have the Unmarshaler graph (`1-unmarshaler-graph/unmarshaler_subgraph.text`), the in-scope full keys
+  YAML (`2-concrete-config/full_keys.yaml`), and the message label baseline (`4-chains/events.jsonl`). In the full
+  keys YAML, each key's comment gives whether it's documented and its value kind; `"*"` is a map key you choose.
 - The state earlier runs left (see "Consistency"): `decisions.md` and a generator, in the state directory
   `gopls/internal/cmd/conftamer/querygraph/paramtrack/concreteconfig/<module>-<testbed>/`.
 
@@ -75,7 +75,7 @@ entries take nothing away (constraint 2).
 ## Steps
 1. Read WORKFLOW.md, MODULE.md, TESTBED.md and the decisions file. Get the inputs above. If there's a generator,
    run it first: its output is the previous run's config, and your starting point instead of the shipped config.
-2. Score the shipped config (`scripts/score.py`), and record a baseline of its message labels (TESTBED.md).
+2. Score the shipped config (`scripts/score.py`).
 3. Start from the generator's output (step 1), or else a copy of the shipped config. Walk the in-scope full keys
    YAML in order, top to bottom. For each searchable key not yet set: if the decisions file covers it, apply that
    decision; otherwise decide, using the developer knowledge, and record the decision (set, with what value and why;
