@@ -13,7 +13,8 @@ import os
 import shutil
 import sys
 
-from common import ARGMATCH_LABELS, CT, GOPLS, QUERYGRAPH, run, say
+import common
+from common import ARGMATCH_LABELS, CT, GOPLS, QUERYGRAPH, log_command, run, say
 from testbeds import TESTBEDS
 
 # stats.py's full key and section rules (STATISTICS.md); step 8 runs it
@@ -247,6 +248,9 @@ class Workflow:
 
     def run(self):
         os.makedirs(self.out, exist_ok=True)
+        # paramtrack's own command line, once per invocation; each step logs the commands it runs in its commands.log
+        common.COMMANDS_LOG = f"{self.out}/paramtrack-commands.log"
+        log_command([sys.executable] + sys.argv)
         fns = [self.unmarshaler_graph, self.concrete_config, self.configkeys, self.chains, self.matches,
                self.label_values, self.label_keys, self.stats]
         redo = self.step_index(self.a.redo) if self.a.redo else len(self.STEPS)
@@ -269,7 +273,9 @@ class Workflow:
             shutil.rmtree(partial, ignore_errors=True)
             os.makedirs(partial)
             say(f"{step}: running")
+            common.COMMANDS_LOG = f"{partial}/commands.log"
             fn(partial)
+            common.COMMANDS_LOG = None
             os.rename(partial, d)
             ran = True
             say(f"{step}: done ({d})")

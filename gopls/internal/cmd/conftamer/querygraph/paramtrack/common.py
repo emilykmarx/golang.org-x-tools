@@ -1,6 +1,7 @@
 """Paths and helpers shared by paramtrack's modules."""
 
 import os
+import shlex
 import subprocess
 import time
 
@@ -14,8 +15,26 @@ def say(msg):
     print(f"{time.strftime('%H:%M:%S')} {msg}", flush=True)
 
 
+# File each command run is appended to (log_command), if set: paramtrack sets it to each step's commands.log
+COMMANDS_LOG = None
+
+
+def log_command(cmd, cwd=None):
+    """Appends cmd, shell-quoted, with the time and its working directory, to COMMANDS_LOG"""
+    if COMMANDS_LOG:
+        with open(COMMANDS_LOG, "a") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} (in {cwd or os.getcwd()}) {shlex.join(cmd)}\n")
+
+
+def popen(cmd, **kwargs):
+    """subprocess.Popen, logging the command"""
+    log_command(cmd, kwargs.get("cwd"))
+    return subprocess.Popen(cmd, **kwargs)
+
+
 def run(cmd, cwd=None, log=None, timeout=600, env=None):
     """Runs cmd, writing its output to log (if given), and raises with the log's tail if it fails or times out."""
+    log_command(cmd, cwd)
     out = open(log, "w") if log else subprocess.PIPE
     try:
         p = subprocess.run(cmd, cwd=cwd, stdout=out, stderr=subprocess.STDOUT, timeout=timeout, text=True,

@@ -16,7 +16,8 @@ import tempfile
 import time
 import urllib.request
 
-from common import CT, run, say
+import common
+from common import CT, log_command, popen, run, say
 
 OUTPUTS = ("events.jsonl", "matches.csv", "matches.calls.csv")
 
@@ -128,7 +129,9 @@ class PrometheusDocker(PrometheusImage):
             self.workload(name, argmatch_out)
         finally:
             with open(f"{out_dir}/container.log", "w") as f:
+                log_command(["docker", "logs", name])
                 subprocess.run(["docker", "logs", name], stdout=f, stderr=subprocess.STDOUT, timeout=60)
+            log_command(["docker", "rm", "-f", name])
             subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=60)
 
         for f in OUTPUTS:
@@ -201,17 +204,20 @@ class Prombench(PrometheusImage):
             run(["docker", "save", self.TAG, "-o", tar.name], timeout=600)
             nodes = self.k("get", "nodes", "-l", "cloud.google.com/gke-nodepool=main-node", "-o", "name").split()
             for n in nodes:
+                cmd = ["docker", "exec", "-i", n.removeprefix("node/"), "ctr", "-n", "k8s.io", "images", "import", "-"]
+                log_command(cmd + ["<", tar.name])
                 with open(tar.name, "rb") as f:
-                    subprocess.run(["docker", "exec", "-i", n.removeprefix("node/"), "ctr", "-n", "k8s.io", "images",
-                                    "import", "-"], stdin=f, check=True, capture_output=True, timeout=600)
+                    subprocess.run(cmd, stdin=f, check=True, capture_output=True, timeout=600)
 
     def restart(self, config, files=None):
         """Restarts prometheus-meta with the config, the files it refers to (added to the ConfigMap, so they appear in
         CONFIG_DIR), CONFTAMER_EVENTS set and no earlier outputs. Scaling to 0 first means the old pod is gone (no more
         writes, TSDB unlocked) before the new one starts."""
         self.k("scale", "deploy/prometheus-meta", "--replicas=0")
-        subprocess.run(["kubectl", "--context", self.CTX, "wait", "--for=delete", "pod", "-l", "app=prometheus-meta",
-                        "--timeout=600s"], capture_output=True, timeout=660)
+        cmd = ["kubectl", "--context", self.CTX, "wait", "--for=delete", "pod", "-l", "app=prometheus-meta",
+               "--timeout=600s"]
+        log_command(cmd)
+        subprocess.run(cmd, capture_output=True, timeout=660)
         data, binary = {"prometheus.yaml": open(config).read()}, {}
         for name in sorted(os.listdir(files)) if files else []:
             content = open(f"{files}/{name}", "rb").read()
@@ -246,10 +252,10 @@ class Prombench(PrometheusImage):
                 if ready is None and self.exec_wget("/-/ready"):
                     ready = t
                     say(f"ready after {t:.0f}s")
-                    pf = subprocess.Popen(["kubectl", "--context", self.CTX, "port-forward", "svc/grafana", "3000:80"],
+                    pf = popen(["kubectl", "--context", self.CTX, "port-forward", "svc/grafana", "3000:80"],
                                           stdout=open(f"{out_dir}/port-forward.log", "w"), stderr=subprocess.STDOUT)
                     time.sleep(2)
-                    viewer = subprocess.Popen(
+                    viewer = popen(
                         [sys.executable, f"{self.EXPERIMENT}/view_dashboards.py", "--url",
                          "http://localhost:3000/grafana", "--duration", str(int(self.wait - t))],
                         stdout=open(f"{out_dir}/viewer.log", "w"), stderr=subprocess.STDOUT)
@@ -261,7 +267,7 @@ class Prombench(PrometheusImage):
                     events = f"{self.OUTDIR}/events.jsonl"
                     if not os.path.exists(events) or os.path.getsize(events) == 0:
                         raise RuntimeError(f"no events {t:.0f}s after the restart (is CONFTAMER_EVENTS set?)")
-                    reload = subprocess.Popen(["bash", f"{self.EXPERIMENT}/reload_on_vm.sh", f"{out_dir}/reload.log"])
+                    reload = popen(["bash", f"{self.EXPERIMENT}/reload_on_vm.sh", f"{out_dir}/reload.log"])
                     say("config reload started")
                 time.sleep(5)
             say(f"capturing after {time.time() - start:.0f}s")
@@ -301,11 +307,14 @@ class PrombenchVM(Testbed):
     POLL = 30  # seconds between checks on the run
     GIVE_UP = 1200  # seconds of failed ssh calls before giving up
 
-    def ssh(self, command, timeout, stdin=None, stdout=None):
+    def ssh(self, command, timeout, stdin=None, stdout=None, log=True):
         """Runs command on the VM, retrying while ssh itself fails (exit 255, e.g. the network dropped) for up to
-        GIVE_UP seconds. stdin and stdout are files (stdin is rewound for each try)."""
+        GIVE_UP seconds. stdin and stdout are files (stdin is rewound for each try). log=False leaves it out of the
+        commands log (for polls)."""
         cmd = ["gcloud", "compute", "ssh", "--zone", self.ZONE, self.vm, "--project", self.PROJECT, "--command",
                command, "--", "-o", "ServerAliveInterval=30", "-o", "ConnectTimeout=30"]
+        if log:
+            log_command(cmd)
         start = time.time()
         while True:
             if stdin:
@@ -340,6 +349,8 @@ class PrombenchVM(Testbed):
                 shutil.copy(path, f"{tmp}/{name}")
             if files:
                 shutil.copytree(files, f"{tmp}/files")
+            log_command(["tar", "-C", tmp, "-cf", "-", "."] + [f"# {n} = {p}" for n, p in sorted(inputs.items())]
+                        + ([f"# files = {files}"] if files else []))
             tar = subprocess.run(["tar", "-C", tmp, "-cf", "-", "."], capture_output=True, check=True).stdout
         say(f"copying inputs to {self.vm}")
         self.ssh(f"rm -rf {self.REMOTE} && mkdir -p {self.REMOTE}/out && tar -C {self.REMOTE} -xf -", timeout=300,
@@ -367,7 +378,7 @@ class PrombenchVM(Testbed):
             while True:
                 time.sleep(self.POLL)
                 out = self.ssh(f"cd {self.REMOTE}/out && tail -n +{n_lines + 1} testbed.log; "
-                               f"echo; echo \"@@exit $(cat exit 2>/dev/null)\"", timeout=120)
+                               f"echo; echo \"@@exit $(cat exit 2>/dev/null)\"", timeout=120, log=False)
                 body, _, status = out.rstrip("\n").rpartition("\n@@exit ")
                 lines = body.split("\n")[:-1]  # the last is the blank line echoed before the status
                 for line in lines:
@@ -414,6 +425,9 @@ def main():
     ap.add_argument("--argmatch-arg", action="append", default=[])
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
+    # (PrombenchVM copies out/ back into the step's directory, next to its commands.log)
+    common.COMMANDS_LOG = os.path.abspath(f"{a.out}/vm-commands.log")
+    log_command(sys.argv)
     Prombench(wait=a.wait, argmatch_args=dict(kv.split("=", 1) for kv in a.argmatch_arg)).run(
         os.path.abspath(a.out), os.path.abspath(a.config), a.stacklog and os.path.abspath(a.stacklog),
         a.matchfile and os.path.abspath(a.matchfile), a.files and os.path.abspath(a.files))
