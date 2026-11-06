@@ -2,40 +2,93 @@
 
 Runs a workflow that outputs a relationship between configuration parameters and messages for a Go module running in a testbed.
 
+As an example, we will use Prometheus as the module, YAML as the config format, and Prombench as the testbed.
+But the workflow must generalize to other modules (including Grafana and the Kubernetes API server), JSON as the config format, and other testbeds.
+
+
 ## Usage
 ```
-cd gopls/internal/cmd/conftamer/querygraph/paramtrack
 uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out <dir> --config <concrete config> \
   [--config-files <dir>] \
   [--module github.com/prometheus/prometheus] [--module-dir <checkout>] [--root /config.Config] [--format yaml] \
-  [--docs <documented keys>] [--ignore <full key patterns>] [--testbed docker|prombench] [--vm paramtrack-e2e] [--wait 240] [--argmatch-arg KEY=VALUE ...] [--redo <step>] [--until <step>]
+  [--docs <documented keys>] [--ignore <full keys to ignore>] [--testbed docker|prombench] [--vm paramtrack-e2e] [--wait 240] [--argmatch-arg KEY=VALUE ...] [--redo <step>] [--until <step>] [--only <step> ...]
 ```
-The defaults are for Prometheus. A full run takes about 20–25 minutes, mostly the two builds and runs of the dynamic phase.
+The defaults are for Prometheus.
 
-**Scope:** `--ignore` is a file of full key patterns out of scope (stats.py's `--ignore`), which steps 2 and 8 leave out, as the /concreteconfig skill does. The default, [ignore/prometheus.txt](ignore/prometheus.txt), leaves out the service discovery configs out of scope for prombench (its header says which and why). Pass `--ignore ''` for every full key.
+### `--ignore`
+The keys listed in the `--ignore` file will be ignored when the `/concreteconfig` skill scores candidate concrete configs and counts unset keys, and in the statistics (with one exception in the statistics - see STATISTICS.md).
 
-## Prerequisite: the concrete config
-Before running paramtrack, generate the `--config` with the /concreteconfig skill ([SKILL.md](../../../../../../.claude/skills/concreteconfig/SKILL.md)), for the same module and testbed. The skill uses paramtrack's first steps, never its full run: `--until 4` with the testbed's shipped config gives it the graph, the in-scope full keys YAML and a message label baseline (steps 1, 2 and 4), and `--until 4` with each candidate config checks that no label is lost. It writes `config.yaml` and the `files/` it refers to, which `--config` takes as they are. Its runs on Prometheus and prombench took about 30–45 minutes, not counting the baseline run.
+However, the concrete config may still set an ignored key (e.g. if the skill finds that it must in order for the config to be valid). In this case, `argmatch` still searches for the corresponding value, and the final step before the statistics still outputs those matches.
 
-pandas, matplotlib and tabulate are for stats.py ([../configkeys/stats/STATISTICS.md](../configkeys/stats/STATISTICS.md)): step 7 uses its rules for full keys and sections, and step 8 runs it.
+The default, [ignore/prometheus.txt](ignore/prometheus.txt), leaves out the service discovery configs (its header says which and why).
 
 ## Steps and outputs
-Each step writes one subdirectory of `--out`, named after the step:
+Each step writes one subdirectory of `--out`, named after the step. All programs are built locally. In "Inputs" below, "concrete config" and "documented keys" are the ones paramtrack was run with (or a copy in the concrete config case), and the other filenames refer to outputs of previous steps.
 
-| Step | Program | Main output |
-|---|---|---|
-| `1-unmarshaler-graph` | `gopls conftamer`, built from this checkout | `unmarshaler_subgraph.text` |
-| `2-concrete-config` | configkeys without a config, then `stats.py --full-keys-only --ignore` (the in-scope full keys); then copies `--config` (see "Prerequisite") and the files it refers to (`--config-files`, default a `files/` directory next to `--config`, as the /concreteconfig skill writes them) | `full_keys.yaml`, `config.yaml`, `files/` |
-| `3-configkeys` | [configkeys](../configkeys/README.md) `--strings-only` | `configkeys.csv`, `param_values.txt`, `param_keys.txt` |
-| `4-chains` | testbed run 1: contexttrack, with argmatch instrumenting nothing; then `events_to_stacklog.py` | `events.jsonl`, `stacklog.txt` |
-| `5-matches` | testbed run 2: argmatch instruments `stacklog.txt`'s functions and searches for `param_values.txt`; contexttrack records the messages | `matches.csv`, `matches.calls.csv`, `events.jsonl` |
-| `6-label-values` | argmatch-labels' `join.py` | `joined.csv` |
-| `7-label-keys` | paramtrack | `label_keys.csv`, `summary.txt` |
-| `8-stats` | stats.py, then visualize.sh | `stats_tables.md` and the other outputs STATISTICS.md lists |
+| Step | Programs | Inputs | Main outputs |
+|---|---|---|---|
+| `1-unmarshaler-graph` | `gopls conftamer` | Module source code | `unmarshaler_subgraph.text` |
+| `2-full-keys` | `configkeys (without --config, --txt-dir, --strings-only)`;<br>then `stats.py --full-keys-only (with the configkeys output)` | `unmarshaler_subgraph.text` for both,<br>documented keys (for `stats.py`) | `full_keys.yaml` |
+| `3-chains` | testbed run 1: `contexttrack`,<br>with `argmatch` instrumenting nothing;<br>then `events_to_stacklog.py` | concrete config | `events.jsonl`,<br>`stacklog.txt` |
+| `4-configkeys` | `configkeys (with --config, --txt-dir, --strings-only)` | `unmarshaler_subgraph.text`,<br>concrete config | `configkeys.csv`,<br>`param_values.txt`,<br>`param_keys.txt` |
+| `5-matches` | testbed run 2: `contexttrack`,<br>with argmatch instrumenting 3's chains and searching 4's values | concrete config,<br>`stacklog.txt`,<br>`param_values.txt` | `matches.csv`,<br>`matches.calls.csv`,<br>`events.jsonl` |
+| `6-label-values` | `join.py` | `matches.calls.csv`,<br>`events.jsonl` (from matches, not chains) | `joined.csv` |
+| `7-label-keys` | `paramtrack` | `unmarshaler_subgraph.text`,<br>`configkeys.csv`,<br>`param_keys.txt`,<br>`param_values.txt`,<br>`joined.csv` | `label_keys.csv`,<br>`summary.txt` |
+| `8-stats` | `stats.py`;<br>then `visualize.sh` | `unmarshaler_subgraph.text`,<br>`configkeys.csv`,<br>`param_values.txt`,<br>`matches.csv`,<br>`label_keys.csv`,<br>documented keys | see STATISTICS.md |
 
-Runs 1 and 2 are argmatch-labels' bootstrapping ([README](../../../../../../../dump_ancestors/argmatch-labels/README.md#bootstrapping)).
+### Programs
+- [gopls conftamer](../../../conftamer.go) (no README)
+- [configkeys](../configkeys/README.md)
+- [contexttrack](../../../../../../../conftamer/contexttrack/README.md)
+- [argmatch](../../../../../../../dump_ancestors/argmatch/README.md)
+- [events_to_stacklog.py](../../../../../../../dump_ancestors/argmatch-labels/README.md#bootstrapping)
+- [join.py](../../../../../../../dump_ancestors/argmatch-labels/README.md)
+- [paramtrack](paramtrack.py) (step 7 is `label_keys()`)
+- [stats.py](../configkeys/stats/stats.py) (no README; STATISTICS.md describes its output)
+- [visualize.sh](../configkeys/stats/visualize.sh) (no README; STATISTICS.md describes its output)
 
-**Resuming:** a step whose directory exists is skipped. A step writes into `<step>.partial` and renames it when it's done, so a failed or interrupted step reruns. `--redo <step>` reruns that step and the later ones. Once any step runs, the later ones rerun too, since their inputs changed. Steps can be named by number (`5`), name (`matches`) or both (`5-matches`). `--until <step>` stops after a step, e.g. `--until 3` for the static phase only.
+### Running parts of the workflow
+Steps can be named by number (`5`), name (`matches`) or both (`5-matches`).
+- If a step's directory already exists, it will be skipped.
+  - If a step failed or was interrupted, it will not be skipped (since a step writes into `<step>.partial` and renames it when it's done)
+- `--redo <step>` reruns that step and the later ones. Once any step runs, the later ones rerun too, since their inputs changed.
+- `--until <step>` stops after a step, e.g. `--until 3` after testbed run 1 (step 4, which run 1 doesn't need, comes after it, so such runs skip it).
+- `--only <step>` (repeatable) runs just the given steps, from the earlier steps' outputs as they are, e.g. `--only 2 --only 4` for configkeys on a new config without a testbed run.
+- Step 2 copies paramtrack's `--config` and `--config-files` to the step subdirectory
+  - This allows rerunning the workflow later even if the original file passed to `--config` is gone
+  - All later steps of the workflow use the copy
+  - If Step 2's directory already exists, it checks that it matches `--config` - if not, it exits with an error saying to use --redo 2
+
+## Use with /concreteconfig
+To run paramtrack to evaluate a concrete config output by the [`/concreteconfig`](../../../../../../.claude/skills/concreteconfig/SKILL.md) skill:
+
+(below `uv run` is elided. The environment variables are illustrative, not built in to the workflow)
+#### 1. Run shipped config ("baseline run")
+This outputs the message labels that the shipped config produces, so the skill can evaluate whether a candidate config loses any labels.
+```
+paramtrack.py  \
+  --out $OUT_SHIPPED \
+  --testbed $TESTBED \
+  --config $CONFIG_SHIPPED \
+  --until chains
+```
+#### 2. Generate new concrete config
+First, write a skill prompt pointing to the results of the baseline run above.
+Then, invoke the skill in a fresh session, either headlessly (as below) or interactively.
+```
+.claude/skills/concreteconfig/scripts/run_headless.sh $SKILL_PROMPT $OUT_SKILL
+```
+The skill will itself run paramtrack with `--until chains` to compare each candidate's message labels to the baseline. It writes the final concrete config to its output directory.
+
+#### 3. Run new concrete config
+```
+paramtrack.py \
+  --out $OUT_CONCRETE \
+  --testbed $TESTBED \
+  --config $OUT_SKILL/config.yaml
+```
+## Example
+See [WORKFLOW_EXAMPLE.md](docs/WORKFLOW_EXAMPLE.md) for an example of each step's output.
 
 ## `label_keys.csv`
 Each message's full keys, with a confidence for each. Two kinds of row:
@@ -60,13 +113,6 @@ These terms are defined in STATISTICS.md. Unlike configkeys' `section keys` colu
 
 `summary.txt` counts rows (evidence and inferred), messages, full keys and sections, and lists needles with no concrete key and concrete keys with no full key.
 
-## Step 8: statistics
-Step 8 computes STATISTICS.md's statistics and visuals for this run. Where its inputs differ from STATISTICS.md's "Scope and inputs":
-- the graph, configkeys output and searched values are this run's (steps 2 and 3);
-- argmatch's results are this run's `matches.csv` (step 5). stats.py only uses their needles, so step 8 writes the distinct needles to its own `5-matches/matched_needles.csv`. stats.py names the argmatch run after that directory, `5-matches`;
-- the documented keys are `--docs`;
-- the full keys are the in-scope ones (`--ignore`; see "Scope"), except in the whole-graph visualization, which counts every full key.
-
 ## Testbeds
 `--testbed` chooses where the module runs (`testbeds.py`):
 - `docker`: Prometheus in one local container, built from `prometheus/prombench-argmatch.Dockerfile`, with the workload of argmatch-labels' `bootstrap-example/bootstrap.sh`: API queries every 5 s from 20 s on, a config reload at 30 s, and a stop at `--wait` seconds. The config's Kubernetes service account files are stand-ins, so it loads, but Kubernetes SD can't connect.
@@ -79,3 +125,11 @@ Both testbeds install step 2's `files/` where the config expects them, `/etc/pro
 Both testbeds copy the stack log and match file into the Prometheus checkout, as `paramtrack-stacklog.txt` and `paramtrack-matches.txt`, because the build reads them.
 
 argmatch's build args are bootstrap.sh's (`ARGMATCH_ARGS` in `testbeds.py`); override them with `--argmatch-arg`.
+
+## Command logs
+paramtrack logs the commands it runs, each line with the time, the working directory and the command, shell-quoted:
+- `<out>/paramtrack-commands.log`: paramtrack's own command line, once per invocation.
+- `<step>/commands.log`: every command the step runs (builds, programs, and for the `prombench` testbed the `gcloud compute ssh` calls that copy inputs, start the testbed and copy outputs back). The paths in it are `<step>.partial`, where the step writes until it's done.
+- `<step>/vm-commands.log`, for the `prombench` testbed's steps: the commands the testbed runs on the VM (the build, loading the image, restarting prometheus-meta, the workload, the capture), copied back with its other outputs.
+
+Commands that only check on progress (polling the VM, prometheus-meta's readiness, the docker container's state) aren't logged.

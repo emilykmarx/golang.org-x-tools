@@ -1,12 +1,12 @@
 # configkeys
 
-Finds every config key in the two input files:
-- An Unmarshaler Subgraph
+Finds every config key in the input file(s):
+- An Unmarshaler Subgraph (mandatory)
   - Key = pattern the graph allows, e.g.:
     - `global.external_labels.*`
     - `scrape_configs.*.role`
     - `global.scrape_interval`
-- A concrete config file (or a keys file)
+- A concrete config file (or a keys file) (optional)
   - Key = concrete key, e.g.:
     - `global.external_labels.cluster`
     - `scrape_configs.kubernetes_sd_configs.role`
@@ -16,9 +16,13 @@ For each key, find other keys in the same section.
 
 For each concrete key, output the corresponding values.
 
-Each edge's key segment comes from `ct.ASTPathKeySegment` (`conftamer/keysegments.go`), which the DOT edge labels also use, so they follow the same rules.
+## Patterns
 
-This replaces `keypaths`, `prom-test-infra/prombench/extract_param_values.py`, and `dlv --dump-params` (`ASTPathToParams`) and `querygraph/dumpparams`, which have been removed along with the rest of `dlv`'s message-send tracker (all in git history).
+Each pattern is intended to represent a position where a scalar value can go (see `--config` below for "scalar").
+
+Patterns have `*` for any one segment: map keys, and keys a custom unmarshaler picks for `yaml:"-"` fields (see "How patterns are enumerated").
+
+Each edge's key segment comes from `ct.ASTPathKeySegment` (`conftamer/keysegments.go`), which the DOT edge labels also use, so they follow the same rules.
 
 ## Usage
 ```
@@ -38,7 +42,7 @@ go run . --config .../prom-test-infra/prombench/fuzzed_prometheus.yaml --txt-dir
 - `--root` names the node as it appears in the serialized graph, i.e. with the module prefix cut. By default matching and enumeration start from every root of the graph. Other roots can be types for other files in the same format, e.g. promtool's test files, and they can add spurious matches and patterns.
 - `--through` keeps only keys with a path through the given node, and only those paths: the keys accessible from a (possibly non-root) type, e.g. `github.com/prometheus/common/config.TLSConfig`.
 - Concrete keys come from one of:
-  - `--config`: the config file, parsed with the format's own parser (`gopkg.in/yaml.v3` nodes, or `encoding/json` tokens). Keys are the dot-separated map keys down to each scalar (a single value in the document, i.e. not a mapping or a list: e.g. a string, number, bool or null. A **scalar-like** type is one whose config values are always written as scalars, or lists of scalars, so no keys are at or below it, whatever Go type it's decoded into: a basic type, a slice, or a struct holding a parsed form of the value, e.g. `model.Duration`, `model.LabelNames`, `config.URL`, `relabel.Regexp`); list indices aren't part of keys. YAML aliases are followed (each use is a separate occurrence) and merge keys (`<<`) add the merged mapping's keys. Empty values are skipped.
+  - `--config`: the config file, parsed with the format's own parser (`gopkg.in/yaml.v3` nodes, or `encoding/json` tokens). If it doesn't parse, configkeys exits with the parser's error. (A key the graph doesn't know doesn't stop it: the key is output with no full path; see "Output".) Keys are the dot-separated map keys down to each scalar (a single value in the document, i.e. not a mapping or a list: e.g. a string, number, bool or null. A **scalar-like** type is one whose config values are always written as scalars, or lists of scalars, so no keys are at or below it, whatever Go type it's decoded into: a basic type, a slice, or a struct holding a parsed form of the value, e.g. `model.Duration`, `model.LabelNames`, `config.URL`, `relabel.Regexp`); list indices aren't part of keys. YAML aliases are followed (each use is a separate occurrence) and merge keys (`<<`) add the merged mapping's keys. Empty values are skipped.
   - `--keys-txt`: lines `<value>:<key>[,<key>...]`, e.g. `param_keys.txt`. The keys come after the last colon on each line. No values.
   - `--keys-csv`: a csv whose `param_keys` column holds comma-separated keys. No values.
 - `--txt-dir` (with `--config`) writes, as `extract_param_values.py` did:
@@ -51,7 +55,7 @@ go run . --config .../prom-test-infra/prombench/fuzzed_prometheus.yaml --txt-dir
 ## Output
 One row per key, with columns `param_key,source,pattern,values,value kind,Unmarshaler,Num Unmarshalers,Unmarshaler Path,section keys`:
 - `param_key`: the key, which is a concrete key or a pattern, as `source` says
-- `source`: `config` (a concrete key), `graph` (a pattern), or `both` (a pattern with no `*` that's also in the config)
+- `source`: `config` (a concrete key), `graph` (a pattern), or `both` (a pattern with no `*` that's in the concrete config as well as the graph)
 - `pattern`: for concrete keys, the patterns they instantiate via the same path, joined with `; `. Every concrete key with a full path should have one; the tool warns about any that don't.
 - `values`: for concrete keys from `--config`, their distinct values as a JSON array, in document order
 - `value kind`: the kind of Go value the key's values are stored as (`string`, `number`, `bool`, `struct`, `interface`, `other`, or `unknown`), from the underlying type of the field or node holding them, after stripping pointers, slices/arrays and maps (whose elements and values are the leaves). `[]byte` is a string. A custom unmarshaler that decodes a map (e.g. `labels.Labels`) has its map's value kind. Joined with `; ` if the paths differ. These come from the graph's `Kind` and `FieldKinds` (and `DecodedFields`), so regenerate older graphs.
