@@ -8,6 +8,7 @@ Run with: uv run --with pandas --with matplotlib --with tabulate python paramtra
 import argparse
 import collections
 import csv
+import filecmp
 import os
 import shutil
 import sys
@@ -80,6 +81,17 @@ class Workflow:
         shutil.copy(self.a.config, f"{d}/config.yaml")
         if self.config_files():
             shutil.copytree(self.config_files(), f"{d}/files")
+
+    def check_config_copy(self, d):
+        """When resuming: stop if --config or its files differ from step 2's copies, which the later steps read"""
+        def tree(root):
+            return {os.path.relpath(os.path.join(dp, f), root): os.path.join(dp, f)
+                    for dp, _, fs in os.walk(root) for f in fs} if root and os.path.isdir(root) else {}
+        given, copied = tree(self.config_files()), tree(f"{d}/files")
+        if not filecmp.cmp(self.a.config, f"{d}/config.yaml", shallow=False) or given.keys() != copied.keys() or \
+                any(not filecmp.cmp(given[f], copied[f], shallow=False) for f in given):
+            sys.exit(f"--config or its files differ from step 2's copies in {d}; to use them, rerun from step 2 "
+                     f"(--redo 2)")
 
     def configkeys(self, d):
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
@@ -248,6 +260,8 @@ class Workflow:
             if (i >= redo or ran) and os.path.exists(d):
                 shutil.rmtree(d)
             if os.path.exists(d):
+                if step == "2-concrete-config":
+                    self.check_config_copy(d)
                 say(f"{step}: done already ({d})")
                 continue
             # Write into a partial directory, so that a step that fails or is interrupted isn't taken as done
