@@ -511,13 +511,18 @@ def conf_bin(c):
     return CONF_BINS[-1] if c >= 1 else CONF_BINS[min(int(c * 10), 9)]
 
 
-def confidence(path, out, chart):
+def confidence(path, out, chart, ignore):
     """The confidence of paramtrack's message => full key mappings (its label_keys.csv; paramtrack's README): one
     mapping per (message kind, message label, full key, section); evidence mappings have confidence 1, inferred ones
     the share of their section's keys that are evidence for the message, out of all its keys and out of its eligible
-    ones. Writes the distribution of both for the inferred mappings, and a grouped bar chart of it."""
+    ones. Leaves out the mappings to full keys matching the ignore patterns (--ignore). Writes the distribution of
+    both for the inferred mappings, and a grouped bar chart of it."""
     lk = pd.read_csv(path, keep_default_na=False, dtype=str)
     lk = lk[lk.full_key != ""]
+    ignored = lk.full_key.map(lambda fk: any(fnmatch.fnmatchcase(fk, p) for p in ignore))
+    if ignore:
+        out.p(f"- Left out (--ignore): {ignored.sum()} rows, for {lk[ignored].full_key.nunique()} ignored full keys")
+    lk = lk[~ignored]
     m = lk.groupby(["message_kind", "message_label", "full_key", "section"]).agg(
         evidence=("evidence", lambda e: (e == "True").any()), eligible=("eligible", "first"),
         confidence_all=("confidence_all", "first"), confidence_eligible=("confidence_eligible", "first")).reset_index()
@@ -962,7 +967,7 @@ def main():
 
     if args.label_keys:
         out.h("Confidence of message => full key mappings (paramtrack's label_keys.csv)")
-        confidence(args.label_keys, out, f"{args.out}/confidence_distribution.png")
+        confidence(args.label_keys, out, f"{args.out}/confidence_distribution.png", ignore)
     write_visuals(fkdf, full_key_rows(full_all, docs_all), config, covered_by, searched, matched, sd, args, out)
 
     out.write()
