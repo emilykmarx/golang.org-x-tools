@@ -62,10 +62,10 @@ After each applied config, for a minute or so, through `kubectl exec ... wget -q
 The authoritative check, at the end (each run takes about 6 minutes, most of it the 240 s workload):
 Run paramtrack as its README says, from its directory, with its Python packages:
 `uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out <dir> --config <config>
---testbed prombench --until 4` (plain `python3` fails at import).
-1. **Baseline**, once per testbed deployment: paramtrack with the shipped config, `--testbed prombench --until 4`
+--testbed prombench --until 3` (plain `python3` fails at import).
+1. **Baseline**, once per testbed deployment: paramtrack with the shipped config, `--testbed prombench --until 3`
    (its run 1: contexttrack records events, argmatch instruments nothing). The events are in
-   `<out>/4-chains/events.jsonl`.
+   `<out>/3-chains/events.jsonl`.
 2. **Candidate:** the same, with `--config <candidate>` and another `--out`.
 3. `scripts/count_labels.py <candidate events> --baseline <baseline events>`: it lists the labels missing from the
    candidate's run.

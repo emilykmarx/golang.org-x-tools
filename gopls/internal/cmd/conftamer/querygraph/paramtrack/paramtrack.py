@@ -63,12 +63,13 @@ class Workflow:
 
     def step_files(self):
         """Step 2's copy of the config's files, if any"""
-        d = self.file("2-concrete-config", "files")
+        d = self.file("2-full-keys", "files")
         return d if os.path.isdir(d) else None
 
-    def concrete_config(self, d):
-        """The full keys YAML (every full key the graph allows: configkeys without a config, then stats.py's SD
-        resolution), and the concrete config"""
+    def full_keys(self, d):
+        """The in-scope full keys YAML (every full key the graph allows, but those --ignore leaves out: configkeys
+        without a config, then stats.py's SD resolution), for the concreteconfig skill; and copies of the concrete
+        config and its files, which the later steps read"""
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
         cmd = [self.configkeys_bin(), "--unmarshaler-subgraph", graph, "--module-prefix", self.a.module, "--format",
                self.a.format, "--output", f"{d}/configkeys_graph.csv"]
@@ -96,7 +97,7 @@ class Workflow:
 
     def configkeys(self, d):
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
-        cmd = [self.configkeys_bin(), "--config", self.file("2-concrete-config", "config.yaml"), "--txt-dir", d,
+        cmd = [self.configkeys_bin(), "--config", self.file("2-full-keys", "config.yaml"), "--txt-dir", d,
                "--strings-only", "--unmarshaler-subgraph", graph, "--module-prefix", self.a.module,
                "--format", self.a.format, "--output", f"{d}/configkeys.csv"]
         if self.a.root:
@@ -112,16 +113,16 @@ class Workflow:
 
     def chains(self, d):
         """Run 1: contexttrack records message chains; argmatch instruments nothing"""
-        self.testbed().run(d, self.file("2-concrete-config", "config.yaml"), files=self.step_files())
+        self.testbed().run(d, self.file("2-full-keys", "config.yaml"), files=self.step_files())
         run([sys.executable, f"{ARGMATCH_LABELS}/events_to_stacklog.py", f"{d}/events.jsonl"],
             log=f"{d}/stacklog.txt", timeout=300)
 
     def matches(self, d):
         """Run 2: argmatch instruments the functions in run 1's chains and searches for the values; contexttrack
         records the messages to label"""
-        self.testbed().run(d, self.file("2-concrete-config", "config.yaml"), files=self.step_files(),
-                           stacklog=self.file("4-chains", "stacklog.txt"),
-                           matchfile=self.file("3-configkeys", "param_values.txt"))
+        self.testbed().run(d, self.file("2-full-keys", "config.yaml"), files=self.step_files(),
+                           stacklog=self.file("3-chains", "stacklog.txt"),
+                           matchfile=self.file("4-configkeys", "param_values.txt"))
         if os.path.getsize(f"{d}/matches.calls.csv") == 0:
             raise RuntimeError(f"argmatch found no matches; see {d}/container.log")
 
@@ -138,7 +139,7 @@ class Workflow:
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
         stats.MAP_FIELDS.update(stats.map_field_keys(graph))
         sd = stats.sd_names(self.a.module_dir)
-        full, config, _ = stats.load_configkeys(self.file("3-configkeys", "configkeys.csv"), sd)
+        full, config, _ = stats.load_configkeys(self.file("4-configkeys", "configkeys.csv"), sd)
 
         sections = {fk: sorted({stats.section(fk, p) for p in info["paths"]}) for fk, info in full.items()}
         section_keys = collections.defaultdict(set)
@@ -148,12 +149,12 @@ class Workflow:
 
         # Needle (a value as written in param_values.txt) => concrete keys, from param_keys.txt
         value_keys = {}
-        for line in open(self.file("3-configkeys", "param_keys.txt")).read().splitlines():
+        for line in open(self.file("4-configkeys", "param_keys.txt")).read().splitlines():
             value, _, keys = line.rpartition(":")
             value_keys[value] = keys.split(",")
 
         # Full keys that could have been evidence: set by the concrete config, with a value step 5 searched for
-        searched = set(open(self.file("3-configkeys", "param_values.txt")).read().splitlines())
+        searched = set(open(self.file("4-configkeys", "param_values.txt")).read().splitlines())
         eligible = {fk for c in config.values() if any(v.replace("\n", "\\n") in searched for v in c["values"])
                     for fk in c["full_keys"]}
 
@@ -229,8 +230,8 @@ class Workflow:
 
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
         shutil.copy(graph, d)  # visualize.sh reads it from its results directory
-        run([sys.executable, f"{STATS}/stats.py", "--configkeys", self.file("3-configkeys", "configkeys.csv"),
-             "--param-values", self.file("3-configkeys", "param_values.txt"), "--graph", graph, "--docs", self.a.docs,
+        run([sys.executable, f"{STATS}/stats.py", "--configkeys", self.file("4-configkeys", "configkeys.csv"),
+             "--param-values", self.file("4-configkeys", "param_values.txt"), "--graph", graph, "--docs", self.a.docs,
              "--prometheus", self.a.module_dir,
              "--argmatch", f"{d}/5-matches/matched_needles.csv",
              "--label-keys", self.file("7-label-keys", "label_keys.csv"), "--out", d] + self.ignore(),
@@ -240,7 +241,9 @@ class Workflow:
 
     # ---------------------------------------------------------------------------------------------------------------
 
-    STEPS = ["1-unmarshaler-graph", "2-concrete-config", "3-configkeys", "4-chains", "5-matches", "6-label-values",
+    # (configkeys comes after testbed run 1, which doesn't need it, so that runs up to run 1, like the concreteconfig
+    # skill's label baselines, skip it)
+    STEPS = ["1-unmarshaler-graph", "2-full-keys", "3-chains", "4-configkeys", "5-matches", "6-label-values",
              "7-label-keys", "8-stats"]
 
     def file(self, step, name):
@@ -251,8 +254,9 @@ class Workflow:
         # paramtrack's own command line, once per invocation; each step logs the commands it runs in its commands.log
         common.COMMANDS_LOG = f"{self.out}/paramtrack-commands.log"
         log_command([sys.executable] + sys.argv)
-        fns = [self.unmarshaler_graph, self.concrete_config, self.configkeys, self.chains, self.matches,
+        fns = [self.unmarshaler_graph, self.full_keys, self.chains, self.configkeys, self.matches,
                self.label_values, self.label_keys, self.stats]
+        only = {self.step_index(s) for s in self.a.only}
         redo = self.step_index(self.a.redo) if self.a.redo else len(self.STEPS)
         until = self.step_index(self.a.until) if self.a.until else len(self.STEPS) - 1
         ran = False
@@ -261,12 +265,14 @@ class Workflow:
                 break
             d = self.dir(step)
             # Once a step has run, the later steps' outputs are out of date
-            if (i >= redo or ran) and os.path.exists(d):
+            if (i >= redo or ran or i in only) and os.path.exists(d):
                 shutil.rmtree(d)
             if os.path.exists(d):
-                if step == "2-concrete-config":
+                if step == "2-full-keys":
                     self.check_config_copy(d)
                 say(f"{step}: done already ({d})")
+                continue
+            if only and i not in only:
                 continue
             # Write into a partial directory, so that a step that fails or is interrupted isn't taken as done
             partial = d + ".partial"
@@ -309,6 +315,9 @@ def main():
                     help="Override an argmatch build arg (ARGMATCH_KEY), e.g. DEPTH=5; repeatable")
     ap.add_argument("--redo", metavar="STEP", help="Rerun this step and the later ones, even if done (name or number)")
     ap.add_argument("--until", metavar="STEP", help="Stop after this step")
+    ap.add_argument("--only", metavar="STEP", action="append", default=[],
+                    help="Run only this step, rerunning it if done, from the earlier steps' outputs as they are; "
+                         "repeatable. Removes the later steps' outputs, as they're out of date")
     Workflow(ap.parse_args()).run()
 
 

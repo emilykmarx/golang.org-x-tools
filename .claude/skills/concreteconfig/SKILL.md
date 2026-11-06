@@ -28,10 +28,10 @@ testbed, write its file first, following these.
 
 ## Inputs
 - The module source checkout, the testbed's shipped concrete config (TESTBED.md says where), and a running testbed.
-- The baseline run: paramtrack with the shipped config, through step 4 (TESTBED.md, "Message labels"; reuse one
+- The baseline run: paramtrack with the shipped config, through step 3 (TESTBED.md, "Message labels"; reuse one
   you're given; its `--ignore` must be the module's ignore file, paramtrack's default for Prometheus). Its step
   directories have the Unmarshaler graph (`1-unmarshaler-graph/unmarshaler_subgraph.text`), the in-scope full keys
-  YAML (`2-concrete-config/full_keys.yaml`), and the message label baseline (`4-chains/events.jsonl`). In the full
+  YAML (`2-full-keys/full_keys.yaml`), and the message label baseline (`3-chains/events.jsonl`). In the full
   keys YAML, each key's comment gives whether it's documented and its value kind; `"*"` is a map key you choose.
 - The state earlier runs left (see "Consistency"): `decisions.md` and a generator, in the state directory
   `gopls/internal/cmd/conftamer/querygraph/paramtrack/concreteconfig/<module>-<testbed>/`.

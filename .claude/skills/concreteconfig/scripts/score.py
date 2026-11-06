@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Measure a candidate concrete config with the statistics it controls: runs configkeys on it (as paramtrack's step
-3 does), then `stats.py --config-only --ignore` (configkeys/stats/STATISTICS.md, "Statistics the concrete config
-controls"), and prints the numbers the skill optimizes. The full tables are in <out>/config_stats.md, and each
-value's ambiguity, literal and signal columns in <out>/config_values.csv.
+"""Measure a candidate concrete config with the statistics it controls: runs paramtrack's steps 2 and 4 on it
+(`--only`: its copy, and configkeys on it), with the given graph as step 1, then `stats.py --config-only --ignore`
+(configkeys/stats/STATISTICS.md, "Statistics the concrete config controls"), and prints the numbers the skill
+optimizes. The full tables are in <out>/config_stats.md, and each value's ambiguity, literal and signal columns in
+<out>/config_values.csv.
 
 Usage (from anywhere):
   uv run --with pandas --with matplotlib --with tabulate python score.py --config <candidate.yaml> \\
@@ -10,12 +11,13 @@ Usage (from anywhere):
     [--module github.com/prometheus/prometheus] [--module-dir <checkout>] [--root /config.Config] \\
     [--format yaml] [--docs <keys>]
 The graph is paramtrack's step 1 output (1-unmarshaler-graph/unmarshaler_subgraph.text); the defaults are
-Prometheus'.
+Prometheus'. <out> is also paramtrack's --out for those steps (their directories, and bin/).
 """
 
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -58,18 +60,19 @@ def main():
     out = os.path.abspath(a.out)
     os.makedirs(out, exist_ok=True)
 
-    bin = f"{out}/configkeys"
-    run(["go", "build", "-o", bin, "."], f"{out}/configkeys.build.log", cwd=f"{QUERYGRAPH}/configkeys")
-    cmd = [bin, "--config", os.path.abspath(a.config), "--txt-dir", out, "--strings-only", "--unmarshaler-subgraph",
-           os.path.abspath(a.graph), "--module-prefix", a.module, "--format", a.format,
-           "--output", f"{out}/configkeys.csv"]
-    if a.root:
-        cmd += ["--root", a.root]
-    run(cmd, f"{out}/configkeys.log")
+    os.makedirs(f"{out}/1-unmarshaler-graph", exist_ok=True)
+    graph = f"{out}/1-unmarshaler-graph/unmarshaler_subgraph.text"
+    if os.path.abspath(a.graph) != graph:
+        shutil.copy(a.graph, graph)
+    run([sys.executable, f"{QUERYGRAPH}/paramtrack/paramtrack.py", "--out", out, "--config", os.path.abspath(a.config),
+         "--only", "full-keys", "--only", "configkeys", "--module", a.module, "--module-dir", a.module_dir,
+         "--root", a.root, "--format", a.format, "--docs", a.docs, "--ignore", os.path.abspath(a.ignore)],
+        f"{out}/paramtrack.log", cwd=f"{QUERYGRAPH}/paramtrack", timeout=900)
+    ck = f"{out}/4-configkeys"
     run([sys.executable, f"{QUERYGRAPH}/configkeys/stats/stats.py", "--config-only", "--ignore",
-         os.path.abspath(a.ignore), "--configkeys", f"{out}/configkeys.csv", "--param-values",
-         f"{out}/param_values.txt", "--graph", os.path.abspath(a.graph), "--docs", a.docs, "--prometheus",
-         a.module_dir, "--out", out], f"{out}/stats.log", timeout=900)
+         os.path.abspath(a.ignore), "--configkeys", f"{ck}/configkeys.csv", "--param-values",
+         f"{ck}/param_values.txt", "--graph", graph, "--docs", a.docs, "--prometheus", a.module_dir, "--out", out],
+        f"{out}/stats.log", timeout=900)
 
     md = open(f"{out}/config_stats.md").read()
     print(section(md, r"^Summary", r"^- |^## "))  # Q1's coverage table (in scope)
