@@ -29,6 +29,7 @@ RESULTS = f"{CT}/golang.org-x-tools/gopls/results/prom/stats"
 
 # Reference palette (dataviz skill, light mode)
 BLUE, ORANGE, GRAY, INK, INK2 = "#2a78d6", "#eb6834", "#c9c8c2", "#0b0b0b", "#52514e"
+AQUA = "#1baf7a"  # categorical slot 3 (after blue, orange); below 3:1 on the surface, so its marks get a visible label
 
 
 def segs(key):
@@ -531,28 +532,38 @@ def confidence(path, out, chart):
               f"{pct((inf[c] >= 1).sum(), len(inf))}")
     dist = pd.DataFrame({c: inf[c].map(conf_bin).value_counts().reindex(CONF_BINS, fill_value=0)
                          for c in ("confidence_all", "confidence_eligible")}).rename_axis("confidence")
-    out.p("\nInferred mappings by confidence:")
-    out.table(dist, index=True)
+    n_ev = int(m.evidence.sum())
+    table = dist.copy()
+    table.loc["evidence (1)"] = [n_ev, n_ev]
+    out.p("\nMappings by confidence (inferred by bin; evidence mappings, all 1, in the last row):")
+    out.table(table, index=True)
 
+    # All mappings: the evidence ones (confidence 1 in both columns) stack on the 100% bars
     fig, ax = plt.subplots(figsize=(9, 3.6), facecolor="#fcfcfb")
     ax.set_facecolor("#fcfcfb")
     x = range(len(CONF_BINS))
     w = 0.4
-    for i, (c, color, label) in enumerate([("confidence_all", BLUE, "out of all the section's keys"),
-                                           ("confidence_eligible", ORANGE,
-                                            "out of its eligible keys (set in the config, with a searched value)")]):
-        ax.bar([j + (i - 0.5) * w for j in x], dist[c], width=w, color=color, label=label, edgecolor="#fcfcfb",
-               linewidth=2)
+    for i, (c, color, label) in enumerate([("confidence_all", BLUE, "inferred, out of all the section's keys"),
+                                           ("confidence_eligible", ORANGE, "inferred, out of its eligible keys "
+                                            "(set in the config, with a searched value)")]):
+        xs = [j + (i - 0.5) * w for j in x]
+        ax.bar(xs, dist[c], width=w, color=color, label=label, edgecolor="#fcfcfb", linewidth=2)
+        ax.bar(xs[-1], n_ev, bottom=dist[c].iloc[-1], width=w, color=AQUA, edgecolor="#fcfcfb", linewidth=2,
+               label="evidence (confidence 1)" if i == 0 else None)
+    ax.text(len(CONF_BINS) - 1, n_ev + dist.values[-1].max(), f"{n_ev} evidence", ha="center", va="bottom",
+            fontsize=8, color=INK2)
     ax.set_xticks(list(x), CONF_BINS, rotation=0)
-    ax.set_xlabel("confidence (share of the section's keys that are evidence for the message)", color=INK2,
-                  fontsize=9)
-    ax.set_ylabel("inferred mappings", color=INK2, fontsize=9)
-    style(ax, f"Confidence of the {len(inf)} inferred message => full key mappings "
-              f"(plus {m.evidence.sum()} evidence mappings, all 1)")
+    ax.set_xlabel("confidence (1 for evidence; for inferred, the share of the section's keys that are evidence)",
+                  color=INK2, fontsize=9)
+    ax.set_ylabel("mappings", color=INK2, fontsize=9)
+    style(ax, f"Confidence of all {len(m)} message => full key mappings ({n_ev} evidence, {len(inf)} inferred)")
     ax.grid(axis="x", visible=False)
     ax.grid(axis="y", color="#ecebe7", linewidth=0.8)
-    ax.set_ylim(0, 1.3 * dist.values.max())  # room for the legend above the bars
-    ax.legend(frameon=False, fontsize=9, loc="upper left")
+    ax.set_ylim(0, 1.15 * (n_ev + dist.values[-1].max()))  # room for the legend
+    handles, labels = ax.get_legend_handles_labels()
+    order = [labels.index(lb) for lb in labels if not lb.startswith("evidence")] + \
+        [labels.index(lb) for lb in labels if lb.startswith("evidence")]  # the inferred pair, then evidence
+    ax.legend([handles[i] for i in order], [labels[i] for i in order], frameon=False, fontsize=9, loc="upper left")
     fig.tight_layout()
     fig.savefig(chart, dpi=150)
     plt.close(fig)
