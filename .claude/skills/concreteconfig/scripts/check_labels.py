@@ -5,7 +5,7 @@ it, reusing the baseline run's graph as step 1, then compare its message labels 
 
 Usage (from anywhere; takes as long as one testbed run, about 6 minutes on prombench):
   uv run --with pandas --with matplotlib --with tabulate python check_labels.py --config <candidate.yaml> \\
-    --baseline <baseline run dir> --out <dir> --testbed prombench [--config-files <dir>] [--wait 240]
+    --baseline <baseline run dir> --out <dir> --testbed prombench [--config-files <dir>] [--wait 240] [--list]
 The baseline run is paramtrack with the shipped config and the same --testbed and --wait, through step 3 (TESTBED.md,
 "Message labels"). --config-files defaults to the files/ next to --config, as paramtrack's does. <out> is
 paramtrack's --out; paramtrack's log is <out>/paramtrack.log.
@@ -28,6 +28,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--testbed", required=True)
     ap.add_argument("--config-files")
+    ap.add_argument("--list", action="store_true", help="count_labels.py --list: print every label, both runs'")
     ap.add_argument("--wait", default="240")
     a = ap.parse_args()
     out, baseline = os.path.abspath(a.out), os.path.abspath(a.baseline)
@@ -47,7 +48,7 @@ def main():
     if p.returncode != 0:
         sys.exit(f"paramtrack exited {p.returncode}; see {out}/paramtrack.log")
     sys.exit(subprocess.run([sys.executable, f"{HERE}/count_labels.py", f"{out}/3-chains/events.jsonl",
-                             "--baseline", base_events]).returncode)
+                             "--baseline", base_events] + (["--list"] if a.list else [])).returncode)
 
 
 if __name__ == "__main__":
