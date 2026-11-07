@@ -12,20 +12,16 @@ the same concrete key; names (job_name, remote `name`) use their list index inst
 Usage: uv run --with pyyaml --with pycryptodome --with cryptography python gen.py <shipped.yaml> <out config.yaml> \\
          <out files dir> [--omit am,arc,sc,rw,rr,tracing,otlp,global,scf]
 """
-import datetime
-import hashlib
 import json
 import os
 import sys
-import uuid
 
 import yaml
-from Crypto.PublicKey import RSA
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.x509.oid import NameOID
 
-sys.path.insert(0, "/home/emily/projects/config_tracing/golang.org-x-tools/.claude/skills/concreteconfig/scripts")
+SKILL = "/home/emily/projects/config_tracing/golang.org-x-tools/.claude/skills/concreteconfig"
+sys.path[:0] = [f"{SKILL}/scripts", f"{SKILL}/modules/prometheus"]
+from files import cert, rsa_key_pem, uuid_from  # noqa: E402
+from prom_files import google_credentials, kubeconfig as kubeconfig_file  # noqa: E402
 from value import token  # noqa: E402
 
 DIR = "/etc/prometheus/config"  # added files (read-only ConfigMap mount)
@@ -115,15 +111,6 @@ def oauth2(p, i=0, full=True):
     else:
         o["client_secret_file"] = secret_file(f"{p}.client_secret_file", i)
     return o
-
-
-def kubeconfig():
-    return yaml.safe_dump({
-        "apiVersion": "v1", "kind": "Config",
-        "clusters": [{"name": "in-cluster", "cluster": {"server": API, "certificate-authority": f"{SA}/ca.crt"}}],
-        "users": [{"name": "prometheus-meta", "user": {"tokenFile": f"{SA}/token"}}],
-        "contexts": [{"name": "in-cluster", "context": {"cluster": "in-cluster", "user": "prometheus-meta"}}],
-        "current-context": "in-cluster"}, sort_keys=False)
 
 
 def k8s_sd(role, ns, selector, api=API, **http):
@@ -305,45 +292,16 @@ def rw(i, auth, base=False):
 def google_creds():
     """A service account key file with a throwaway RSA key, whose token_uri is in the cluster (Loki, 404)"""
     t = token(f"{RW}.google_iam.credentials_file")
-    return json.dumps({
-        "type": "service_account", "project_id": t + "-project", "private_key_id": "0", "private_key": RSA_KEY,
-        "client_email": f"{t}@ccfg.iam.gserviceaccount.com", "client_id": "0",
-        "token_uri": f"{TOKEN_HOST}/{t}-token-uri"}, indent=2) + "\n"
+    return google_credentials(t, RSA_KEY, f"{TOKEN_HOST}/{t}-token-uri")
 
 
-def det_rsa(seed):
-    """A throwaway 2048-bit RSA key, the same for the same seed: pycryptodome's RSA.generate with its randomness
-    drawn from SHA-256 in counter mode over the seed, so reruns reproduce it without keeping a key in the repo"""
-    buf, n = b"", 0
-
-    def randfunc(k):
-        nonlocal buf, n
-        while len(buf) < k:
-            buf += hashlib.sha256(f"{seed}:{n}".encode()).digest()
-            n += 1
-        out, buf = buf[:k], buf[k:]
-        return out
-
-    return RSA.generate(2048, randfunc=randfunc)
-
-
-def det_cert(seed):
-    """A throwaway self-signed cert and its key (PEM), deterministic: RSA PKCS#1 v1.5 signatures and fixed fields"""
-    key = serialization.load_pem_private_key(det_rsa(seed).export_key(format="PEM", pkcs=8), password=None)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, seed)])
-    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
-            .serial_number(1).not_valid_before(datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc))
-            .not_valid_after(datetime.datetime(2036, 1, 1, tzinfo=datetime.timezone.utc))
-            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-            .sign(key, hashes.SHA256()))
-    key_pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                                serialization.NoEncryption())
-    return cert.public_bytes(serialization.Encoding.PEM).decode(), key_pem.decode()
+def kubeconfig():
+    return kubeconfig_file(API, f"{SA}/ca.crt", f"{SA}/token")
 
 
 def det_uuid(key):
     """azuread client_id must be a UUID (AzureADConfig.Validate): a UUID derived from value.py's token"""
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, token(key)))
+    return uuid_from(token(key))
 
 
 def remote_write():
@@ -439,8 +397,8 @@ def main():
     shipped, out, fdir = sys.argv[1:4]
     omit = set(sys.argv[sys.argv.index("--omit") + 1].split(",")) if "--omit" in sys.argv else set()
     text = open(shipped).read()
-    CERT, KEY = det_cert("ccfg-throwaway-tls")
-    RSA_KEY = det_rsa("ccfg-remote-write-google-iam-credentials-file").export_key(format="PEM", pkcs=8).decode() + "\n"
+    CERT, KEY = cert("ccfg-throwaway-tls")
+    RSA_KEY = rsa_key_pem("ccfg-remote-write-google-iam-credentials-file") + "\n"
 
     note = "# Added by the concreteconfig skill (see its decisions file)"
     if "global" not in omit:

@@ -2,8 +2,9 @@
 """Measure a candidate concrete config with the statistics it controls: runs paramtrack's steps 2 and 4 on it
 (`--only`: its copy, and configkeys on it), with the given graph as step 1, then `stats.py --config-only --ignore`
 (configkeys/stats/STATISTICS.md, "Statistics the concrete config controls"), and prints the numbers the skill
-optimizes. The full tables are in <out>/config_stats.md, and each value's ambiguity, literal and signal columns in
-<out>/config_values.csv.
+optimizes. The full tables are in <out>/config_stats.md, each value's ambiguity, literal and signal columns in
+<out>/config_values.csv, and each in-scope full key's columns (in_config, searchable, searched, kind, section, ...)
+in <out>/config_full_keys.csv: its rows with in_config false and searchable true are the searchable keys not set yet.
 
 Usage (from anywhere):
   uv run --with pandas --with matplotlib --with tabulate python score.py --config <candidate.yaml> \\
@@ -15,6 +16,7 @@ Prometheus'. <out> is also paramtrack's --out for those steps (their directories
 """
 
 import argparse
+import csv
 import os
 import re
 import shutil
@@ -80,7 +82,11 @@ def main():
     print(section(md, r"^Ambiguity:", r"^How similar"))
     print("\n".join(line[:300] for line in md.splitlines() if line.startswith("- Searched values")))
     print(section(md, r"^What a match on a value tells us", r"^- "))
-    print(f"\nfull tables: {out}/config_stats.md; per value: {out}/config_values.csv")
+    rows = list(csv.DictReader(open(f"{out}/config_full_keys.csv")))
+    unset = sorted({r["key"] for r in rows if r["in_config"] == "False" and r["searchable"] == "True"})
+    print(f"\nsearchable in-scope full keys not set: {len(unset)} (in_config False, searchable True)")
+    print(f"full tables: {out}/config_stats.md; per value: {out}/config_values.csv; per full key: "
+          f"{out}/config_full_keys.csv")
 
 
 if __name__ == "__main__":

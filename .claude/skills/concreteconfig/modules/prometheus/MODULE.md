@@ -7,6 +7,9 @@
   scope; the shipped config uses only `kubernetes_sd_configs`). In scope:
   `kubernetes_sd_configs` under `scrape_configs` and `alerting.alertmanagers`, and `dns_sd_configs`,
   `file_sd_configs` and `static_configs` under `scrape_configs`. Pass it to `stats.py` and `scripts/score.py`.
+- **File helpers:** `prom_files.py` here writes the contents of Prometheus-specific files: a Google service account
+  key file (`remote_write`'s `google_iam.credentials_file`) and a kubeconfig (`kubernetes_sd_configs`'
+  `kubeconfig_file`). The generic ones (certs, keys, UUIDs) are the skill's `scripts/files.py`.
 
 ## Developer knowledge
 In the checkout, and in prometheus/common at the version it uses (`go list -m -f '{{.Dir}}' github.com/prometheus/common`):
@@ -23,7 +26,12 @@ In the checkout, and in prometheus/common at the version it uses (`go list -m -f
     config with many more keys, each with a value meant to be distinctive and inert;
   - `gopls/internal/cmd/conftamer/querygraph/paramtrack/concreteconfig/prometheus-prombench-fuzzed-base-2026-11-04/`:
     an earlier run of this skill that extended the fuzzed config (its `decisions.md` records what it learned about
-    the testbed, e.g. which endpoints accept which credentials).
+    the testbed, e.g. which endpoints accept which credentials);
+  - `gopls/internal/cmd/conftamer/querygraph/paramtrack/concreteconfig/prometheus-prombench/`: an earlier run
+    (2026-11-05) that extended the shipped config without changing its values: its `decisions.md` records each key
+    it set or skipped and why (e.g. which keys fail at runtime, where Prometheus can write files, which credentials
+    the testbed's endpoints check), and `gen.py` writes its config and files from the shipped config. Its output,
+    with the scorecard and label comparison, is `gopls/results/prom/concreteconfig-upstream-base/`.
 
 ## Checking a config
 - `promtool check config <file>`: parses and validates, and checks that files the config names exist, so run it

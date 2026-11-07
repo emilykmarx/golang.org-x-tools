@@ -642,6 +642,11 @@ def main():
     searched = set(open(args.param_values).read().splitlines())
     if not cfg_only:  # (write_visuals rewrites it with the coverage columns)
         fkdf.to_csv(f"{args.out}/full_keys.csv", index=False)
+    else:  # Per full key, with whether the config sets it and searches one of its values: e.g. the searchable keys a
+        # candidate doesn't set yet (the concreteconfig skill). Its own name, so as not to replace a full run's.
+        def is_searched(fk):
+            return any(v.replace("\n", "\\n") in searched for k in covered_by.get(fk, ()) for v in config[k]["values"])
+        fkdf.assign(searched=fkdf.key.map(is_searched)).to_csv(f"{args.out}/config_full_keys.csv", index=False)
     keys = fkdf.drop_duplicates("key")
 
     # =============================================================================================================

@@ -66,9 +66,9 @@ Run paramtrack as its README says, from its directory, with its Python packages:
 1. **Baseline**, once per testbed deployment: paramtrack with the shipped config, `--testbed prombench --until 3`
    (its run 1: contexttrack records events, argmatch instruments nothing). The events are in
    `<out>/3-chains/events.jsonl`.
-2. **Candidate:** the same, with `--config <candidate>` and another `--out`.
-3. `scripts/count_labels.py <candidate events> --baseline <baseline events>`: it lists the labels missing from the
-   candidate's run.
+2. **Candidate:** `scripts/check_labels.py --config <candidate> --baseline <baseline out> --out <another dir>
+   --testbed prombench` (with uv and the same packages): it runs the same with the candidate, reusing the baseline's
+   graph, then `scripts/count_labels.py`, which lists the labels missing from the candidate's run (exit 1 if any).
 
 Some labels depend on timing, not the config (e.g. `/-/ready` answering 503 while Prometheus starts). If a label is
 missing, check whether it plausibly depends on the config change before concluding: rerun the candidate, and if

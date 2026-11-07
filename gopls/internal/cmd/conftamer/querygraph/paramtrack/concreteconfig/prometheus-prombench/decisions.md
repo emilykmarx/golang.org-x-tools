@@ -1,5 +1,9 @@
 # Decisions: Prometheus on prombench
 
+Since 2026-11-06 the skill keeps no memory between runs (its "Consistency" requirement is gone), and changes shipped
+values to make them distinctive, which this run didn't. This file and `gen.py` are an example for later runs
+(MODULE.md, "Developer knowledge"), not decisions to follow; the text below is as the run wrote it.
+
 The concreteconfig skill's memory between runs (SKILL.md, "Consistency"). Read it first and follow it; change a
 decision only for a reason you record here. One row per full key or key pattern, in the full keys YAML's order where
 possible. First written 2026-11-05 by a headless run starting from upstream's shipped config (TESTBED.md); the

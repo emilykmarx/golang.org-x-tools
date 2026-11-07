@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Runs the end-to-end param tracking workflow (WORKFLOW.md) and joins its outputs into Message label => Full keys.
-See README.md.
+"""Runs the end-to-end param tracking workflow and joins its outputs into Message label => Full keys. See README.md.
 
 Run with: uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out DIR --config CONFIG [flags]
 """
@@ -79,7 +78,8 @@ class Workflow:
         run([sys.executable, f"{STATS}/stats.py", "--full-keys-only", "--configkeys", f"{d}/configkeys_graph.csv",
              "--graph", graph, "--docs", self.a.docs, "--prometheus", self.a.module_dir, "--out", d] + self.ignore(),
             log=f"{d}/stats.log", timeout=600)
-        # The concrete config is an input, generated beforehand by the /concreteconfig skill (README.md, "Prerequisite")
+        # The concrete config is an input, generated beforehand by the /concreteconfig skill (README.md, "Use with
+        # /concreteconfig")
         shutil.copy(self.a.config, f"{d}/config.yaml")
         if self.config_files():
             shutil.copytree(self.config_files(), f"{d}/files")
@@ -297,7 +297,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True, help="Directory for every step's output (one subdirectory per step)")
     ap.add_argument("--config", required=True, help="Concrete config, e.g. the /concreteconfig skill's config.yaml "
-                                                       "(README.md, \"Prerequisite\")")
+                                                       "(README.md, \"Use with /concreteconfig\")")
     ap.add_argument("--config-files", help="Directory of files the concrete config refers to, which the testbed "
                                            "installs (default: a files/ directory next to --config, if any)")
     ap.add_argument("--module", default="github.com/prometheus/prometheus", help="Module as in go.mod")
