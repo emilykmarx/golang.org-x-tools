@@ -5,13 +5,16 @@ it, reusing the baseline run's graph as step 1, then compare its message labels 
 
 Usage (from anywhere; takes as long as one testbed run, about 6 minutes on prombench):
   uv run --with pandas --with matplotlib --with tabulate python check_labels.py --config <candidate.yaml> \\
-    --baseline <baseline run dir> --out <dir> --testbed prombench [--config-files <dir>] [--wait 240] [--list]
-The baseline run is paramtrack with the shipped config and the same --testbed and --wait, through step 3 (TESTBED.md,
-"Message labels"). --config-files defaults to the files/ next to --config, as paramtrack's does. <out> is
-paramtrack's --out; paramtrack's log is <out>/paramtrack.log.
+    --baseline <baseline run dir> --out <dir> [--config-files <dir>] [--list]
+The baseline run is paramtrack with the shipped config, through step 3 (TESTBED.md, "Message labels"). The candidate's
+run uses the baseline run's testbed settings (testbed, --wait, VM, argmatch's build args), from its
+3-chains/testbed.json, which paramtrack writes: a shorter run, for example, can miss labels for that reason alone.
+--config-files defaults to the files/ next to --config, as paramtrack's does. <out> is paramtrack's --out; paramtrack's
+log is <out>/paramtrack.log.
 """
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -26,21 +29,29 @@ def main():
     ap.add_argument("--config", required=True)
     ap.add_argument("--baseline", required=True, help="the baseline run's paramtrack --out directory")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--testbed", required=True)
     ap.add_argument("--config-files")
     ap.add_argument("--list", action="store_true", help="count_labels.py --list: print every label, both runs'")
-    ap.add_argument("--wait", default="240")
     a = ap.parse_args()
     out, baseline = os.path.abspath(a.out), os.path.abspath(a.baseline)
     base_events = f"{baseline}/3-chains/events.jsonl"
     if not os.path.exists(base_events):
         sys.exit(f"no {base_events}: the baseline run must be paramtrack through step 3 (3-chains)")
+    # The baseline run's testbed settings, which the candidate's run must match (paramtrack records them)
+    settings_file = f"{baseline}/3-chains/testbed.json"
+    if not os.path.exists(settings_file):
+        sys.exit(f"no {settings_file}: the baseline run predates paramtrack recording its testbed settings; redo it")
+    tb = json.load(open(settings_file))
 
     # Reuse the baseline's graph, so paramtrack doesn't rebuild it (step 1 is the same for every config)
     os.makedirs(f"{out}/1-unmarshaler-graph", exist_ok=True)
     shutil.copy(f"{baseline}/1-unmarshaler-graph/unmarshaler_subgraph.text", f"{out}/1-unmarshaler-graph/")
     cmd = [sys.executable, f"{QUERYGRAPH}/paramtrack/paramtrack.py", "--out", out, "--config",
-           os.path.abspath(a.config), "--testbed", a.testbed, "--wait", a.wait, "--until", "3", "--redo", "2"]
+           os.path.abspath(a.config), "--testbed", tb["testbed"], "--wait", str(tb["wait"]), "--until", "3",
+           "--redo", "2"]
+    if "vm" in tb:
+        cmd += ["--vm", tb["vm"]]
+    for k, v in tb["argmatch_args"].items():
+        cmd += ["--argmatch-arg", f"{k}={v}"]
     if a.config_files:
         cmd += ["--config-files", os.path.abspath(a.config_files)]
     with open(f"{out}/paramtrack.log", "w") as log:

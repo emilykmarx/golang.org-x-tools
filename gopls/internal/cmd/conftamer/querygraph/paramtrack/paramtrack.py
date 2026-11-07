@@ -8,6 +8,7 @@ import argparse
 import collections
 import csv
 import filecmp
+import json
 import os
 import shutil
 import sys
@@ -107,20 +108,28 @@ class Workflow:
     # ---------------------------------------------------------------------------------------------------------------
     # Dynamic phase
 
-    def testbed(self):
+    def testbed(self, d):
+        """The testbed for a run, whose effective settings (defaults filled in) it records in <d>/testbed.json, so
+        later runs can match them (e.g. the concreteconfig skill's label checks match the baseline run's)"""
         overrides = dict(kv.split("=", 1) for kv in self.a.argmatch_arg)
-        return TESTBEDS[self.a.testbed](wait=self.a.wait, argmatch_args=overrides, vm=self.a.vm)
+        tb = TESTBEDS[self.a.testbed](wait=self.a.wait, argmatch_args=overrides, vm=self.a.vm)
+        settings = {"testbed": self.a.testbed, "wait": tb.wait, "argmatch_args": tb.argmatch_args}
+        if self.a.testbed == "prombench":
+            settings["vm"] = tb.vm
+        with open(f"{d}/testbed.json", "w") as f:
+            json.dump(settings, f, indent=2)
+        return tb
 
     def chains(self, d):
         """Run 1: contexttrack records message chains; argmatch instruments nothing"""
-        self.testbed().run(d, self.file("2-full-keys", "config.yaml"), files=self.step_files())
+        self.testbed(d).run(d, self.file("2-full-keys", "config.yaml"), files=self.step_files())
         run([sys.executable, f"{ARGMATCH_LABELS}/events_to_stacklog.py", f"{d}/events.jsonl"],
             log=f"{d}/stacklog.txt", timeout=300)
 
     def matches(self, d):
         """Run 2: argmatch instruments the functions in run 1's chains and searches for the values; contexttrack
         records the messages to label"""
-        self.testbed().run(d, self.file("2-full-keys", "config.yaml"), files=self.step_files(),
+        self.testbed(d).run(d, self.file("2-full-keys", "config.yaml"), files=self.step_files(),
                            stacklog=self.file("3-chains", "stacklog.txt"),
                            matchfile=self.file("4-configkeys", "param_values.txt"))
         if os.path.getsize(f"{d}/matches.calls.csv") == 0:
