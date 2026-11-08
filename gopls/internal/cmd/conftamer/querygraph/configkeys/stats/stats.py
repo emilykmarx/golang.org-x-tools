@@ -94,7 +94,7 @@ def split(cell):
 
 
 # Kind of value for --strings-only purposes: what step (1) searches (see configkeys keepString)
-def searchable(kinds):
+def searchable_kind(kinds):
     return any(k in ("string", "struct") for k in kinds.split("; "))
 
 
@@ -632,7 +632,8 @@ def main():
                 rows.append({"key": fk, "pattern": info["pattern"], "unmarshaler": u, "kind": info["kind"],
                              "top": segs(fk)[0], "section": sec, "map_key": segs(fk)[-1] == STAR,
                              "in_config": fk in covered_by, "documented": fk in docs,
-                             "searchable": searchable(info["kind"]), "sd": sd_key_of(fk, sd_keys) is not None})
+                             "searchable_kind": searchable_kind(info["kind"]),
+                             "sd": sd_key_of(fk, sd_keys) is not None})
         return pd.DataFrame(rows)
 
     fkdf = full_key_rows(full, docs)
@@ -683,7 +684,7 @@ def main():
 
     # Sections
     secs = fkdf.groupby("section").agg(size=("key", "nunique"), in_config=("in_config", "sum"),
-                                       top=("top", "first"), searchable=("searchable", "sum")).reset_index()
+                                       top=("top", "first"), searchable_kind=("searchable_kind", "sum")).reset_index()
     secs["covered"] = secs.in_config > 0
     check_sections(fkdf, n_full, args.configkeys, out)
     out.p(f"- Sections (keys with the same parent key and Unmarshaler) with at least one key in the config: "
@@ -731,8 +732,8 @@ def main():
         out.p("\nBy value kind:")
         out.table(kinds.sort_values("full_keys", ascending=False), index=True)
         out.p(f"- Full keys whose values step (1) could find (kind string or struct): "
-              f"{pct(keys.searchable.sum(), len(keys))}; of those in the config: "
-              f"{pct(keys[keys.in_config].searchable.sum(), keys.in_config.sum())}")
+              f"{pct(keys.searchable_kind.sum(), len(keys))}; of those in the config: "
+              f"{pct(keys[keys.in_config].searchable_kind.sum(), keys.in_config.sum())}")
 
     # How much of each section it touches the concrete config sets (Q1: coverage)
     cov = secs[secs.covered].copy()
@@ -750,13 +751,13 @@ def main():
             "sections with a concrete key": secs[secs.covered]["size"].describe()}).round(1)
         out.table(size_desc, index=True)
         out.p(f"- Sections with no key step (1) could find (no string/struct kind): "
-              f"{pct((secs.searchable == 0).sum(), len(secs))}, "
-              f"holding {secs[secs.searchable == 0]['size'].sum()} keys")
-        out.p(f"  - of the sections with a concrete key: {pct((cov.searchable == 0).sum(), len(cov))}")
+              f"{pct((secs.searchable_kind == 0).sum(), len(secs))}, "
+              f"holding {secs[secs.searchable_kind == 0]['size'].sum()} keys")
+        out.p(f"  - of the sections with a concrete key: {pct((cov.searchable_kind == 0).sum(), len(cov))}")
         # Covered sections whose concrete keys are all unsearchable
         cfg_searchable = collections.defaultdict(int)
         for r in fkdf[fkdf.in_config].itertuples():
-            if r.searchable:
+            if r.searchable_kind:
                 cfg_searchable[r.section] += 1
         cov["config_searchable"] = cov.section.map(lambda s: cfg_searchable.get(s, 0))
         out.p(f"- Sections with concrete keys, none of them searchable: "
@@ -764,7 +765,8 @@ def main():
               + ": " + ", ".join(f"`{s}`" for s in cov[cov.config_searchable == 0].section))
         secs.to_csv(f"{args.out}/sections.csv", index=False)
         out.p("\nLargest sections:")
-        out.table(secs.sort_values("size", ascending=False).head(10)[["section", "size", "in_config", "searchable"]])
+        out.table(secs.sort_values("size", ascending=False).head(10)[["section", "size", "in_config",
+                                                                       "searchable_kind"]])
 
         # Ambiguous unmarshalers for concrete keys
         multi = {k: c for k, c in config.items() if len(c["unmarshalers"]) > 1}
