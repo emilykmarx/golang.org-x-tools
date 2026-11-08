@@ -10,12 +10,14 @@ labels for that reason alone.
 
 Usage: count_labels.py <events.jsonl> [<events.jsonl> ...] [--baseline <events.jsonl>] [--list]
 --list prints every label (the union's, and the baseline's), sorted, besides the counts and the differences.
-Exits 1 if labels are missing from the baseline.
+Exits 0 if no baseline label is missing, 1 if one is, and 2 if it couldn't count (an error reading the events, or
+bad arguments).
 """
 
 import argparse
 import json
 import sys
+import traceback
 
 sys.path.insert(0, "/home/emily/projects/config_tracing/dump_ancestors/argmatch-labels")
 import join  # noqa: E402  (argmatch-labels' join.py: message_labels)
@@ -53,4 +55,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:  # (not SystemExit: main's own exit codes pass through)
+        traceback.print_exc()
+        sys.exit(2)

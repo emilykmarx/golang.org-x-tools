@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Check constraint 2 (SKILL.md) for a candidate concrete config: run paramtrack up to testbed run 1 (`--until 3`) with
 it, reusing the baseline run's graph as step 1, then compare its message labels with the baseline run's
-(count_labels.py). Prints count_labels.py's report, and exits 1 if a label is missing (or paramtrack fails).
+(count_labels.py). Prints count_labels.py's report. Exits 0 if no label is missing, 1 if one is, and 2 if it couldn't
+check (no baseline events or testbed.json, paramtrack failed, count_labels.py failed, or bad arguments).
 
 Usage (from anywhere; takes as long as one testbed run, about 6 minutes on prombench):
   uv run --with pandas --with matplotlib --with tabulate python check_labels.py --config <candidate.yaml> \\
@@ -24,6 +25,12 @@ QUERYGRAPH = "/home/emily/projects/config_tracing/golang.org-x-tools/gopls/inter
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def fail(msg):
+    """Couldn't check: exit 2, which a missing label (1) can't be confused with"""
+    print(f"check_labels.py: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", required=True)
@@ -35,11 +42,11 @@ def main():
     out, baseline = os.path.abspath(a.out), os.path.abspath(a.baseline)
     base_events = f"{baseline}/3-chains/events.jsonl"
     if not os.path.exists(base_events):
-        sys.exit(f"no {base_events}: the baseline run must be paramtrack through step 3 (3-chains)")
+        fail(f"no {base_events}: the baseline run must be paramtrack through step 3 (3-chains)")
     # The baseline run's testbed settings, which the candidate's run must match (paramtrack records them)
     settings_file = f"{baseline}/3-chains/testbed.json"
     if not os.path.exists(settings_file):
-        sys.exit(f"no {settings_file}: the baseline run predates paramtrack recording its testbed settings; redo it")
+        fail(f"no {settings_file}: the baseline run predates paramtrack recording its testbed settings; redo it")
     tb = json.load(open(settings_file))
 
     # Reuse the baseline's graph, so paramtrack doesn't rebuild it (step 1 is the same for every config)
@@ -57,9 +64,10 @@ def main():
     with open(f"{out}/paramtrack.log", "w") as log:
         p = subprocess.run(cmd, cwd=f"{QUERYGRAPH}/paramtrack", stdout=log, stderr=subprocess.STDOUT)
     if p.returncode != 0:
-        sys.exit(f"paramtrack exited {p.returncode}; see {out}/paramtrack.log")
-    sys.exit(subprocess.run([sys.executable, f"{HERE}/count_labels.py", f"{out}/3-chains/events.jsonl",
-                             "--baseline", base_events] + (["--list"] if a.list else [])).returncode)
+        fail(f"paramtrack exited {p.returncode}; see {out}/paramtrack.log")
+    code = subprocess.run([sys.executable, f"{HERE}/count_labels.py", f"{out}/3-chains/events.jsonl",
+                           "--baseline", base_events] + (["--list"] if a.list else [])).returncode
+    sys.exit(code if code in (0, 1) else 2)
 
 
 if __name__ == "__main__":
