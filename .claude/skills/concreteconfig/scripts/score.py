@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Measure a candidate concrete config with the statistics it controls: runs paramtrack's steps 2 and 4 on it
-(`--only`: its copy, and configkeys on it), with the given graph as step 1, then `stats.py --config-only --ignore`
+(`--only`: its copy, and configkeys on it), with the baseline run's graph as step 1 and its settings (module, root,
+format, docs, ignore file: its 2-full-keys/settings.json), then `stats.py --config-only --ignore`
 (configkeys/stats/STATISTICS.md, "Statistics the concrete config controls"), and prints the numbers the skill
 optimizes. The full tables are in <out>/config_stats.md, each value's ambiguity, literal and signal columns in
 <out>/config_values.csv, and each in-scope full key's columns (in_config, searchable, searched, kind, section, ...)
@@ -8,11 +9,9 @@ in <out>/config_full_keys.csv: its rows with in_config false and searchable true
 
 Usage (from anywhere):
   uv run --with pandas --with matplotlib --with tabulate python score.py --config <candidate.yaml> \\
-    --graph <unmarshaler_subgraph.text> --ignore <module's ignore file (MODULE.md)> --out <dir> \\
-    [--module github.com/prometheus/prometheus] [--module-dir <checkout>] [--root /config.Config] \\
-    [--format yaml] [--docs <keys>]
-The graph is paramtrack's step 1 output (1-unmarshaler-graph/unmarshaler_subgraph.text); the defaults are
-Prometheus'. <out> is also paramtrack's --out for those steps (their directories, and bin/).
+    --baseline <baseline run dir> --out <dir>
+<out> is also paramtrack's --out for those steps (their directories, and bin/). Exits 2 if the baseline run lacks a
+file it needs (e.g. it predates paramtrack recording its settings).
 """
 
 import argparse
@@ -22,6 +21,8 @@ import re
 import shutil
 import subprocess
 import sys
+
+import baseline  # (next to this file)
 
 CT = "/home/emily/projects/config_tracing"
 QUERYGRAPH = f"{CT}/golang.org-x-tools/gopls/internal/cmd/conftamer/querygraph"
@@ -50,30 +51,25 @@ def section(md, heading_re, until_re=r"^## "):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", required=True)
-    ap.add_argument("--graph", required=True)
-    ap.add_argument("--ignore", required=True)
+    ap.add_argument("--baseline", required=True, help="the baseline run's paramtrack --out directory")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--module", default="github.com/prometheus/prometheus")
-    ap.add_argument("--module-dir", default=f"{CT}/prometheus")
-    ap.add_argument("--root", default="/config.Config")
-    ap.add_argument("--format", default="yaml", help="Config format, as paramtrack's --format")
-    ap.add_argument("--docs", default=f"{CT}/prom-test-infra/prombench/prometheus_config_keys.txt")
     a = ap.parse_args()
-    out = os.path.abspath(a.out)
-    os.makedirs(out, exist_ok=True)
-
+    out, base = os.path.abspath(a.out), os.path.abspath(a.baseline)
+    try:
+        base_graph, st = baseline.graph(base), baseline.settings(base)
+    except baseline.MissingInput as e:
+        print(f"score.py: {e}", file=sys.stderr)
+        sys.exit(2)
     os.makedirs(f"{out}/1-unmarshaler-graph", exist_ok=True)
     graph = f"{out}/1-unmarshaler-graph/unmarshaler_subgraph.text"
-    if os.path.abspath(a.graph) != graph:
-        shutil.copy(a.graph, graph)
+    shutil.copy(base_graph, graph)
     run([sys.executable, f"{QUERYGRAPH}/paramtrack/paramtrack.py", "--out", out, "--config", os.path.abspath(a.config),
-         "--only", "full-keys", "--only", "configkeys", "--module", a.module, "--module-dir", a.module_dir,
-         "--root", a.root, "--format", a.format, "--docs", a.docs, "--ignore", os.path.abspath(a.ignore)],
+         "--only", "full-keys", "--only", "configkeys"] + baseline.static_args(st),
         f"{out}/paramtrack.log", cwd=f"{QUERYGRAPH}/paramtrack", timeout=900)
     ck = f"{out}/4-configkeys"
-    run([sys.executable, f"{QUERYGRAPH}/configkeys/stats/stats.py", "--config-only", "--ignore",
-         os.path.abspath(a.ignore), "--configkeys", f"{ck}/configkeys.csv", "--param-values",
-         f"{ck}/param_values.txt", "--graph", graph, "--docs", a.docs, "--prometheus", a.module_dir, "--out", out],
+    run([sys.executable, f"{QUERYGRAPH}/configkeys/stats/stats.py", "--config-only", "--configkeys",
+         f"{ck}/configkeys.csv", "--param-values", f"{ck}/param_values.txt", "--graph", graph, "--docs", st["docs"],
+         "--prometheus", st["module_dir"], "--out", out] + (["--ignore", st["ignore"]] if st["ignore"] else []),
         f"{out}/stats.log", timeout=900)
 
     md = open(f"{out}/config_stats.md").read()

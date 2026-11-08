@@ -68,8 +68,14 @@ class Workflow:
 
     def full_keys(self, d):
         """The in-scope full keys YAML (every full key the graph allows, but those --ignore leaves out: configkeys
-        without a config, then stats.py's SD resolution), for the concreteconfig skill; and copies of the concrete
-        config and its files, which the later steps read"""
+        without a config, then stats.py's SD resolution), for the concreteconfig skill; copies of the concrete
+        config and its files, which the later steps read; and the static settings (settings.json)"""
+        # The static settings, defaults filled in, so later runs can match them (e.g. the concreteconfig skill's
+        # score.py and check_labels.py match the baseline run's)
+        with open(f"{d}/settings.json", "w") as f:
+            json.dump({"module": self.a.module, "module_dir": os.path.abspath(self.a.module_dir), "root": self.a.root,
+                       "format": self.a.format, "docs": os.path.abspath(self.a.docs),
+                       "ignore": os.path.abspath(self.a.ignore) if self.a.ignore else ""}, f, indent=2)
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
         cmd = [self.configkeys_bin(), "--unmarshaler-subgraph", graph, "--module-prefix", self.a.module, "--format",
                self.a.format, "--output", f"{d}/configkeys_graph.csv"]
