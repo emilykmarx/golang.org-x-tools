@@ -124,8 +124,8 @@ Columns:
 - `section`: the full key's section (`<parent key> @ <Unmarshaler>`); a row per section, if it has several
 - `section_keys`: the full keys in that section, joined with `; `
 - `evidence`: whether the key is evidence for the message
-- `eligible`: whether the key could have been evidence: the concrete config sets it, with a value argmatch searched for (`param_values.txt`)
-- `confidence_all`, `confidence_eligible`: 1 for evidence. For an inferred key, the share of its section's keys that are evidence for the message: out of all the section's keys, and out of its eligible keys. Reading the two together separates the causes of a low score:
+- `eligible`: whether the key could have been evidence: it's in scope (not left out by `--ignore`), and the concrete config sets it, with a value argmatch searched for (`param_values.txt`)
+- `confidence_all`, `confidence_eligible`: 1 for evidence. For an inferred key, the share of its section's in-scope keys that are evidence for the message: out of all of them (not left out by `--ignore`), and out of its eligible keys. Blank if there are none. Reading the two together separates the causes of a low score:
   - both low: the section's eligible keys were searched for, and most weren't found for this message;
   - `confidence_all` low but `confidence_eligible` high: most of the section is unset, or unsearchable (numbers, bools), so the concrete config or argmatch's strings-only search is the gap.
 

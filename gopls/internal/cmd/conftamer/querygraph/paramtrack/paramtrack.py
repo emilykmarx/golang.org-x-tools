@@ -172,10 +172,12 @@ class Workflow:
             value, _, keys = line.rpartition(":")
             value_keys[value] = keys.split(",")
 
-        # Full keys that could have been evidence: set by the concrete config, with a value step 5 searched for
+        # Full keys that could have been evidence: in scope (not left out by --ignore), set by the concrete config,
+        # with a value step 5 searched for
+        ignore = stats.read_patterns(self.a.ignore)
         searched = set(open(self.file("4-configkeys", "param_values.txt")).read().splitlines())
         eligible = {fk for c in config.values() if any(v.replace("\n", "\\n") in searched for v in c["values"])
-                    for fk in c["full_keys"]}
+                    for fk in c["full_keys"] if not stats.matches_any(fk, ignore)}
 
         # Evidence rows: each (message, needle) row of the join, with every concrete key whose value the needle is
         rows, no_key, no_full_key = [], set(), set()
@@ -192,18 +194,21 @@ class Workflow:
                     rows.append(base + [k, "", "", "", True, True, 1, 1])
                 for fk in fks:
                     for sec in sections[fk]:
-                        rows.append(base + [k, fk, sec, "; ".join(sorted(section_keys[sec])), True, True, 1, 1])
+                        rows.append(base + [k, fk, sec, "; ".join(sorted(section_keys[sec])), True, fk in eligible,
+                                            1, 1])
 
         # Inferred rows: every other full key in a section with evidence for the message, with the share of the
-        # section's keys that are evidence for it, out of all its keys and out of those that could have been
+        # section's in-scope keys (not left out by --ignore) that are evidence for it, out of all of them and out of
+        # those that could have been (blank if there are none)
         evidence = collections.defaultdict(set)  # (kind, label, section) => its full keys that are evidence
         for r in rows:
             if r[5]:
                 evidence[(r[0], r[1], r[5])].add(r[4])
         for (kind, label, sec), ev in sorted(evidence.items()):
             keys = section_keys[sec]
-            conf_all = round(len(ev) / len(keys), 3)
-            conf_eligible = round(len(ev) / len(keys & eligible), 3)
+            in_scope = {k for k in keys if not stats.matches_any(k, ignore)}
+            conf_all = round(len(ev & in_scope) / len(in_scope), 3) if in_scope else ""
+            conf_eligible = round(len(ev & in_scope) / len(keys & eligible), 3) if keys & eligible else ""
             for fk in sorted(keys - ev):
                 rows.append([kind, label, "", "", fk, sec, "; ".join(sorted(keys)), False, fk in eligible,
                              conf_all, conf_eligible])
