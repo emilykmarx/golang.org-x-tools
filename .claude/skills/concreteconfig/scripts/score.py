@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Measure a candidate concrete config with the statistics it controls: runs paramtrack's steps 2 and 4 on it (`--only`:
 its copy, and configkeys on it), with the baseline run's graph as step 1 and its settings (module, root, format,
-docs, ignore file: its 2-full-keys/settings.json), then `stats.py --config-only --ignore`
+docs, ignore file, transformed-keys file: its 2-full-keys/settings.json), then `stats.py --config-only --run`
 (configkeys/stats/STATISTICS.md, "Statistics the concrete config controls"), and prints the numbers the skill
 optimizes. The full tables are in <out>/config_stats.md, each value's ambiguity, literal and signal columns in
-<out>/config_values.csv, and each in-scope full key's columns (in_config, searchable_kind, searched, kind, section,
-...) in <out>/config_full_keys.csv: its rows with in_config false and searchable_kind true are the keys not set yet
-whose kind the search covers.
+<out>/config_values.csv, and each in-scope full key's columns (in_config, searchable_kind, transformed, target,
+searched, kind, section, ...) in <out>/config_full_keys.csv: its rows with in_config false and target true are the
+target keys not set yet.
 
 Usage (from anywhere):
   uv run --with pandas --with matplotlib --with tabulate python score.py --config <candidate.yaml> \\
@@ -67,10 +67,8 @@ def main():
     run([sys.executable, f"{QUERYGRAPH}/paramtrack/paramtrack.py", "--out", out, "--config", os.path.abspath(a.config),
          "--only", "full-keys", "--only", "configkeys"] + baseline.static_args(st),
         f"{out}/paramtrack.log", cwd=f"{QUERYGRAPH}/paramtrack", timeout=900)
-    ck = f"{out}/4-configkeys"
-    run([sys.executable, f"{QUERYGRAPH}/configkeys/stats/stats.py", "--config-only", "--configkeys",
-         f"{ck}/configkeys.csv", "--param-values", f"{ck}/param_values.txt", "--graph", graph, "--docs", st["docs"],
-         "--prometheus", st["module_dir"], "--out", out] + (["--ignore", st["ignore"]] if st["ignore"] else []),
+    # stats.py takes the rest from the run in <out>: step 2's settings (the baseline's), step 4's configkeys
+    run([sys.executable, f"{QUERYGRAPH}/configkeys/stats/stats.py", "--config-only", "--run", out, "--out", out],
         f"{out}/stats.log", timeout=900)
 
     md = open(f"{out}/config_stats.md").read()
@@ -80,8 +78,8 @@ def main():
     print("\n".join(line[:300] for line in md.splitlines() if line.startswith("- Searched values")))
     print(section(md, r"^What a match on a value tells us", r"^- "))
     rows = list(csv.DictReader(open(f"{out}/config_full_keys.csv")))
-    unset = sorted({r["key"] for r in rows if r["in_config"] == "False" and r["searchable_kind"] == "True"})
-    print(f"\nfull keys not set that are in-scope and of searchable kind (but may be transformed): {len(unset)}")
+    unset = sorted({r["key"] for r in rows if r["in_config"] == "False" and r["target"] == "True"})
+    print(f"\ntarget keys not set (in scope, searchable kind, not stored transformed): {len(unset)}")
     print(f"full tables: {out}/config_stats.md; per value: {out}/config_values.csv; per full key: "
           f"{out}/config_full_keys.csv")
 

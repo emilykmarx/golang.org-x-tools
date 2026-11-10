@@ -1,7 +1,7 @@
 """The baseline run's files and settings (SKILL.md, "Inputs"), for the scripts that rerun paramtrack's steps on a
 candidate and must match it: score.py and check_labels.py. paramtrack records its settings, defaults filled in, in
-2-full-keys/settings.json (module, module dir, root, format, docs, ignore file) and 3-chains/testbed.json (testbed,
---wait, --vm, argmatch's build args)."""
+2-full-keys/settings.json (module, module dir, root, format, docs, ignore file, transformed-keys file) and
+3-chains/testbed.json (testbed, --wait, --vm, argmatch's build args)."""
 
 import json
 import os
@@ -31,9 +31,11 @@ def settings(baseline):
 
 
 def static_args(s):
-    """paramtrack arguments for the static settings s"""
-    return ["--module", s["module"], "--module-dir", s["module_dir"], "--root", s["root"], "--format", s["format"],
+    """paramtrack arguments for the static settings s. A baseline from before paramtrack recorded the transformed-keys
+    file gets paramtrack's default."""
+    args = ["--module", s["module"], "--module-dir", s["module_dir"], "--root", s["root"], "--format", s["format"],
             "--docs", s["docs"], "--ignore", s["ignore"]]
+    return args + (["--transformed", s["transformed"]] if "transformed" in s else [])
 
 
 def testbed_args(baseline):

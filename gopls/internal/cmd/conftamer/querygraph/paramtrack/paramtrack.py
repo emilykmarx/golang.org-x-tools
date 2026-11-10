@@ -59,8 +59,10 @@ class Workflow:
         return sibling if os.path.isdir(sibling) else None
 
     def ignore(self):
-        """stats.py's --ignore: the full keys out of scope, for steps 2 and 8"""
-        return ["--ignore", self.a.ignore] if self.a.ignore else []
+        """stats.py's --ignore (the full keys out of scope) and --transformed (those stored transformed), for steps 2
+        and 8"""
+        return ((["--ignore", self.a.ignore] if self.a.ignore else []) +
+                (["--transformed", self.a.transformed] if self.a.transformed else []))
 
     def step_files(self):
         """Step 2's copy of the config's files, if any"""
@@ -76,7 +78,8 @@ class Workflow:
         with open(f"{d}/settings.json", "w") as f:
             json.dump({"module": self.a.module, "module_dir": os.path.abspath(self.a.module_dir), "root": self.a.root,
                        "format": self.a.format, "docs": os.path.abspath(self.a.docs),
-                       "ignore": os.path.abspath(self.a.ignore) if self.a.ignore else ""}, f, indent=2)
+                       "ignore": os.path.abspath(self.a.ignore) if self.a.ignore else "",
+                       "transformed": os.path.abspath(self.a.transformed) if self.a.transformed else ""}, f, indent=2)
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
         cmd = [self.configkeys_bin(), "--unmarshaler-subgraph", graph, "--module-prefix", self.a.module, "--format",
                self.a.format, "--output", f"{d}/configkeys_graph.csv"]
@@ -226,34 +229,14 @@ class Workflow:
             say(line)
 
     def stats(self, d):
-        """stats.py's statistics and visuals (../configkeys/stats/STATISTICS.md) on this run's outputs, then
+        """stats.py's statistics and visuals (../configkeys/stats/STATISTICS.md) on this run's outputs (--run: the
+        earlier steps' outputs and settings.json; --ignore and --transformed as given to this invocation), then
         visualize.sh's coloured graphs"""
-        # stats.py only uses the needles of its argmatch input. matches.csv is too big for pandas, and its rows have
-        # more fields than its header, so write its distinct needles. (In a directory named after step 5, which
-        # stats.py prints as the argmatch run's name.)
-        matched = set()
-        with open(self.file("5-matches", "matches.csv"), newline="") as f:
-            r = csv.reader(f)
-            ni = next(r).index("needle")
-            for row in r:
-                if len(row) > ni:
-                    matched.add(row[ni])
-        os.makedirs(f"{d}/5-matches")
-        with open(f"{d}/5-matches/matched_needles.csv", "w", newline="") as f:
-            w = csv.writer(f, lineterminator="\n")
-            w.writerow(["needle"])
-            w.writerows([n] for n in sorted(matched))
-
-        graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
-        shutil.copy(graph, d)  # visualize.sh reads it from its results directory
-        run([sys.executable, f"{STATS}/stats.py", "--configkeys", self.file("4-configkeys", "configkeys.csv"),
-             "--param-values", self.file("4-configkeys", "param_values.txt"), "--graph", graph, "--docs", self.a.docs,
-             "--prometheus", self.a.module_dir,
-             "--argmatch", f"{d}/5-matches/matched_needles.csv",
-             "--label-keys", self.file("7-label-keys", "label_keys.csv"), "--out", d] + self.ignore(),
-            log=f"{d}/stats.log", timeout=900)
+        shutil.copy(self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text"), d)  # visualize.sh reads it here
+        run([sys.executable, f"{STATS}/stats.py", "--run", self.out, "--out", d] + self.ignore(), log=f"{d}/stats.log",
+            timeout=900)
         run(["bash", f"{STATS}/visualize.sh", d], log=f"{d}/visualize.log", timeout=1200)
-        say(f"{len(matched)} distinct needles matched; tables in {self.dir('8-stats')}/stats_tables.md")
+        say(f"tables in {self.dir('8-stats')}/stats_tables.md")
 
     # ---------------------------------------------------------------------------------------------------------------
 
@@ -324,6 +307,9 @@ def main():
                     help="Documented keys, for steps 2 and 8 (stats.py --docs)")
     ap.add_argument("--ignore", default=f"{QUERYGRAPH}/paramtrack/ignore/prometheus.txt",
                     help="Full keys out of scope, which steps 2 and 8 leave out (stats.py --ignore; empty: none)")
+    ap.add_argument("--transformed", default=f"{QUERYGRAPH}/paramtrack/transformed/prometheus.txt",
+                    help="Full keys whose values are stored transformed, which steps 2 and 8 mark (stats.py "
+                         "--transformed; empty: none)")
     ap.add_argument("--testbed", default="docker", choices=sorted(TESTBEDS))
     ap.add_argument("--vm", default="paramtrack-e2e", help="GCE VM for --testbed prombench")
     ap.add_argument("--wait", type=int, default=240, help="Seconds to run the module under the workload, per run")
