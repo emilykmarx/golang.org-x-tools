@@ -5,7 +5,8 @@ doesn't. Given several runs' events (e.g. reruns of one candidate, when a label 
 compares the union of their labels. The skill's hard requirement is that a new concrete config loses none (see
 SKILL.md, "Constraints").
 
-A label is (message kind, message label). Compare runs of the same length and workload: a shorter run can miss
+A label is (message kind, message label), without the label's `paths` field (how many distinct paths matched a route
+pattern): that depends on the workload's timing as much as on the config. Compare runs of the same length and workload: a shorter run can miss
 labels for that reason alone.
 
 Usage: count_labels.py <events.jsonl> [<events.jsonl> ...] [--baseline <events.jsonl>] [--list]
@@ -16,6 +17,7 @@ bad arguments).
 
 import argparse
 import json
+import re
 import sys
 import traceback
 
@@ -23,9 +25,12 @@ sys.path.insert(0, "/home/emily/projects/config_tracing/dump_ancestors/argmatch-
 import join  # noqa: E402  (argmatch-labels' join.py: message_labels)
 
 
+PATHS = re.compile(r"(, )?paths: \d+\}$")  # (message_graph.py's _label_fields puts it last)
+
+
 def labels(path):
     events = [json.loads(line) for line in open(path) if line.strip()]
-    return {(events[i]["kind"], label) for i, label in join.message_labels(events).items()}
+    return {(events[i]["kind"], PATHS.sub("}", label)) for i, label in join.message_labels(events).items()}
 
 
 def main():
