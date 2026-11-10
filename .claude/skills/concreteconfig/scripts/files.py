@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Contents of files a concrete config refers to (TLS certs and keys, private keys, IDs), derived from a seed, so they
-come out the same for the same seed without keeping a key in the repo. Use value.py's token for the key as the seed,
-so each file is distinct. Import it, or run it to print a file.
+"""Contents of files/IDs a concrete config refers to (TLS certs and keys, private keys, UUIDs).
+Contents are deterministic given the same seed.
+Import it, or run it to print a file.
 
 Usage:
   uv run --with pycryptodome --with cryptography python files.py cert <seed>   # a self-signed CA cert, then its key
@@ -43,10 +43,12 @@ def rsa_key_pem(seed):
 
 def cert(seed):
     """A throwaway self-signed CA cert and its key, as PEM strings: the same for the same seed (RSA PKCS#1 v1.5
-    signatures, fixed fields). Since it's self-signed, the cert is also its own CA, e.g. for a tls_config's ca_file,
+    signatures, fixed fields; the CN is the seed, or its SHA-256 if longer than 64 characters). Since it's self-signed, the cert is also its own CA, e.g. for a tls_config's ca_file,
     cert_file and key_file."""
     key = serialization.load_pem_private_key(rsa_key(seed).export_key(format="PEM", pkcs=8), password=None)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, seed)])
+    # A CN is at most 64 characters, so a longer seed (e.g. a value.py token) is hashed
+    cn = seed if len(seed) <= 64 else hashlib.sha256(seed.encode()).hexdigest()
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
     c = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
          .serial_number(1).not_valid_before(datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc))
          .not_valid_after(datetime.datetime(2036, 1, 1, tzinfo=datetime.timezone.utc))

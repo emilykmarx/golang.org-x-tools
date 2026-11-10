@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Print the canonical distinctive value for a concrete key, so that every run of the skill picks the same value for
-the same key (see SKILL.md, "Values").
+"""Print a distinctive value for a concrete key: distinct from other keys' values, and almost never a string literal
+in the module's code (see SKILL.md, "Values").
 
 The value is a token derived from the concrete key: `ccfg-` + the key, lowercased, with every run of characters
 other than [a-z0-9] replaced by `-`. A list entry after the first gets `-<index>` (concrete keys leave out list

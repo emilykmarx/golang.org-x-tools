@@ -2,6 +2,7 @@
 """Runs the end-to-end param tracking workflow and joins its outputs into Message label => Full keys. See README.md.
 
 Run with: uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out DIR --config CONFIG [flags]
+Exits 1 if the testbed failed, or some other error occurred.
 """
 
 import argparse
