@@ -11,12 +11,12 @@ But the workflow must generalize to other modules (including Grafana and the Kub
 uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out <dir> --config <concrete config> \
   [--config-files <dir>] \
   [--module github.com/prometheus/prometheus] [--module-dir <checkout>] [--root /config.Config] [--format yaml] \
-  [--docs <documented keys>] [--ignore <full keys to ignore>] [--testbed docker|prombench] [--vm paramtrack-e2e] [--wait 240] [--argmatch-arg KEY=VALUE ...] [--redo <step>] [--until <step>] [--only <step> ...]
+  [--docs <documented keys>] [--ignore <full keys to ignore>] [--transformed <full keys stored transformed>] [--testbed docker|prombench] [--vm paramtrack-e2e] [--wait 240] [--argmatch-arg KEY=VALUE ...] [--redo <step>] [--until <step>] [--only <step> ...]
 ```
 The defaults are for Prometheus.
 
 ## Input files
-In addition to the concrete config, paramtrack takes two module-/testbed-specific files, described below.
+In addition to the concrete config, paramtrack takes the module-/testbed-specific files described below.
 
 ### `--config-files`
 The files in this directory are any that the concrete config references (e.g., `password_file:/etc/prometheus/config/password_file.txt`).
@@ -24,10 +24,18 @@ The files in this directory are any that the concrete config references (e.g., `
 paramtrack copies these into the testbed using module-/testbed-specific logic.
 
 ### `--ignore`
-The keys listed in the `--ignore` file will be ignored when the `/concreteconfig` skill evaluates candidate concrete configs, and in the statistics (with one exception in the statistics - see STATISTICS.md). This file is generated for each module on an ad hoc basis; e.g. in Prometheus, we choose to ignore many of the service discovery keys - see [ignore/prometheus.txt](ignore/prometheus.txt).
+- A file listing keys the testbed is unlikely to be able to use
+  - E.g. in Prometheus, we choose to ignore many of the service discovery keys - see [ignore/prometheus.txt](ignore/prometheus.txt).
+- Generated for each module on an ad hoc basis
+- Interaction with `argmatch`: The /concreteconfig skill does not typically set these (since they are not "target" - see [TERMINOLOGY](../configkeys/stats/TERMINOLOGY.md)), so `argmatch` will typically not search them.
+  - But, the skill may e.g. if it finds that it must in order for the config to be valid. In this case, `argmatch` still searches for the corresponding value if it is a searchable kind, and the final step before the statistics still outputs those matches.
 
-However, the concrete config may still set an ignored key (e.g. if the skill finds that it must in order for the config to be valid). In this case, `argmatch` still searches for the corresponding value, and the final step before the statistics still outputs those matches.
 
+### `--transformed`
+- A file listing keys whose values are likely to have different contents in memory than in the config file
+  - E.g. Prometheus parses `*.proxy_url` and `*.api_server` URLs into scheme, host, etc, which are stored as separate fields in `config.URL` - see [transformed/prometheus.txt](transformed/prometheus.txt)
+- Generated for each module on an ad hoc basis
+- Interaction with `argmatch`: Still searches for these keys' values, in case we're wrong.
 
 ### `--docs`
 A list of keys generated from the module's documentation using the `/documentedkeys` skill.
@@ -111,10 +119,10 @@ paramtrack.py \
 ## Output
 The final output is `label_keys.csv`. It lists each message's keys, with a confidence for each. Message are identified by a *kind* and *label*, applied in [join.py](../../../../../../../dump_ancestors/argmatch-labels/README.md) using the logic in contexttrack's [message_graph.py](../../../../../../../conftamer/contexttrack/analysis/message_graph.py).
 
-(See STATISTICS.md for terminology e.g. "full key").
+See [TERMINOLOGY](../configkeys/stats/TERMINOLOGY.md) for terminology e.g. "full key".
 
 Two kinds of row:
-- **Evidence rows:** one per (message, needle, concrete key, full key, section), for the keys whose values argmatch matched in calls that join with the message. These keys are *evidence* for the message.
+- **Evidence rows:** one per (message, needle, concrete key, full key, section), for the keys whose values argmatch matched, in calls that join with the message. These keys are *evidence* for the message. (Includes both ambiguous and unambiguous matches.)
 - **Inferred rows:** for each section with evidence for a message, one per other full key in the section. The key wasn't matched for the message, but its section was.
 
 Columns:
@@ -122,16 +130,10 @@ Columns:
 - `concrete_key`: a key at which the needle is a value in the concrete config (from `param_keys.txt`). A needle that stands for several concrete keys gets a row for each. Empty in inferred rows.
 - `full_key`: the concrete key's full key (empty if it has none), or the inferred key
 - `section`: the full key's section (`<parent key> @ <Unmarshaler>`); a row per section, if it has several
-- `section_keys`: the full keys in that section, joined with `; `
+- `section_keys`: the full keys in that section (joined with `; `), with custom unmarshaler `*` resolved
 - `evidence`: whether the key is evidence for the message
-- `eligible`: whether the key could have been evidence: it's in scope (not left out by `--ignore`), and the concrete config sets it, with a value argmatch searched for (`param_values.txt`)
-- `confidence_all`, `confidence_eligible`: 1 for evidence. For an inferred key, the share of its section's in-scope keys that are evidence for the message: out of all of them (not left out by `--ignore`), and out of its eligible keys. Blank if there are none. Reading the two together separates the causes of a low score:
-  - both low: the section's eligible keys were searched for, and most weren't found for this message;
-  - `confidence_all` low but `confidence_eligible` high: most of the section is unset, or unsearchable (numbers, bools), so the concrete config or argmatch's strings-only search is the gap.
-
-  E.g. for the remote write request in the Prombench run, `remote_write.sigv4`'s `access_key`, `region` and `secret_key` are evidence. Its other 3 keys aren't set, so they get 0.5 out of all 6 keys, and 1.0 out of the 3 eligible.
-
-These terms are defined in STATISTICS.md. Unlike configkeys' `section keys` column, an SD key's section is that of its own SD config, not combined over every SD config with the same field. Every evidence key counts fully, even when its needle stands for several concrete keys or is also a string literal in the code.
+- `eligible`: whether the key could have been evidence - see TERMINOLOGY.md
+- `confidence_all`, `confidence_eligible`: 1 for an evidence row. For an inferred row, the share of its section's in-scope keys that are evidence for the message: out of all of them (`confidence_all`), and out of its eligible keys (`confidence_eligible`).
 
 `summary.txt` counts rows (evidence and inferred), messages, full keys and sections, and lists needles with no concrete key and concrete keys with no full key.
 
@@ -148,7 +150,7 @@ Both testbeds copy the stack log and match file into the Prometheus checkout, as
 
 argmatch's build args are bootstrap.sh's (`ARGMATCH_ARGS` in `testbeds.py`); override them with `--argmatch-arg`.
 
-Each testbed step (`3-chains`, `5-matches`) records its effective settings in `testbed.json`: the testbed, `--wait`, `--vm` (for `prombench`) and argmatch's build args, defaults filled in. Step 2 likewise records the static ones in `2-full-keys/settings.json`: `--module`, `--module-dir`, `--root`, `--format`, `--docs` and `--ignore`. The concreteconfig skill's `score.py` and `check_labels.py` read these, so it evaluates candidates using the same settings as the baseline.
+Each testbed step (`3-chains`, `5-matches`) records its effective settings in `testbed.json`: the testbed, `--wait`, `--vm` (for `prombench`) and argmatch's build args, defaults filled in. Step 2 likewise records the static ones in `2-full-keys/settings.json`: `--module`, `--module-dir`, `--root`, `--format`, `--docs`, `--ignore` and `--transformed`. The concreteconfig skill's `score.py` and `check_labels.py` read these, so it evaluates candidates using the same settings as the baseline.
 
 ## Adding modules and testbeds
 
