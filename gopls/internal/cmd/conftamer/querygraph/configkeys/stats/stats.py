@@ -586,6 +586,66 @@ def confidence(path, out, chart, ignore):
 # ---------------------------------------------------------------------------------------------------------------
 
 
+def property_table(rows, props, in_scope):
+    """Keys, Sections, Keys per section and Min. confidence per property (TERMINOLOGY.md): rows has a key and
+    section column; props is a list of (name, set of keys), each a subset of the previous; in_scope is the in-scope
+    keys. A section has a property if one of its keys does. Keys per section is the median/mean, over the sections
+    with the property, of their keys with it. Min. confidence is the median/mean, over the keys with the property, of
+    1 / the number of in-scope keys in the key's section (the confidence its section's keys get if it's the only
+    evidence, as in label_keys.csv's confidence_all); not for the first column, whose keys needn't be in scope. A %
+    is of the previous column."""
+    rows = rows[["key", "section"]].drop_duplicates()
+    in_scope_size = rows[rows.key.isin(in_scope)].groupby("section").key.nunique()
+    section_of = dict(zip(rows.key, rows.section))
+    table, prev = {}, None
+    for name, keys in props:
+        r = rows[rows.key.isin(keys)]
+        per_sec = r.groupby("section").key.nunique()
+        n = (len(keys), len(per_sec))
+        cells = [f"{x}" if prev is None else f"{x} ({100 * x / p:.0f}%)" if p else f"{x}" for x, p in
+                 zip(n, prev or (None, None))]
+        cells.append(f"{per_sec.median():g}/{per_sec.mean():.1f}" if len(per_sec) else "-")
+        conf = pd.Series([] if prev is None else [100 / in_scope_size[section_of[k]] for k in keys], dtype=float)
+        cells.append("-" if conf.empty else f"{conf.median():.1f}%/{conf.mean():.1f}%")
+        table[name] = cells
+        prev = n
+    return pd.DataFrame(table, index=["Keys", "Sections", "Keys per section", "Min. confidence"])
+
+
+# Why the concreteconfig skill left target keys unset, for Prometheus: the 2026-11-08 run's reasons (its diff.md).
+# fnmatch patterns, as in --ignore.
+UNSET_REASONS = [
+    ("secret-manager reference (*_ref): fails at runtime", ["*_ref"]),
+    ("would contact endpoints outside the testbed", ["*.sigv4.role_arn", "remote_write.azuread.oauth.*"]),
+]
+
+
+def dropout_reasons(name_from, keys_from, name_to, keys_to, reasons):
+    """Why keys in one column of the property table (keys_from) aren't in the next (keys_to): reasons is a list of
+    (reason, predicate on a key). Each dropped key counts once, under the combination of reasons that apply to it
+    ("none of these" if none does), so the shares add up to 100%."""
+    dropped = keys_from - keys_to
+    combos = collections.Counter(" + ".join(r for r, applies in reasons if applies(k)) or "none of these"
+                                 for k in dropped)
+    df = pd.DataFrame([(r[:1].upper() + r[1:], pct(n, len(dropped))) for r, n in combos.most_common()],
+                      columns=["Drop reason", "Dropped"])
+    return f"{name_from} -> {name_to}", df
+
+
+def side_by_side_html(tables):
+    """(title, DataFrame with Drop reason and Dropped columns) tables as one HTML table, side by side: a column pair
+    per table, headed by its title and "Dropped", with a line after each pair (markdown tables can't go side by side)"""
+    bar = ' style="border-right: 1px solid"'
+    lines = ["<table>", "<tr>" + "".join(f"<th>{t}</th><th{bar}>Dropped</th>" for t, _ in tables) + "</tr>"]
+    for i in range(max(len(df) for _, df in tables)):
+        cells = []
+        for _, df in tables:
+            reason, dropped = (df.iloc[i]["Drop reason"], df.iloc[i]["Dropped"]) if i < len(df) else ("", "")
+            cells.append(f"<td>{reason}</td><td{bar}>{dropped}</td>")
+        lines.append("<tr>" + "".join(cells) + "</tr>")
+    return "\n".join(lines + ["</table>"])
+
+
 def fill_from_run(args):
     """Fills in the path arguments not given from paramtrack run args.run (paramtrack's README lists its steps'
     outputs): the inputs paramtrack's step 8 passes. Raises FileNotFoundError for a missing one the mode needs."""
@@ -985,6 +1045,47 @@ def main():
                                           "Unmarshaler types with full keys"])
     out.p("What each stage can tell us about (a value stands for all of its keys):")
     out.table(chain)
+
+    # =============================================================================================================
+    out.h("Keys and sections by property")
+    # Nested: each column also has the previous columns' properties (TERMINOLOGY.md). A key is unambiguous if each of
+    # its values (over its concrete keys) is: no other concrete key has it, and it's not a string literal in the code.
+    def unambiguous(fk):
+        vs = [v.replace("\n", "\\n") for k in covered_by.get(fk, ()) for v in config[k]["values"]]
+        return bool(vs) and all(len(occ[v]) == 1 and v not in lits for v in vs)
+
+    all_rows = full_key_rows(full_all, docs_all)
+    in_scope = set(keys.key)
+    target = set(keys[keys.target].key)
+    concrete = target & set(keys[keys.in_config].key)
+    props = [("Full", set(all_rows.key)), ("In-scope", in_scope), ("Target", target), ("Concrete", concrete),
+             ("Unambiguous", {fk for fk in concrete if unambiguous(fk)})]
+    out.p("Each column's keys also have the previous columns' properties; a % is of the previous column. "
+          "Keys per section: median/mean over the sections with the property. Min. confidence: median/mean, over the "
+          "keys with the property, of 1 / the in-scope keys in the key's section" +
+          ("" if args.ignore else " (no --ignore: every full key is in scope)") + ".")
+    out.table(property_table(all_rows, props, in_scope), index=True)
+
+    # Why keys drop out from one column to the next, where there's more than one reason
+    by_key = keys.set_index("key")
+
+    def key_values(fk):
+        return [v.replace("\n", "\\n") for k in covered_by.get(fk, ()) for v in config[k]["values"]]
+
+    pairs = [
+        (props[1], props[2], [("unsearchable kind", lambda k: not by_key.searchable_kind[k]),
+                              ("stored transformed", lambda k: by_key.transformed[k])]),
+        (props[2], props[3], [(r, lambda k, ps=ps: matches_any(k, ps)) for r, ps in UNSET_REASONS]),
+        (props[3], props[4], [("no values", lambda k: not key_values(k)),
+                              ("a value shared with another concrete key", lambda k: any(len(occ[v]) > 1
+                                                                                         for v in key_values(k))),
+                              ("a value that's a string literal in the code", lambda k: any(v in lits
+                                                                                            for v in key_values(k)))]),
+    ]
+    out.p("\nWhy keys drop out from one column to the next (each dropped key counts once, under the combination of "
+          "reasons that apply to it):\n")
+    out.p(side_by_side_html([dropout_reasons(name_from, keys_from, name_to, keys_to, reasons)
+                             for (name_from, keys_from), (name_to, keys_to), reasons in pairs]))
     if cfg_only:
         out.write()
         print(f"wrote {out.path}")
