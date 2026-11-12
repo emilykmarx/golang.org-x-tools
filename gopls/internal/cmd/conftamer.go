@@ -668,6 +668,10 @@ func (c *Conftamer) Run(ctx context.Context, args ...string) error {
 	if c.Format == "" {
 		c.Format = string(ct.YAML)
 	}
+	// The unmarshal function/interface strategies (see FindUnmarshalers) only support YAML so far
+	if (c.UnmarshalFuncDefn != "" || c.UnmarshalIfaceDefn != "") && c.Format != string(ct.YAML) {
+		return tool.CommandLineErrorf("u-fn and u-iface only support format %q (got %q)", ct.YAML, c.Format)
+	}
 	format, err := ct.ParseFormat(c.Format)
 	if err != nil {
 		return tool.CommandLineErrorf("%v", err)
