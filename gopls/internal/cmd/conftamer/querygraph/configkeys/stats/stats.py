@@ -103,6 +103,18 @@ def matches_any(fk, patterns):
     return any(fnmatch.fnmatchcase(fk, p) for p in patterns)
 
 
+def key_values(fk, covered_by, config):
+    """The values of full key fk in the concrete config: those of its concrete keys (covered_by: full key => concrete
+    keys; config: concrete key => info), with newlines escaped as in param_values.txt and values.csv"""
+    return [v.replace("\n", "\\n") for k in covered_by.get(fk, ()) for v in config[k]["values"]]
+
+
+def unambiguous_key(values, unambiguous_value):
+    """Whether a key with these values is unambiguous (TERMINOLOGY.md): it has values, and each is unambiguous
+    (unambiguous_value(v): no other concrete key has v, and v isn't a string literal in the module's code)"""
+    return bool(values) and all(unambiguous_value(v) for v in values)
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # Inputs
 
@@ -1048,11 +1060,9 @@ def main():
 
     # =============================================================================================================
     out.h("Keys and sections by property")
-    # Nested: each column also has the previous columns' properties (TERMINOLOGY.md). A key is unambiguous if each of
-    # its values (over its concrete keys) is: no other concrete key has it, and it's not a string literal in the code.
+    # Nested: each column also has the previous columns' properties (TERMINOLOGY.md)
     def unambiguous(fk):
-        vs = [v.replace("\n", "\\n") for k in covered_by.get(fk, ()) for v in config[k]["values"]]
-        return bool(vs) and all(len(occ[v]) == 1 and v not in lits for v in vs)
+        return unambiguous_key(key_values(fk, covered_by, config), lambda v: len(occ[v]) == 1 and v not in lits)
 
     all_rows = full_key_rows(full_all, docs_all)
     in_scope = set(keys.key)
@@ -1069,18 +1079,18 @@ def main():
     # Why keys drop out from one column to the next, where there's more than one reason
     by_key = keys.set_index("key")
 
-    def key_values(fk):
-        return [v.replace("\n", "\\n") for k in covered_by.get(fk, ()) for v in config[k]["values"]]
+    def values_of(fk):
+        return key_values(fk, covered_by, config)
 
     pairs = [
         (props[1], props[2], [("unsearchable kind", lambda k: not by_key.searchable_kind[k]),
                               ("stored transformed", lambda k: by_key.transformed[k])]),
         (props[2], props[3], [(r, lambda k, ps=ps: matches_any(k, ps)) for r, ps in UNSET_REASONS]),
-        (props[3], props[4], [("no values", lambda k: not key_values(k)),
+        (props[3], props[4], [("no values", lambda k: not values_of(k)),
                               ("a value shared with another concrete key", lambda k: any(len(occ[v]) > 1
-                                                                                         for v in key_values(k))),
+                                                                                         for v in values_of(k))),
                               ("a value that's a string literal in the code", lambda k: any(v in lits
-                                                                                            for v in key_values(k)))]),
+                                                                                            for v in values_of(k)))]),
     ]
     out.p("\nWhy keys drop out from one column to the next (each dropped key counts once, under the combination of "
           "reasons that apply to it):\n")
