@@ -1,0 +1,108 @@
+"""Prometheus: paramtrack's settings and hooks for this module (see ../__init__.py for what each is; README.md here for
+the module's decisions and sources)."""
+
+import glob
+import os
+import re
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CT = "/home/emily/projects/config_tracing"
+
+GO_MODULE = "github.com/prometheus/prometheus"
+MODULE_DIR = f"{CT}/prometheus"
+ROOT = "/config.Config"
+FORMAT = "yaml"
+DOCS = f"{CT}/prom-test-infra/prombench/prometheus_config_keys.txt"
+IGNORE = f"{HERE}/ignore.txt"
+TRANSFORMED = f"{HERE}/transformed.txt"
+GOLITS_PACKAGE = "./cmd/prometheus"
+GOLITS_TAGS = "netgo,builtinassets,stringlabels"  # Prometheus' build tags (.promu.yml)
+TITLE = "Prometheus, root /config.Config"
+
+
+class CustomKeys:
+    """Service discovery: discovery.Configs' custom UnmarshalYAML picks each SD config by its key, which
+    discovery.RegisterConfig makes <Name()>_sd_configs (static_configs for "static"), under scrape_configs and
+    alerting.alertmanagers."""
+
+    parents = ("scrape_configs", "alerting.alertmanagers")
+
+    def __init__(self, module_dir):
+        # Graph type name of each SD config => its key, from the configs' Name() methods
+        rx = re.compile(r'func \((?:\w+ )?\*?(\w+)\) Name\(\) string \{\s*return "(\w+)"')
+        alias_rx = re.compile(r"^type (\w+) = (\w+)$", re.M)  # e.g. type KumaSDConfig = SDConfig: the graph names Y
+        self.names = {}
+        for f in glob.glob(f"{module_dir}/discovery/**/*.go", recursive=True):
+            if f.endswith("_test.go"):
+                continue
+            pkg = os.path.relpath(os.path.dirname(f), module_dir)
+            src = open(f).read()
+            aliases = dict(alias_rx.findall(src))
+            for typ, name in rx.findall(src):
+                key = "static_configs" if name == "static" else f"{name}_sd_configs"
+                self.names[f"/{pkg}.{typ}"] = key
+                if typ in aliases:
+                    self.names[f"/{pkg}.{aliases[typ]}"] = key
+
+    def full_key(self, pattern, nodes, ends_custom):
+        """The pattern with its SD `*` replaced by the SD config's key, for the SD type on the path (nodes). The
+        pattern unchanged if the path doesn't go through discovery.Configs; None for the catch-all (a path ending at
+        discovery.Configs' dynamic unmarshaler)."""
+        if "/discovery.Configs" not in nodes:
+            return pattern
+        sd_nodes = [n for n in nodes if n in self.names]
+        if ends_custom or not sd_nodes:
+            return None
+        s = pattern.split(".")
+        i = 1 if s[0] == "scrape_configs" else 2 if s[:2] == ["alerting", "alertmanagers"] else None
+        assert i is not None and s[i] == "*", (pattern, nodes)
+        s[i] = self.names[sd_nodes[0]]
+        return ".".join(s)
+
+    def of(self, fk):
+        """The SD config key (e.g. azure_sd_configs) a full key is under, or None"""
+        s = fk.split(".")
+        keys = set(self.names.values())
+        if s[0] == "scrape_configs" and len(s) > 2 and s[1] in keys:
+            return s[1]
+        if s[:2] == ["alerting", "alertmanagers"] and len(s) > 3 and s[2] in keys:
+            return s[2]
+        return None
+
+
+def docs_kind(typ):
+    """Kind of Go value we'd expect for a documented type (the docs' <boolean>, <duration>, ...)"""
+    t = typ.strip("[] ")
+    if t.startswith("<boolean>"):
+        return "bool"
+    if any(t.startswith(x) for x in ("<duration>", "<int>", "<float>", "<size>")):
+        return "number"
+    if typ == "map" or typ == "":
+        return "map"
+    return "string"
+
+
+def graph_docs_reason(k, in_graph):
+    """Why a key is only in the graph (in_graph) or only in the docs"""
+    s = k.split(".")
+    if in_graph:
+        if s[-1].endswith("_ref"):
+            return "secret-manager reference (*_ref)"
+        if s[-1] in ("bearer_token", "bearer_token_file"):
+            return "deprecated bearer_token[_file]"
+        if k.startswith("alerting.alertmanagers.kuma_sd_configs."):
+            return "kuma_sd_configs under alertmanagers (docs list it only under scrape_configs)"
+        if k.startswith("scrape_configs.vultr_sd_configs."):
+            return "vultr_sd_configs under scrape_configs (docs list it only under alertmanagers)"
+        return "other: " + s[-1]
+    if ".oauth2.http_headers." in k:
+        return "oauth2.http_headers (docs; not a field of OAuth2 in prometheus/common v0.62.0)"
+    return "other: " + k
+
+
+# Why the concreteconfig skill left target keys unset: the 2026-11-08 run's reasons (its diff.md). fnmatch patterns,
+# as in --ignore.
+UNSET_REASONS = [
+    ("secret-manager reference (*_ref): fails at runtime", ["*_ref"]),
+    ("would contact endpoints outside the testbed", ["*.sigv4.role_arn", "remote_write.azuread.oauth.*"]),
+]

@@ -1,7 +1,7 @@
 # Prometheus' full keys whose values are stored transformed (stats.py --transformed), so argmatch can't find them as
 # written: they're not target keys of the concreteconfig skill (in scope, a searchable kind, and not stored
 # transformed). paramtrack's steps 2 and 8 and the skill's score.py mark them. One fnmatch pattern per line, as in
-# ../ignore/prometheus.txt.
+# ignore.txt.
 # Provisional (2026-11-09): only the config.URL fields, the one case confirmed by the code and by the 2026-11-09 full
 # run (none of their values matched). remote_write.url and remote_read.url are *config.URL too, but also keep a string
 # copy, and are found. To be regenerated from code (configkeys' ClassifyUnmarshaler TODO) and/or empirically (values

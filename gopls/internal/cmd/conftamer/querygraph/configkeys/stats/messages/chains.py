@@ -10,7 +10,8 @@ fields are one message. A message's events are those whose label reduces to it.
 An event's chain is its stack (the goroutine that sent it, innermost first), then the frames in its ancestry (the
 stacks that created that goroutine, and so on, up to main), as join.py parses them: the code path from the send to the
 root.
-Similarity is measured on the module's own functions (MODULE, e.g. github.com/prometheus/prometheus/...), since
+Similarity is measured on the module's own functions (MODULE: the run's Go module, from its 2-full-keys/settings.json,
+e.g. github.com/prometheus/prometheus/...), since
 nearly every request shares the net/http frames:
 - per message: its events, its distinct chains (full, and module functions only), and its origin(s): the outermost
   module function of each chain (e.g. notifier.(*Manager).Run);
@@ -30,7 +31,7 @@ import pandas as pd
 sys.path.insert(0, "/home/emily/projects/config_tracing/dump_ancestors/argmatch-labels")
 import join  # noqa: E402  (argmatch-labels' join.py: message_labels)
 
-MODULE = "github.com/prometheus/prometheus/"
+MODULE = "github.com/prometheus/prometheus/"  # (message_chains sets it to the run's module)
 KINDS = ("Request sent", "Response sent")  # the sent messages
 
 
@@ -60,7 +61,9 @@ STEP = "5-matches"
 
 
 def message_chains(run, step=STEP):
-    """(kind, message) => the chains of its events in run's <step>/events.jsonl"""
+    """(kind, message) => the chains of its events in run's <step>/events.jsonl. Sets MODULE to the run's module."""
+    global MODULE
+    MODULE = json.load(open(f"{run}/2-full-keys/settings.json"))["module"] + "/"
     events = [json.loads(line) for line in open(f"{run}/{step}/events.jsonl") if line.strip()]
     chains = collections.defaultdict(list)
     for i, label in join.message_labels(events).items():

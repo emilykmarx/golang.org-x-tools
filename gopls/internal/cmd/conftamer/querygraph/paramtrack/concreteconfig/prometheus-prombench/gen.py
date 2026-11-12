@@ -19,7 +19,7 @@ import sys
 import yaml
 
 SKILL = "/home/emily/projects/config_tracing/golang.org-x-tools/.claude/skills/concreteconfig"
-sys.path[:0] = [f"{SKILL}/scripts", f"{SKILL}/modules/prometheus"]
+sys.path[:0] = [f"{SKILL}/scripts", f"{SKILL}/../../../gopls/internal/cmd/conftamer/querygraph/paramtrack/modules/prometheus"]
 from files import cert, rsa_key_pem, uuid_from  # noqa: E402
 from prom_files import google_credentials, kubeconfig as kubeconfig_file  # noqa: E402
 from value import token  # noqa: E402

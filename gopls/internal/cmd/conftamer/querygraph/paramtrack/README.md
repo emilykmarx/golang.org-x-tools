@@ -25,7 +25,7 @@ paramtrack copies these into the testbed using module-/testbed-specific logic.
 
 ### `--ignore`
 - A file listing keys the testbed is unlikely to be able to use
-  - E.g. in Prometheus, we choose to ignore many of the service discovery keys - see [ignore/prometheus.txt](ignore/prometheus.txt).
+  - E.g. in Prometheus, we choose to ignore many of the service discovery keys - see [modules/prometheus/ignore.txt](modules/prometheus/ignore.txt).
 - Generated for each module on an ad hoc basis
 - Interaction with `argmatch`: The /concreteconfig skill does not typically set these (since they are not "target" - see [TERMINOLOGY](../configkeys/stats/TERMINOLOGY.md)), so `argmatch` will typically not search them.
   - But, the skill may e.g. if it finds that it must in order for the config to be valid. In this case, `argmatch` still searches for the corresponding value if it is a searchable kind, and the final step before the statistics still outputs those matches.
@@ -33,7 +33,7 @@ paramtrack copies these into the testbed using module-/testbed-specific logic.
 
 ### `--transformed`
 - A file listing keys whose values are likely to have different contents in memory than in the config file
-  - E.g. Prometheus parses `*.proxy_url` and `*.api_server` URLs into scheme, host, etc, which are stored as separate fields in `config.URL` - see [transformed/prometheus.txt](transformed/prometheus.txt)
+  - E.g. Prometheus parses `*.proxy_url` and `*.api_server` URLs into scheme, host, etc, which are stored as separate fields in `config.URL` - see [modules/prometheus/transformed.txt](modules/prometheus/transformed.txt)
 - Generated for each module on an ad hoc basis
 - Interaction with `argmatch`: Still searches for these keys' values, in case we're wrong.
 

@@ -10,11 +10,12 @@
 #   <stem>.gv.dot        the graph with the node attributes and a legend (graph label),
 #                        laid out left to right by dot (open in gephi)
 #   <stem>_preview.png   a graphviz rendering of it, at the same node positions
-# Usage: visualize.sh [RESULTS]
+# Usage: visualize.sh [RESULTS [GO_MODULE]]  (GO_MODULE: the graph's module prefix, default Prometheus')
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 R=${1:-$here/../../../../../../results/prom/stats}
 R=$(cd "$R" && pwd)
+module=${2:-github.com/prometheus/prometheus}
 
 # Adds the legend and graph-wide attributes:
 # add_legend <in .gv.dot> <out .gv> <title> <description lines, separated by newlines> [<colour for 0% matched nodes>]
@@ -65,7 +66,7 @@ render() {
   local stem=$1 attrs=$2 title=$3 description=$4 zero_color=$5
   shift 5
   (cd "$here/../../../parse/prettify" && timeout 300 go run . --infile "$R/unmarshaler_subgraph.text" \
-    --outfile "$R/$stem.gv" --module-prefix github.com/prometheus/prometheus \
+    --outfile "$R/$stem.gv" --module-prefix "$module" \
     --node-attrs "$attrs" "$@")
 
   local with_legend

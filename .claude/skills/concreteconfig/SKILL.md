@@ -27,8 +27,8 @@ If any of the inputs below doesn't exist, stop and say which in the output (see 
 
 ### The module's and the testbed's files
 They hold everything specific to one module or testbed, so the "Steps" below stay generic. The prompt that invokes the skill points to them.
-- `modules/<module>/MODULE.md`: points to the developer knowledge, the ignore file, and other module-specific information described below
-- `testbeds/<testbed>/TESTBED.md`: how to use the testbed to evaluate the config, as described below.
+- paramtrack's `modules/<module>/MODULE.md` (`gopls/internal/cmd/conftamer/querygraph/paramtrack/`): points to the developer knowledge, the ignore file, and other module-specific information described below
+- paramtrack's `testbeds/<testbed>/TESTBED.md`: how to use the testbed to evaluate the config, as described below.
 
 ### The rest
 - The module source checkout; a running testbed; and the *shipped config*, i.e. the concrete config running in the testbed when the skill is invoked.

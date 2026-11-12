@@ -61,7 +61,8 @@ def unambiguous_keys(run):
     fkdf = pd.read_csv(f"{run}/8-stats/full_keys.csv", keep_default_na=False, dtype=str)
     section_of = dict(zip(fkdf.key, fkdf.section))
     stats.MAP_FIELDS.update(stats.map_field_keys(f"{run}/1-unmarshaler-graph/unmarshaler_subgraph.text"))
-    _, config, _ = stats.load_configkeys(f"{run}/4-configkeys/configkeys.csv", stats.sd_names(settings["module_dir"]))
+    custom = stats.modules.load(settings["module"]).CustomKeys(settings["module_dir"])
+    _, config, _ = stats.load_configkeys(f"{run}/4-configkeys/configkeys.csv", custom)
     covered_by = collections.defaultdict(set)
     for k, c in config.items():
         for fk in c["full_keys"]:
@@ -137,7 +138,7 @@ def call_matches(run, wanted_calls, kept, config_values):
 
 def short(t):
     """A type without its module path prefix, for the tables"""
-    return t.replace("github.com/prometheus/prometheus/", "").replace("github.com/prometheus/", "")
+    return t.replace(chains.MODULE, "").replace("github.com/prometheus/", "")  # (and prometheus/common's)
 
 
 def jaccard(a, b):

@@ -16,9 +16,14 @@ import json
 import os
 import re
 import subprocess
+import sys
 
 import matplotlib
 import pandas as pd
+
+# paramtrack's per-module settings and hooks (paramtrack/modules/<module>/module.py)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../paramtrack"))
+import modules  # noqa: E402
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -119,52 +124,16 @@ def unambiguous_key(values, unambiguous_value):
 # Inputs
 
 
-def sd_names(prom_dir):
-    """Graph type name of each service discovery config => its key under scrape_configs / alertmanagers.
-    From the configs' Name() methods (discovery.RegisterConfig registers them as <Name()>_sd_configs)."""
-    rx = re.compile(r'func \((?:\w+ )?\*?(\w+)\) Name\(\) string \{\s*return "(\w+)"')
-    alias_rx = re.compile(r"^type (\w+) = (\w+)$", re.M)  # e.g. type KumaSDConfig = SDConfig: the graph names Y
-    names = {}
-    for f in glob.glob(f"{prom_dir}/discovery/**/*.go", recursive=True):
-        if f.endswith("_test.go"):
-            continue
-        pkg = os.path.relpath(os.path.dirname(f), prom_dir)
-        src = open(f).read()
-        aliases = dict(alias_rx.findall(src))
-        for typ, name in rx.findall(src):
-            key = "static_configs" if name == "static" else f"{name}_sd_configs"
-            names[f"/{pkg}.{typ}"] = key
-            if typ in aliases:
-                names[f"/{pkg}.{aliases[typ]}"] = key
-    return names
-
-
-def expand_sd(pattern, path, sd):
-    """The pattern with its service discovery `*` replaced by the SD config's key, for the SD type on the path.
-    Returns the pattern unchanged if the path doesn't go through discovery.Configs, and None for the catch-all
-    (a path ending at discovery.Configs' dynamic unmarshaler)."""
-    nodes = path_nodes(path)
-    if "/discovery.Configs" not in nodes:
-        return pattern
-    sd_nodes = [n for n in nodes if n in sd]
-    if path.endswith(CUSTOM) or not sd_nodes:
-        return None
-    s = segs(pattern)
-    i = 1 if s[0] == "scrape_configs" else 2 if s[:2] == ["alerting", "alertmanagers"] else None
-    assert i is not None and s[i] == STAR, (pattern, path)
-    s[i] = sd[sd_nodes[0]]
-    return ".".join(s)
-
-
-def load_configkeys(path, sd):
-    """Full keys (graph patterns with SD `*`s resolved) and concrete keys, from the configkeys csv."""
+def load_configkeys(path, custom):
+    """Full keys (graph patterns with the custom `*`s resolved by custom, the module's CustomKeys) and concrete keys,
+    from the configkeys csv."""
     ck = pd.read_csv(path, keep_default_na=False, dtype=str)
     ck.columns = [c.replace(" ", "_") for c in ck.columns]
     full = {}  # full key => info
     catchall = set()
     for r in ck[ck.source != "config"].itertuples():
         for p in split(r.Unmarshaler_Path):
-            fk = expand_sd(r.param_key, p, sd)
+            fk = custom.full_key(r.param_key, path_nodes(p), p.endswith(CUSTOM))
             if fk is None:
                 catchall.add(r.param_key)
                 continue
@@ -179,7 +148,7 @@ def load_configkeys(path, sd):
         patterns = split(r.pattern) or [r.param_key]
         for p in info["paths"]:
             for pat in patterns:
-                fk = expand_sd(pat, p, sd)
+                fk = custom.full_key(pat, path_nodes(p), p.endswith(CUSTOM))
                 if fk is not None and instance_of(r.param_key, fk) and fk in full:
                     info["full_keys"].add(fk)
                     info["unmarshalers"].add(path_nodes(p)[-1])
@@ -237,11 +206,11 @@ def check_sections(fkdf, n_full, configkeys_csv, out):
         print(f"Warning: {len(mismatches)} full keys' sections differ from configkeys' section keys: {mismatches[:10]}")
 
 
-def go_string_literals(module_dir):
-    """String literals in the non-test Go files compiled into Prometheus, dependencies and standard library included
+def go_string_literals(module_dir, mod):
+    """String literals in the non-test Go files compiled into the module (mod.GOLITS_PACKAGE, mod.GOLITS_TAGS), dependencies and standard library included
     (golits/), with newlines written as a literal \\n, as the values are"""
     golits = f"{os.path.dirname(os.path.abspath(__file__))}/golits"
-    out = subprocess.run(["go", "run", ".", "-dir", module_dir], cwd=golits, capture_output=True, text=True,
+    out = subprocess.run(["go", "run", ".", "-dir", module_dir, "-tags", mod.GOLITS_TAGS, mod.GOLITS_PACKAGE], cwd=golits, capture_output=True, text=True,
                          timeout=600, check=True).stdout
     return {json.loads(line).replace("\n", "\\n") for line in out.splitlines()}
 
@@ -260,18 +229,6 @@ def read_docs(path):
         if any(k.startswith(key + ".") for k in docs):
             del docs[key]
     return docs
-
-
-def docs_kind(typ):
-    """Kind of Go value we'd expect for a documented type"""
-    t = typ.strip("[] ")
-    if t.startswith("<boolean>"):
-        return "bool"
-    if any(t.startswith(x) for x in ("<duration>", "<int>", "<float>", "<size>")):
-        return "number"
-    if typ == "map" or typ == "":
-        return "map"
-    return "string"
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -348,16 +305,6 @@ def node_rows(fkdf, graph_path):
     return pd.DataFrame(rows).sort_values("node")
 
 
-def sd_key_of(fk, sd_keys):
-    """The SD config key (e.g. azure_sd_configs) a full key is under, or None"""
-    s = segs(fk)
-    if s[0] == "scrape_configs" and len(s) > 2 and s[1] in sd_keys:
-        return s[1]
-    if s[:2] == ["alerting", "alertmanagers"] and len(s) > 3 and s[2] in sd_keys:
-        return s[2]
-    return None
-
-
 def write_full_keys_yaml(keys, path, tiers):
     """Keys-only YAML: nested mappings down to each full key (rows of `keys`), `{}` at the leaves (as in
     prometheus_config_keys.yaml), with each key's kind as a comment, and each mapping's counts. With tiers, each key's
@@ -424,7 +371,7 @@ def write_full_keys_yaml(keys, path, tiers):
     open(path, "w").write("\n".join(lines) + "\n")
 
 
-def write_visuals(fkdf, fkdf_all, config, covered_by, searched, matched, sd, args, out):
+def write_visuals(fkdf, fkdf_all, config, covered_by, searched, matched, custom, args, out):
     """Write full_keys.csv with searched/matched columns, node_coverage.csv (attributes per graph node, for
     prettify's --node-attrs, from every full key, --ignore or not) and node_coverage_keyed.csv (from the in-scope
     ones), sd_configs.csv, and full_keys.yaml (a keys-only YAML of the in-scope full keys, annotated)"""
@@ -446,10 +393,9 @@ def write_visuals(fkdf, fkdf_all, config, covered_by, searched, matched, sd, arg
     # For the keyed graph: the in-scope full keys. Leave out the SD config nodes with none of them under the SD
     # config's key, wherever they end (e.g. static_configs' keys all end at targetgroup.Group): those --ignore leaves
     # out under every parent key.
-    sd_keys = set(sd.values())
-    under = keys.assign(sd_key=keys.key.map(lambda fk: sd_key_of(fk, sd_keys)))
+    under = keys.assign(sd_key=keys.key.map(custom.of))
     sd_df = pd.DataFrame([{"node": n, "sd_key": k, "keys": int((under.sd_key == k).sum()),
-                           "keys_matched": int(under[under.sd_key == k].matched.sum())} for n, k in sorted(sd.items())
+                           "keys_matched": int(under[under.sd_key == k].matched.sum())} for n, k in sorted(custom.names.items())
                           if n in set(nodes.node)])
     sd_df["left_out"] = sd_df["keys"] == 0
     sd_df.to_csv(f"{args.out}/sd_configs.csv", index=False)
@@ -624,14 +570,6 @@ def property_table(rows, props, in_scope):
     return pd.DataFrame(table, index=["Keys", "Sections", "Keys per section", "Min. confidence"])
 
 
-# Why the concreteconfig skill left target keys unset, for Prometheus: the 2026-11-08 run's reasons (its diff.md).
-# fnmatch patterns, as in --ignore.
-UNSET_REASONS = [
-    ("secret-manager reference (*_ref): fails at runtime", ["*_ref"]),
-    ("would contact endpoints outside the testbed", ["*.sigv4.role_arn", "remote_write.azuread.oauth.*"]),
-]
-
-
 def dropout_reasons(name_from, keys_from, name_to, keys_to, reasons):
     """Why keys in one column of the property table (keys_from) aren't in the next (keys_to): reasons is a list of
     (reason, predicate on a key). Each dropped key counts once, under the combination of reasons that apply to it
@@ -673,9 +611,10 @@ def fill_from_run(args):
     args.param_values = args.param_values or need(f"{run}/4-configkeys/param_values.txt")
     args.graph = args.graph or need(f"{run}/1-unmarshaler-graph/unmarshaler_subgraph.text")
     args.docs = args.docs or settings["docs"]
-    args.prometheus = args.prometheus or settings["module_dir"]
-    args.ignore = args.ignore or settings["ignore"] or None
-    args.transformed = args.transformed or settings.get("transformed") or None
+    args.module = args.module or settings["module"]
+    args.module_dir = args.module_dir or settings["module_dir"]
+    args.ignore = args.ignore or modules.moved(settings["ignore"]) or None
+    args.transformed = args.transformed or modules.moved(settings.get("transformed")) or None
     if not args.config_only:
         args.argmatch = args.argmatch or need(f"{run}/5-matches/matches.csv")
         lk = f"{run}/7-label-keys/label_keys.csv"
@@ -707,7 +646,9 @@ def main():
                                            "required unless --full-keys-only")
     ap.add_argument("--graph", help="the Unmarshaler Subgraph configkeys was run on")
     ap.add_argument("--docs", help="documented keys (e.g. list_config_keys.py's)")
-    ap.add_argument("--prometheus", help="Prometheus checkout the graph was built from")
+    ap.add_argument("--module", help="the module: its Go module path or its paramtrack/modules/ directory name "
+                                     "(e.g. prometheus), whose module.py has its settings and hooks")
+    ap.add_argument("--module-dir", "--prometheus", help="module checkout the graph was built from")
     ap.add_argument("--argmatch", help="needle_types.csv of an argmatch run (step (1) results), or a csv with a needle "
                                        "column (e.g. paramtrack's 5-matches/matches.csv); required unless "
                                        "--config-only or --full-keys-only")
@@ -733,9 +674,9 @@ def main():
             fill_from_run(args)
         except FileNotFoundError as e:
             ap.error(f"--run {args.run}: {e}")
-    for name in ("configkeys", "graph", "docs", "prometheus"):
+    for name in ("configkeys", "graph", "docs", "module", "module_dir"):
         if not getattr(args, name):
-            ap.error(f"--{name} is required (or --run)")
+            ap.error(f"--{name.replace('_', '-')} is required (or --run)")
     if not args.full_keys_only and not args.param_values:
         ap.error("--param-values is required (unless --full-keys-only)")
     if not (args.config_only or args.full_keys_only) and not args.argmatch:
@@ -743,12 +684,13 @@ def main():
     cfg_only = args.config_only
     out = Out(f"{args.out}/{'config_stats.md' if cfg_only else 'stats_tables.md'}")
     out.p("<!-- Generated by querygraph/configkeys/stats/stats.py; see STATISTICS.md there for what these mean. -->")
-    out.p("# Statistics the concrete config controls (Prometheus, root /config.Config)" if cfg_only else
-          "# Statistics tables (Prometheus, root /config.Config)")
+    mod = modules.load(args.module)
+    out.p(f"# Statistics the concrete config controls ({mod.TITLE})" if cfg_only else
+          f"# Statistics tables ({mod.TITLE})")
 
     MAP_FIELDS.update(map_field_keys(args.graph))
-    sd = sd_names(args.prometheus)
-    full, config, catchall = load_configkeys(args.configkeys, sd)
+    custom = mod.CustomKeys(args.module_dir)
+    full, config, catchall = load_configkeys(args.configkeys, custom)
     full_all = dict(full)  # before --ignore: for the whole-graph visualization
     n_full = collections.Counter(info["pattern"] for info in full.values())  # (for check_sections)
     ignore = read_patterns(args.ignore)
@@ -762,7 +704,6 @@ def main():
     for k, info in config.items():
         for fk in info["full_keys"]:
             covered_by[fk].add(k)
-    sd_keys = set(sd.values())
 
     def full_key_rows(full, docs):
         rows = []
@@ -775,7 +716,7 @@ def main():
                              "transformed": matches_any(fk, transformed),
                              # The concreteconfig skill's target keys (in scope, given --ignore)
                              "target": searchable_kind(info["kind"]) and not matches_any(fk, transformed),
-                             "sd": sd_key_of(fk, sd_keys) is not None})
+                             "sd": custom.of(fk) is not None})
         return pd.DataFrame(rows)
 
     fkdf = full_key_rows(full, docs)
@@ -797,7 +738,7 @@ def main():
     out.h("Inputs")
     out.p(f"- Full keys (graph patterns, SD `*` resolved by Name()): {len(full)}; excluded catch-all patterns of "
           f"discovery.Configs' dynamic unmarshaler: {', '.join(sorted(catchall))}")
-    out.p(f"- SD config types found (Name()): {len(set(sd.values()))}")
+    out.p(f"- SD config types found (Name()): {len(set(custom.names.values()))}")
     if args.ignore:
         out.p(f"- Ignored (--ignore {args.ignore}): {n_ignored} full keys; {n_dropped} concrete keys left with no "
               f"full key dropped")
@@ -848,8 +789,8 @@ def main():
 
     # SD configs
     sd_rows = []
-    for parent_key in ("scrape_configs", "alerting.alertmanagers"):
-        for name in sorted(set(sd.values())):
+    for parent_key in custom.parents:
+        for name in sorted(set(custom.names.values())):
             prefix = f"{parent_key}.{name}."
             ks = keys[keys.key.str.startswith(prefix)]
             sd_rows.append({"parent": parent_key, "sd": name, "full_keys": len(ks), "in_config": ks.in_config.sum()})
@@ -942,7 +883,7 @@ def main():
         for v in c["values"]:
             occ[v.replace("\n", "\\n")].add(k)
 
-    lits = go_string_literals(args.prometheus)
+    lits = go_string_literals(args.module_dir, mod)
     matched = set() if cfg_only else read_needles(args.argmatch)
 
     def describe(v, ks):
@@ -1085,7 +1026,7 @@ def main():
     pairs = [
         (props[1], props[2], [("unsearchable kind", lambda k: not by_key.searchable_kind[k]),
                               ("stored transformed", lambda k: by_key.transformed[k])]),
-        (props[2], props[3], [(r, lambda k, ps=ps: matches_any(k, ps)) for r, ps in UNSET_REASONS]),
+        (props[2], props[3], [(r, lambda k, ps=ps: matches_any(k, ps)) for r, ps in mod.UNSET_REASONS]),
         (props[3], props[4], [("no values", lambda k: not values_of(k)),
                               ("a value shared with another concrete key", lambda k: any(len(occ[v]) > 1
                                                                                          for v in values_of(k))),
@@ -1126,36 +1067,20 @@ def main():
         sec = collections.Counter(".".join(s for s in segs(k)[:3]) for k in ks)
         out.p("By first three segments (top 15): " + ", ".join(f"`{s}` ({n})" for s, n in sec.most_common(15)))
 
-    # Why keys are in only one of the two
-    def category(k, in_graph):
-        s = segs(k)
-        if in_graph:
-            if s[-1].endswith("_ref"):
-                return "secret-manager reference (*_ref)"
-            if s[-1] in ("bearer_token", "bearer_token_file"):
-                return "deprecated bearer_token[_file]"
-            if k.startswith("alerting.alertmanagers.kuma_sd_configs."):
-                return "kuma_sd_configs under alertmanagers (docs list it only under scrape_configs)"
-            if k.startswith("scrape_configs.vultr_sd_configs."):
-                return "vultr_sd_configs under scrape_configs (docs list it only under alertmanagers)"
-            return "other: " + s[-1]
-        if ".oauth2.http_headers." in k:
-            return "oauth2.http_headers (docs; not a field of OAuth2 in prometheus/common v0.62.0)"
-        return "other: " + k
-
+    # Why keys are in only one of the two (the module's graph_docs_reason)
     for name, ks, in_graph in (("Documented but not in the graph", docs_only, False),
                                ("In the graph but not documented", graph_only, True)):
-        c = collections.Counter(category(k, in_graph) for k in ks)
+        c = collections.Counter(mod.graph_docs_reason(k, in_graph) for k in ks)
         out.p(f"\n{name}, by reason:")
         out.table(pd.DataFrame(c.most_common(), columns=["reason", "keys"]))
 
     # Kind agreement
     rows = []
-    for k in both:
+    for k in sorted(both):  # (sorted: the same csv every run)
         if docs[k] == "map":
             continue  # the docs give no type for the map's values
         gk = full[k]["kind"]
-        dk = docs_kind(docs[k])
+        dk = mod.docs_kind(docs[k])
         rows.append({"key": k, "docs type": docs[k], "docs kind": dk, "graph kind": gk})
     kd = pd.DataFrame(rows)
     ct = pd.crosstab(kd["docs kind"], kd["graph kind"])
@@ -1175,7 +1100,7 @@ def main():
     if args.label_keys:
         out.h("Confidence of message => full key mappings (paramtrack's label_keys.csv)")
         confidence(args.label_keys, out, f"{args.out}/confidence_distribution.png", ignore)
-    write_visuals(fkdf, full_key_rows(full_all, docs_all), config, covered_by, searched, matched, sd, args, out)
+    write_visuals(fkdf, full_key_rows(full_all, docs_all), config, covered_by, searched, matched, custom, args, out)
 
     out.write()
     print(f"wrote {out.path}")

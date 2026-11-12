@@ -2,7 +2,7 @@
 
 - **Checkout:** `/home/emily/projects/config_tracing/prometheus` (v3.2.1; on the prombench VM, the same path).
 - **Module and root:** `github.com/prometheus/prometheus`, `/config.Config` (paramtrack's defaults).
-- **Ignore file:** `gopls/internal/cmd/conftamer/querygraph/paramtrack/ignore/prometheus.txt` (paramtrack's
+- **Ignore file:** `ignore.txt` next to this file (paramtrack's
   default `--ignore`): the 53 (parent, SD config) pairs the user's fuzzed config doesn't use (a fixed
   scope; the shipped config uses only `kubernetes_sd_configs`). In scope:
   `kubernetes_sd_configs` under `scrape_configs` and `alerting.alertmanagers`, and `dns_sd_configs`,

@@ -15,6 +15,7 @@ import shutil
 import sys
 
 import common
+import modules  # (modules/<module>/module.py: each module's settings and hooks)
 from common import ARGMATCH_LABELS, CT, GOPLS, QUERYGRAPH, log_command, run, say
 from testbeds import TESTBEDS
 
@@ -87,7 +88,8 @@ class Workflow:
             cmd += ["--root", self.a.root]
         run(cmd, log=f"{d}/configkeys.log", timeout=600)
         run([sys.executable, f"{STATS}/stats.py", "--full-keys-only", "--configkeys", f"{d}/configkeys_graph.csv",
-             "--graph", graph, "--docs", self.a.docs, "--prometheus", self.a.module_dir, "--out", d] + self.ignore(),
+             "--graph", graph, "--docs", self.a.docs, "--module", self.a.module, "--module-dir", self.a.module_dir,
+             "--out", d] + self.ignore(),
             log=f"{d}/stats.log", timeout=600)
         # The concrete config is an input, generated beforehand by the /concreteconfig skill (README.md, "Use with
         # /concreteconfig")
@@ -157,8 +159,8 @@ class Workflow:
         """Message label => Full keys, with a confidence for each (README.md, "label_keys.csv")"""
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
         stats.MAP_FIELDS.update(stats.map_field_keys(graph))
-        sd = stats.sd_names(self.a.module_dir)
-        full, config, _ = stats.load_configkeys(self.file("4-configkeys", "configkeys.csv"), sd)
+        custom = modules.load(self.a.module).CustomKeys(self.a.module_dir)
+        full, config, _ = stats.load_configkeys(self.file("4-configkeys", "configkeys.csv"), custom)
 
         sections = {fk: sorted({stats.section(fk, p) for p in info["paths"]}) for fk, info in full.items()}
         section_keys = collections.defaultdict(set)
@@ -241,7 +243,7 @@ class Workflow:
         shutil.copy(self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text"), d)  # visualize.sh reads it here
         run([sys.executable, f"{STATS}/stats.py", "--run", self.out, "--out", d] + self.ignore(), log=f"{d}/stats.log",
             timeout=900)
-        run(["bash", f"{STATS}/visualize.sh", d], log=f"{d}/visualize.log", timeout=1200)
+        run(["bash", f"{STATS}/visualize.sh", d, self.a.module], log=f"{d}/visualize.log", timeout=1200)
         say(f"tables in {self.dir('8-stats')}/stats_tables.md")
 
     # ---------------------------------------------------------------------------------------------------------------
@@ -305,17 +307,18 @@ def main():
                                                        "(README.md, \"Use with /concreteconfig\")")
     ap.add_argument("--config-files", help="Directory of files the concrete config refers to, which the testbed "
                                            "installs (default: a files/ directory next to --config, if any)")
-    ap.add_argument("--module", default="github.com/prometheus/prometheus", help="Module as in go.mod")
-    ap.add_argument("--module-dir", default=f"{CT}/prometheus", help="Module source checkout")
-    ap.add_argument("--root", default="/config.Config", help="configkeys --root (empty: all roots)")
-    ap.add_argument("--format", default="yaml", help="Config format (yaml; json not yet supported by configkeys)")
-    ap.add_argument("--docs", default=f"{CT}/prom-test-infra/prombench/prometheus_config_keys.txt",
-                    help="Documented keys, for steps 2 and 8 (stats.py --docs)")
-    ap.add_argument("--ignore", default=f"{QUERYGRAPH}/paramtrack/ignore/prometheus.txt",
-                    help="Full keys out of scope, which steps 2 and 8 leave out (stats.py --ignore; empty: none)")
-    ap.add_argument("--transformed", default=f"{QUERYGRAPH}/paramtrack/transformed/prometheus.txt",
-                    help="Full keys whose values are stored transformed, which steps 2 and 8 mark (stats.py "
-                         "--transformed; empty: none)")
+    # The module's settings: each default is the module's (modules/<module>/module.py)
+    ap.add_argument("--module", default="prometheus",
+                    help="The module: its Go module path (as in go.mod) or its modules/ directory name; known: "
+                         + ", ".join(modules.names()) + " (default %(default)s)")
+    ap.add_argument("--module-dir", help="Module source checkout")
+    ap.add_argument("--root", help="configkeys --root (empty: all roots)")
+    ap.add_argument("--format", help="Config format (yaml; json not yet supported by configkeys)")
+    ap.add_argument("--docs", help="Documented keys, for steps 2 and 8 (stats.py --docs)")
+    ap.add_argument("--ignore", help="Full keys out of scope, which steps 2 and 8 leave out (stats.py --ignore; empty: "
+                                     "none)")
+    ap.add_argument("--transformed", help="Full keys whose values are stored transformed, which steps 2 and 8 mark "
+                                          "(stats.py --transformed; empty: none)")
     ap.add_argument("--testbed", default="docker", choices=sorted(TESTBEDS))
     ap.add_argument("--vm", default="paramtrack-e2e", help="GCE VM for --testbed prombench")
     ap.add_argument("--wait", type=int, default=240, help="Seconds to run the module under the workload, per run")
@@ -326,7 +329,14 @@ def main():
     ap.add_argument("--only", metavar="STEP", action="append", default=[],
                     help="Run only this step, rerunning it if done, from the earlier steps' outputs as they are; "
                          "repeatable. Removes the later steps' outputs, as they're out of date")
-    Workflow(ap.parse_args()).run()
+    a = ap.parse_args()
+    mod = modules.load(a.module)
+    a.module = mod.GO_MODULE
+    for name, default in (("module_dir", mod.MODULE_DIR), ("root", mod.ROOT), ("format", mod.FORMAT),
+                          ("docs", mod.DOCS), ("ignore", mod.IGNORE), ("transformed", mod.TRANSFORMED)):
+        if getattr(a, name) is None:  # (not given; "" is given, e.g. --ignore "" for none)
+            setattr(a, name, default)
+    Workflow(a).run()
 
 
 if __name__ == "__main__":

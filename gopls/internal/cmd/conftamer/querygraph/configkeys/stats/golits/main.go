@@ -1,10 +1,10 @@
 // Command golits prints the distinct string literals in the non-test Go files compiled into a program: the given
 // package and everything it imports, the standard library included, as `go list -deps` lists them for the build tags
-// (-tags; default Prometheus'). Interpreted ("...") and raw (`...`) strings are both decoded (strconv.Unquote), and comments are skipped
+// (-tags; a module's are in paramtrack/modules/<module>/module.py, GOLITS_TAGS). Interpreted ("...") and raw (`...`) strings are both decoded (strconv.Unquote), and comments are skipped
 // (go/scanner). Each literal is printed once, as a JSON string on its own line, since literals can contain newlines.
 // See STATISTICS.md, "Caveats", for what this doesn't find.
 //
-// Usage: golits -dir <module checkout> [-tags <build tags>] [package, default ./cmd/prometheus]
+// Usage: golits -dir <module checkout> [-tags <build tags>] <package, e.g. ./cmd/prometheus>
 package main
 
 import (
@@ -22,13 +22,13 @@ import (
 
 func main() {
 	dir := flag.String("dir", ".", "Module checkout to load the package from")
-	// Prometheus' build tags (.promu.yml), which change which files are compiled
-	tags := flag.String("tags", "netgo,builtinassets,stringlabels", "Build tags, comma-separated")
+	// The module's build tags, which change which files are compiled
+	tags := flag.String("tags", "", "Build tags, comma-separated")
 	flag.Parse()
-	pattern := "./cmd/prometheus"
-	if flag.NArg() > 0 {
-		pattern = flag.Arg(0)
+	if flag.NArg() != 1 {
+		log.Fatal("usage: golits -dir <module checkout> [-tags <build tags>] <package>")
 	}
+	pattern := flag.Arg(0)
 
 	cfg := &packages.Config{Dir: *dir, Mode: packages.NeedName | packages.NeedFiles | packages.NeedImports | packages.NeedDeps,
 		BuildFlags: []string{"-tags=" + *tags}}
