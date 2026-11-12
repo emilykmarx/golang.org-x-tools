@@ -3,8 +3,10 @@
 negatives): an HTML page (interactive) and a markdown summary. LEGEND below says what's in it.
 
 Inputs, all from the run directory:
-- the messages: requests.txt and responses.txt next to this file (sent messages only), with their chain groups from
-  chains.py (3-chains/events.jsonl);
+- the messages: step 5's 5-matches/events.jsonl (chains.STEP), labelled as argmatch-labels' join.py labels them (as count_labels.py
+  does), sent messages only (Request sent, Response sent), each label reduced to its path or route pattern (its
+  api_id, method, paths and code fields dropped; chains.reduce_label) and the duplicates that leaves merged; with their
+  chains and chain groups (chains.py);
 - the sections: step 8's 8-stats/full_keys.csv (every in-scope full key, with its section);
 - the concrete config's keys and values: step 4's configkeys.csv, and param_values.txt (the values searched for);
 - unambiguous keys: those whose values are all unambiguous (TERMINOLOGY.md; stats.unambiguous_key, as stats.py's
@@ -39,13 +41,13 @@ LEGEND = [
     ("Terms", "as defined in configkeys/stats/TERMINOLOGY.md. UNAMBIGUOUS matches only: eligible keys, evidence "
               "keys and the keys of anchor values count only if they're Unambiguous."),
     ("Rows",
+        "Every in-scope section, grouped by top-level key. Horizontal line between top-level keys."),
+    ("Columns",
         "Observed sends: Path/pattern field of message label. Ordered by chain "  # noqa: ISC004
         "group: messages whose chains have exactly the same set of module "
-        "functions. Horizontal line between chain groups. (In this run, message labels were uniquely identified "
+        "functions. Vertical line between chain groups. (In this run, message labels were uniquely identified "
         "by path/pattern, with one exception, affecting two paths (/api/v1/pods and /api/v1/services), due to a "
         "labeling bug)"),
-    ("Columns",
-        "Every in-scope section, grouped by top-level key."),
     ("Cell color",
         "White = The section has eligible keys, but none is evidence for this message. "
         "Blue = The section has evidence for this message; "
@@ -61,6 +63,7 @@ def load(run):
     """Everything the matrix needs, from the run directory"""
     fkdf = pd.read_csv(f"{run}/8-stats/full_keys.csv", keep_default_na=False, dtype=str)
     section_of = dict(zip(fkdf.key, fkdf.section))  # in-scope full key => section
+    section_keys = fkdf.groupby("section").key.apply(lambda ks: sorted(set(ks))).to_dict()  # section => its keys
     sections = sorted(set(fkdf.section), key=lambda s: (s.split(".")[0].split(" ")[0], s))
 
     # Unambiguous keys (matches.unambiguous_keys: stats.py's rule), with the concrete keys' values
@@ -93,8 +96,8 @@ def load(run):
                 via[(msg, section_of[fk])][fk].add(r["needle"])
 
     # Messages, ordered by chain group
-    msgs = [k for k in chains.read_messages() if k[0] in SENT]
-    ch = chains.message_chains(run)
+    ch = chains.message_chains(run)  # (kind, reduced label) => chains, for every message of a sent kind
+    msgs = sorted(k for k in ch if k[0] in SENT)
     funcs = {k: chains.module_functions(ch.get(k, []))[0] for k in msgs}
     order, group_of = [], {}
     for i, g in enumerate(sorted(chains.groups_of(funcs), key=lambda g: (-len(g), sorted(g)))):
@@ -113,7 +116,7 @@ def load(run):
             if v in k[1] or k[1] in v:
                 for s in secs:
                     anchors[k][s].add(v)
-    return dict(sections=sections, eligible=eligible, evidence=evidence, via=via, msgs=order, group_of=group_of,
+    return dict(sections=sections, section_keys=section_keys, eligible=eligible, evidence=evidence, via=via, msgs=order, group_of=group_of,
                 anchors=anchors)
 
 
@@ -170,7 +173,7 @@ def write_md(df, d, run, path):
 
 
 def short_section(s):
-    """A column label: the section without its top-level key (the header above names it) and with a shorter
+    """A row label: the section without its top-level key (the first column names it) and with a shorter
     Unmarshaler, e.g. `alerting.alertmanagers.oauth2 @ .../common/config.OAuth2` => `alertmanagers.oauth2 @
     config.OAuth2`; `@ config.X` alone for the top-level key's own section"""
     parent, _, unm = s.partition(" @ ")
@@ -198,8 +201,10 @@ def write_html(df, d, run, path, kind):
             return "var(--zero)"
         return ramp[min(len(ramp) - 1, int(c * (len(ramp) - 1) + 0.5))]
 
-    tops = list(dict.fromkeys(s.split(".")[0].split(" ")[0] for s in d["sections"]))
-    span = collections.Counter(s.split(".")[0].split(" ")[0] for s in d["sections"])
+    def top(s):
+        return s.split(".")[0].split(" ")[0]
+
+    span = collections.Counter(top(s) for s in d["sections"])
     by = {(r.message, r.kind_msg, r.section): r for r in df.itertuples()}
     esc = html.escape
     out = ["<!DOCTYPE html><html><head><meta charset='utf-8'><title>Evidence mappings: " + what + "</title><style>",
@@ -218,52 +223,54 @@ border:1px solid var(--grid);margin:0 2px}
 .wrap{overflow:auto;background:var(--surface-1);border:1px solid var(--grid);margin-top:12px}
 table{border-collapse:collapse}  /* (a 1px surface border stands in for the gaps; the 2px lines win over it) */
 th{font-weight:400;color:var(--text-secondary);font-size:11px}
-th.top{text-align:left;border-bottom:1px solid var(--grid);border-left:2px solid var(--text-primary);color:var(--text-primary);
-padding:0;height:46px;vertical-align:top}
-th.top div{width:0;overflow:visible;white-space:nowrap;padding-left:3px}th.top div.l1{padding-top:15px}
-th.top div.l2{padding-top:30px}
-th.col{height:300px;vertical-align:bottom;padding:0}
-th.col div{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;max-height:296px;overflow:hidden;
-text-overflow:ellipsis;width:14px}
-th.row{text-align:right;white-space:nowrap;max-width:360px;overflow:hidden;text-overflow:ellipsis;padding-right:6px;
-position:sticky;left:0;z-index:2;background:var(--surface-1)}
-td.c{width:14px;height:14px;padding:0;border:1px solid var(--surface-1)}
-td.c.g,th.col.g{border-left:2px solid var(--text-primary)}  /* a top-level key's first column: a line on its left */
+th.top{text-align:left;vertical-align:top;color:var(--text-primary);padding:2px 6px 0 2px;white-space:nowrap;
+width:110px;min-width:110px;position:sticky;left:0;z-index:2;background:var(--surface-1)}
+th.col{height:270px;vertical-align:bottom;padding:0;position:relative;min-width:16px}
+th.col div{position:absolute;bottom:4px;left:9px;transform-origin:0 100%;transform:rotate(-60deg);white-space:nowrap;
+max-width:300px;overflow:hidden;text-overflow:ellipsis;text-align:left}  /* diagonal, up and to the right (60°: 16px columns put labels ~14px apart) */
+.wrap table{margin-right:160px}  /* (room for the last labels, which extend past the last column) */
+th.row{text-align:left;white-space:nowrap;max-width:360px;overflow:hidden;text-overflow:ellipsis;padding-right:6px;
+position:sticky;left:118px;z-index:2;background:var(--surface-1)}
+td.c{width:16px;height:14px;padding:0;border:1px solid var(--surface-1)}
+td.c.g{border-left:2px solid var(--text-primary)}  /* a chain group's first column: a line on its left (in the body
+   only: in the header it would cross the angled labels) */
 td.c.a{outline:2px solid var(--outline);outline-offset:0;position:relative;z-index:1}
 td.c:hover{outline:2px solid var(--muted);outline-offset:-2px}
-tr.sep td,tr.sep th{border-top:2px solid var(--text-primary)}
+tr.sep td,tr.sep th{border-top:2px solid var(--text-primary)}  /* a top-level key's first row: a line above */
 #tip{position:fixed;z-index:10;pointer-events:none;background:var(--surface-1);color:var(--text-primary);border:1px solid
 var(--grid);padding:6px 8px;max-width:520px;font-size:12px;line-height:1.4;display:none;box-shadow:0 2px 8px
 rgba(0,0,0,.15)}#tip .v{font-weight:600}#tip .kv{padding-left:12px}#tip .s{color:var(--text-secondary)}
 details{margin-top:12px;color:var(--text-secondary)}""",
            "</style></head><body><div class='viz-root'>",
-           f"<h1>Evidence mappings: {what} ({kind}) × sections</h1><div class='legend'>Run: {esc(run)}<br>"]
+           f"<h1>Evidence mappings: sections × {what} ({kind})</h1><div class='legend'>Run: {esc(run)}<br>"]
     for name, text in LEGEND:
         sw = {"Orange-outlined cell": "<span class='swatch' style='outline:2px solid var(--outline)'></span>",
               "Cell color": "<span class='swatch' style='background:var(--zero)'></span>0 " + "".join(
                   f"<span class='swatch' style='background:{c}'></span>" for c in ramp[::3]) + " 1, "
                   "<span class='swatch' style='background:var(--no-eligible)'></span>gray "}.get(name, "")
         out.append(f"<b>{esc(name)}:</b> {sw}{esc(text)}<br>")
-    out.append("</div><div class='wrap'><table><thead><tr><th></th>")
-    # (the names don't widen their columns: they overflow to the right, on three lines in turn so that neighbours,
-    # even around a one-column group, don't overlap)
-    out += [f"<th class='top' colspan='{span[t]}' title='{esc(t or '(top level)')}'><div class=l{i % 3}>"
-            f"{esc(t)}</div></th>" for i, t in enumerate(tops)]
-    out.append("</tr><tr><th></th>")
-    starts = {next(s for s in d["sections"] if s.split(".")[0].split(" ")[0] == t) for t in tops}  # groups' first
-    out += [f"<th class='col{' g' if s in starts else ''}' title='{esc(s)}'><div>{esc(short_section(s))}</div></th>"
-            for s in d["sections"]]
+    out.append("</div><div class='wrap'><table><thead><tr><th class='top'></th><th class='row'></th>")
+    # Columns: the messages, by chain group, with a line before each group's first message
+    group_start = {k for i, k in enumerate(msgs) if i == 0 or d["group_of"][k] != d["group_of"][msgs[i - 1]]}
+    out += [f"<th class='col{' g' if k in group_start and i else ''}' title='{esc(k[0])}: {esc(k[1])} "
+            f"(chain group {d['group_of'][k]})'><div>{esc(k[1])}</div></th>" for i, k in enumerate(msgs)]
     out.append("</tr></thead><tbody>")
+    # Rows: the sections, by top-level key (named in the first column), with a line above each key's first section
     prev = None
-    for k in msgs:
-        g = d["group_of"][k]
-        sep = " class='sep'" if prev is not None and g != prev else ""
-        prev = g
-        label = k[1]
-        out.append(f"<tr{sep}><th class='row' title='{esc(k[0])}: {esc(k[1])} (chain group {g})'>{esc(label)}</th>")
-        for s in d["sections"]:
+    for s in d["sections"]:
+        t = top(s)
+        first = t != prev
+        sep = " class='sep'" if first and prev is not None else ""
+        prev = t
+        out.append(f"<tr{sep}>")
+        if first:
+            out.append(f"<th class='top' rowspan='{span[t]}'>{esc(t or '(top level)')}</th>")
+        # (hover: the section's name, then all its in-scope full keys, one per line)
+        title = "\n".join([s, ""] + d["section_keys"][s])
+        out.append(f"<th class='row' title='{esc(title)}'>{esc(short_section(s))}</th>")
+        for i, k in enumerate(msgs):
             r = by[(k[1], k[0], s)]
-            cls = ("c a" if r.cell.startswith("anchored") else "c") + (" g" if s in starts else "")
+            cls = ("c a" if r.cell.startswith("anchored") else "c") + (" g" if k in group_start and i else "")
             conf = "-" if r.confidence is None or pd.isna(r.confidence) else f"{r.confidence:.2f}"
             data = {"m": f"{k[0]}: {k[1]}", "s": s, "k": r.cell, "c": conf, "e": f"{r.evidence_keys}/{r.eligible_keys}",
                     "a": ", ".join(json.dumps(v) for v in sorted(d["anchors"][k].get(s, ()))), "v": r.evidence}

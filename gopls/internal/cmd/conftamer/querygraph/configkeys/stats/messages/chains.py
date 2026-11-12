@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """How similar the chains of a run's messages are.
 
-A message is a line of requests.txt or responses.txt (next to this file): a message label with its kind, api_id,
-method, paths and code fields left out, so just a request's path or a response's path/route pattern. Its events are
-the run's 3-chains/events.jsonl events of that kind (Request sent / Response sent) whose label (argmatch-labels'
-join.py, as count_labels.py uses) reduces to the line.
+The messages are the run's sent messages: its 5-matches/events.jsonl events (by default; --step) of kind Request sent
+or Response sent,
+labelled as argmatch-labels' join.py labels them (as count_labels.py does), each label reduced to its path or route
+pattern (reduce_label: its api_id, method, paths and code fields dropped), so the labels that differ only in those
+fields are one message. A message's events are those whose label reduces to it.
 
-An event's chain is its call_chain (the stack of the goroutine that sent it, innermost first), then the frames in its
-ancestry (the stacks that created that goroutine, and so on, up to main): the code path from the send to the root.
+An event's chain is its stack (the goroutine that sent it, innermost first), then the frames in its ancestry (the
+stacks that created that goroutine, and so on, up to main), as join.py parses them: the code path from the send to the
+root.
 Similarity is measured on the module's own functions (MODULE, e.g. github.com/prometheus/prometheus/...), since
 nearly every request shares the net/http frames:
 - per message: its events, its distinct chains (full, and module functions only), and its origin(s): the outermost
@@ -21,8 +23,6 @@ import argparse
 import collections
 import itertools
 import json
-import os
-import re
 import sys
 
 import pandas as pd
@@ -30,48 +30,38 @@ import pandas as pd
 sys.path.insert(0, "/home/emily/projects/config_tracing/dump_ancestors/argmatch-labels")
 import join  # noqa: E402  (argmatch-labels' join.py: message_labels)
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = "github.com/prometheus/prometheus/"
-KINDS = {"Request sent": "requests.txt", "Response sent": "responses.txt"}
+KINDS = ("Request sent", "Response sent")  # the sent messages
 
 
 def reduce_label(label):
-    """A message label as requests.txt/responses.txt write it: no braces, field names, api_id, method, paths or code
+    """A message label reduced to its path or route pattern: no braces, field names, api_id, method, paths or code
     (e.g. `{api_id: k8s.io, method: GET, path: /api/v1/pods}` => `/api/v1/pods`)"""
     fields = dict(f.split(": ", 1) for f in label.strip("{}").split(", "))
     return fields.get("path") or fields.get("pattern")
 
 
-def ancestry_frames(ancestry):
-    """Function names in an ancestry trace, outermost last: the frames under each `[originating from goroutine N]:`
-    (`created by` lines repeat the next section's first frame, so they're left out)"""
-    frames = []
-    for line in ancestry.splitlines():
-        if not line or line[0] in "\t[" or line.startswith(("goroutine ", "created by ")):
-            continue
-        frames.append(re.sub(r"\(\.\.\.\)$|\(0x.*\)$", "", line))
-    return frames
-
-
 def chain(ev):
-    """The event's chain: its call_chain's functions (without runtime.goexit), then its ancestry's"""
-    own = [c["function"] for c in ev.get("call_chain") or [] if c["function"] != "runtime.goexit"]
-    return tuple(own + ancestry_frames(ev.get("ancestry") or ""))
+    """The event's chain: the functions of its frames, innermost first, as argmatch-labels' join.py parses its stack
+    and ancestry (step 6 joins on these frames): each physical frame's inlined functions, then its own; without
+    runtime.goexit, and without join.py's "created by" and "...elided..." entries"""
+    return tuple(n for kind, _, _, names in join.chain(ev["stack"], ev.get("ancestry") or "") if kind == "frame"
+                 for n in names if n != "runtime.goexit")
 
 
 def short(fn):
     return fn.removeprefix(MODULE)
 
 
-def read_messages():
-    """(kind, message) for each line of requests.txt and responses.txt"""
-    return [(kind, m) for kind, name in KINDS.items()
-            for m in open(f"{HERE}/{name}").read().splitlines() if m and not m.startswith("#")]
+# The testbed run whose events chains are read from: step 5 (testbed run 2), the run argmatch searched, so that the
+# chains and chain groups are of the same process run as the matches (matches.py joins step 5's events with argmatch's
+# calls). Step 3 (testbed run 1) has the same fields, and gave the same chain groups for the 2026-11-09 run.
+STEP = "5-matches"
 
 
-def message_chains(run):
-    """(kind, message) => the chains of its events in run's 3-chains/events.jsonl"""
-    events = [json.loads(line) for line in open(f"{run}/3-chains/events.jsonl") if line.strip()]
+def message_chains(run, step=STEP):
+    """(kind, message) => the chains of its events in run's <step>/events.jsonl"""
+    events = [json.loads(line) for line in open(f"{run}/{step}/events.jsonl") if line.strip()]
     chains = collections.defaultdict(list)
     for i, label in join.message_labels(events).items():
         if events[i]["kind"] in KINDS:
@@ -96,16 +86,18 @@ def groups_of(funcs):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", required=True, help="paramtrack --out directory (reads 3-chains/events.jsonl)")
+    ap.add_argument("--run", required=True, help="paramtrack --out directory (reads <step>/events.jsonl)")
+    ap.add_argument("--step", default=STEP, help="the testbed step whose events to read (default %(default)s; or "
+                                                 "3-chains)")
     ap.add_argument("--out", help="write the report here (markdown) rather than to stdout")
     a = ap.parse_args()
 
-    chains = message_chains(a.run)
+    chains = message_chains(a.run, a.step)
 
-    lines = [f"<!-- Generated by configkeys/stats/messages/chains.py --run {a.run} -->",
-             f"# Chains of the messages in requests.txt and responses.txt ({a.run})", ""]
+    lines = [f"<!-- Generated by configkeys/stats/messages/chains.py --run {a.run} --step {a.step} -->",
+             f"# Chains of the sent messages ({a.run}, {a.step}/events.jsonl)", ""]
     rows, funcs = [], {}
-    for kind, m in read_messages():
+    for kind, m in sorted(chains):
         cs = chains.get((kind, m), [])
         funcs[(kind, m)], origins = module_functions(cs)
         rows.append({"kind": kind, "message": m, "events": len(cs), "distinct chains": len(set(cs)),

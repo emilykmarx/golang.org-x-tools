@@ -17,7 +17,7 @@ Matches are compared at three levels, each a set per message:
 - "full key + path": (full key, the whole type path from the receiver): two messages share it only if argmatch found
   the same key's value through the same receiver type and path.
 
-Groups, from chains.py (on 3-chains/events.jsonl): "chain group" = messages whose chains have exactly the same module
+Groups, from chains.py (on 5-matches/events.jsonl, the run the matches are from): "chain group" = messages whose chains have exactly the same module
 functions (one group per distinct set); "origin" = messages sharing the outermost module function of a chain (a
 message with several origins is in each). For each grouping and level, the Jaccard similarity of pairs of messages
 (with at least one match) in the same group vs in different groups. Then, for the full keys matched for messages in
@@ -150,8 +150,8 @@ def main():
     ap.add_argument("--out", help="write the report here (markdown) rather than to stdout")
     a = ap.parse_args()
 
-    msgs = chains.read_messages()
-    ch = chains.message_chains(a.run)
+    ch = chains.message_chains(a.run)  # (kind, reduced label) => chains, for each sent message
+    msgs = sorted(ch)
     funcs, origins = {}, {}
     for k in msgs:
         funcs[k], origins[k] = chains.module_functions(ch.get(k, []))
@@ -235,7 +235,7 @@ def main():
             for g in groups[k]:
                 members[g].append(k)
         out = []
-        for g, ks in sorted(members.items(), key=lambda x: -len(x[1])):
+        for g, ks in sorted(members.items(), key=lambda x: (-len(x[1]), x[0])):
             union = set().union(*(sets[lvl][k] for k in ks))
             common = set.intersection(*(sets[lvl][k] for k in ks))
             pj = [jaccard(sets[lvl][x], sets[lvl][y]) for x, y in itertools.combinations(ks, 2)]
@@ -268,7 +268,9 @@ def main():
         if ks:
             rows.append({"through": what, "type": short(t), "shared full keys found through it": len(ks),
                          "chain groups": len(set().union(*(keys[fk] for fk in ks)))})
-    vt = pd.DataFrame(rows).sort_values(["through", "shared full keys found through it"], ascending=[False, False])
+    # (ties in name order, so the top 15 are the same every run)
+    vt = pd.DataFrame(rows).sort_values(["through", "shared full keys found through it", "type"],
+                                        ascending=[False, False, True])
     lines += ["## Full keys matched for messages in several chain groups: what they're found through", "",
               f"- Full keys matched for messages in more than one chain group: {len(shared)} of {len(groups_of_key)}",
               "", "By receiver type and by holder type (top 15 each; a key found through several counts for each):", ""]
@@ -276,7 +278,7 @@ def main():
         lines += [vt[vt.through == what].head(15).to_markdown(index=False), ""]
     # Per shared key: through how many distinct paths, and do different groups use the same path?
     rows = []
-    for fk in sorted(shared, key=lambda f: -len(groups_of_key[f])):
+    for fk in sorted(shared, key=lambda f: (-len(groups_of_key[f]), f)):
         paths = collections.defaultdict(set)
         for k in with_matches:
             for f, t in sites[k]:
