@@ -29,7 +29,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 STAR = "*"
-CUSTOM = " (custom UnmarshalYAML)"
+# configkeys' suffix for a path ending at a custom unmarshaler (match.go's customSuffix), by format
+CUSTOM_SUFFIXES = (" (custom UnmarshalYAML)", " (custom UnmarshalJSON)")
 
 # Reference palette (dataviz skill, light mode)
 BLUE, ORANGE, GRAY, INK, INK2 = "#2a78d6", "#eb6834", "#c9c8c2", "#0b0b0b", "#52514e"
@@ -133,7 +134,7 @@ def load_configkeys(path, custom):
     catchall = set()
     for r in ck[ck.source != "config"].itertuples():
         for p in split(r.Unmarshaler_Path):
-            fk = custom.full_key(r.param_key, path_nodes(p), p.endswith(CUSTOM))
+            fk = custom.full_key(r.param_key, path_nodes(p), p.endswith(CUSTOM_SUFFIXES))
             if fk is None:
                 catchall.add(r.param_key)
                 continue
@@ -148,7 +149,7 @@ def load_configkeys(path, custom):
         patterns = split(r.pattern) or [r.param_key]
         for p in info["paths"]:
             for pat in patterns:
-                fk = custom.full_key(pat, path_nodes(p), p.endswith(CUSTOM))
+                fk = custom.full_key(pat, path_nodes(p), p.endswith(CUSTOM_SUFFIXES))
                 if fk is not None and instance_of(r.param_key, fk) and fk in full:
                     info["full_keys"].add(fk)
                     info["unmarshalers"].add(path_nodes(p)[-1])

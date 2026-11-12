@@ -117,11 +117,11 @@ func (s *Server) TypeDefinition(ctx context.Context, params *protocol.TypeDefini
 }
 
 // See golang.FuncParamCalls
-func (s *Server) FuncParamCalls(ctx context.Context, loc protocol.Location, method_name string, param_idx int) ([]golang.FuncParamCall, error) {
+func (s *Server) FuncParamCalls(ctx context.Context, loc protocol.Location, method_name string, param_idx int, decode_func string) ([]golang.FuncParamCall, error) {
 	_, snapshot, release, err := s.session.FileOf(ctx, loc.URI)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	return golang.FuncParamCalls(ctx, snapshot, loc, method_name, param_idx)
+	return golang.FuncParamCalls(ctx, snapshot, loc, method_name, param_idx, decode_func)
 }

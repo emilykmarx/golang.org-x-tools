@@ -313,7 +313,7 @@ def main():
                          + ", ".join(modules.names()) + " (default %(default)s)")
     ap.add_argument("--module-dir", help="Module source checkout")
     ap.add_argument("--root", help="configkeys --root (empty: all roots)")
-    ap.add_argument("--format", help="Config format (yaml; json not yet supported by configkeys)")
+    ap.add_argument("--format", help="Config format: yaml (go-yaml v2) or json (encoding/json)")
     ap.add_argument("--docs", help="Documented keys, for steps 2 and 8 (stats.py --docs)")
     ap.add_argument("--ignore", help="Full keys out of scope, which steps 2 and 8 leave out (stats.py --ignore; empty: "
                                      "none)")

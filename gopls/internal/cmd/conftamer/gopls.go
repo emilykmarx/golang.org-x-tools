@@ -62,13 +62,19 @@ func CopyTags(node *CTypeNode) {
 }
 
 // Populate info needed to map config file keys to the node: whether it and its fields (if struct) are maps,
-// which fields are embedded, whether it has custom unmarshalers, and the kinds of values stored in it and its fields
-func CopyKeyInfo(node *CTypeNode) {
+// which fields are embedded, whether it has custom unmarshalers (the format's library's), and the kinds of values
+// stored in it and its fields
+func CopyKeyInfo(node *CTypeNode, format Format) {
 	node.IsMap = IsMap(node.TypeInfo)
-	node.YAMLUnmarshaler = ImplementsYAMLUnmarshaler(node.TypeInfo)
+	switch format {
+	case YAML:
+		node.YAMLUnmarshaler = ImplementsYAMLUnmarshaler(node.TypeInfo)
+	case JSON:
+		node.JSONUnmarshaler = ImplementsJSONUnmarshaler(node.TypeInfo)
+	}
 	node.TextUnmarshaler = ImplementsTextUnmarshaler(node.TypeInfo)
 	node.Kind = GetValueKind(node.TypeInfo)
-	if !node.YAMLUnmarshaler {
+	if !node.CustomUnmarshaler() {
 		node.ScalarLike = IsScalarType(node.TypeInfo)
 	} // else see ClassifyUnmarshaler
 	struct_info := IsStruct(node.TypeInfo)

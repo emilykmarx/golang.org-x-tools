@@ -8,13 +8,16 @@ import (
 
 	"golang.org/x/tools/go/ast/edge"
 	"golang.org/x/tools/go/ast/inspector"
+	"golang.org/x/tools/go/types/typeutil"
 	"golang.org/x/tools/gopls/internal/cache"
 	"golang.org/x/tools/gopls/internal/protocol"
 )
 
-// A use of a function-typed parameter in the body of the function that declares it
+// A use of a parameter in the body of the function that declares it: a call of a function-typed parameter, or (with a
+// decode func) a call passing the parameter to the decode func
 type FuncParamCall struct {
-	// Type of the first argument, if the use is a call (e.g. *T for unmarshal((*plain)(c)) or unmarshal(&v))
+	// Type of the first argument, if the use is a call (e.g. *T for unmarshal((*plain)(c)) or unmarshal(&v)); with a
+	// decode func, of the argument after the parameter (e.g. *T for json.Unmarshal(b, &v))
 	Arg types.Type
 	// The parameter is used other than as the callee of a call with one argument
 	// (e.g. passed to another function, which may call it with anything)
@@ -25,8 +28,12 @@ type FuncParamCall struct {
 // For the method `method_name` of the type named by the identifier at `loc` (looked up in *T's method set, so it may
 // be promoted from an embedded field and declared in another package), find the uses of its parameter `param_idx`
 // in its body - e.g. the calls UnmarshalYAML makes to its `unmarshal` func parameter, and their argument types.
+// With decode_func (a function's package path and name, e.g. "encoding/json.Unmarshal"), find instead the calls
+// passing the parameter as the first of two arguments to that function - e.g. UnmarshalJSON's json.Unmarshal(b, &v) -
+// and the second argument's type; other uses of the parameter (e.g. b[0], string(b)) only read the data, so they're
+// left out.
 // Returns no calls if the type has no such method, or the method has no body or doesn't name the parameter.
-func FuncParamCalls(ctx context.Context, snapshot *cache.Snapshot, loc protocol.Location, method_name string, param_idx int) ([]FuncParamCall, error) {
+func FuncParamCalls(ctx context.Context, snapshot *cache.Snapshot, loc protocol.Location, method_name string, param_idx int, decode_func string) ([]FuncParamCall, error) {
 	pkg, _, cur, err := locToCursor(ctx, snapshot, loc)
 	if err != nil {
 		return nil, err
@@ -104,6 +111,17 @@ func FuncParamCalls(ctx context.Context, snapshot *cache.Snapshot, loc protocol.
 			return true
 		}
 		call := FuncParamCall{Loc: mustLocation(decl_pgf, use)}
+		if decode_func != "" {
+			if kind, idx := c.ParentEdge(); kind == edge.CallExpr_Args && idx == 0 {
+				call_expr := c.Parent().Node().(*ast.CallExpr)
+				if fn, ok := typeutil.Callee(info, call_expr).(*types.Func); ok && fn.Pkg() != nil &&
+					fn.Pkg().Path()+"."+fn.Name() == decode_func && len(call_expr.Args) == 2 {
+					call.Arg = info.TypeOf(call_expr.Args[1])
+					calls = append(calls, call)
+				}
+			}
+			return true
+		}
 		if c.ParentEdgeKind() == edge.CallExpr_Fun {
 			if call_expr := c.Parent().Node().(*ast.CallExpr); len(call_expr.Args) == 1 {
 				call.Arg = info.TypeOf(call_expr.Args[0])

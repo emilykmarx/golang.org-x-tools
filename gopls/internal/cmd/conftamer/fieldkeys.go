@@ -19,7 +19,7 @@ type Format string
 
 const (
 	YAML Format = "yaml" // gopkg.in/yaml.v2
-	JSON Format = "json" // encoding/json (not yet supported)
+	JSON Format = "json" // encoding/json
 )
 
 func ParseFormat(s string) (Format, error) {
@@ -27,7 +27,7 @@ func ParseFormat(s string) (Format, error) {
 	case YAML:
 		return YAML, nil
 	case JSON:
-		return "", fmt.Errorf("format %q not yet supported", s)
+		return JSON, nil
 	default:
 		return "", fmt.Errorf("unknown format %q (want %q or %q)", s, YAML, JSON)
 	}
@@ -40,6 +40,9 @@ type RawField struct {
 	Tag      string // whole struct tag
 	Embedded bool
 	IsMap    bool // after stripping pointers/slices/arrays (see IsMap)
+	// The field's type is a struct, after following a pointer (encoding/json inlines untagged embedded structs).
+	// Unknown for a serialized graph node's field: assumed for embedded fields there.
+	IsStruct bool
 }
 
 // How a struct field maps to config file keys
@@ -66,13 +69,17 @@ func (k FieldKey) IsKey() bool {
 	return !k.Skip && !k.Untagged
 }
 
-// Find how a struct field maps to config file keys.
-// For YAML, ported from the per-field part of getStructInfo in gopkg.in/yaml.v2 v2.4.0 (yaml.go;
+// Find how a struct field maps to config file keys, following the library for the format.
+// For JSON, see getJSONFieldKey. For YAML, ported from the per-field part of getStructInfo in gopkg.in/yaml.v2 v2.4.0 (yaml.go;
 // Apache-2.0/MIT, Copyright (c) 2011-2019 Canonical Ltd), from reflect to plain field info.
 // Struct-level checks (duplicate keys, multiple inline maps) aren't done.
 func GetFieldKey(f RawField, format Format) (FieldKey, error) {
-	if format != YAML {
-		return FieldKey{}, fmt.Errorf("format %q not yet supported", format)
+	switch format {
+	case YAML:
+	case JSON:
+		return getJSONFieldKey(f)
+	default:
+		return FieldKey{}, fmt.Errorf("format %q not supported", format)
 	}
 	r, _ := utf8.DecodeRuneInString(f.Name)
 	if !unicode.IsUpper(r) && !f.Embedded {
@@ -121,16 +128,22 @@ func GetFieldKey(f RawField, format Format) (FieldKey, error) {
 // RawField for field i of a struct, from go/types
 func StructRawField(st *types.Struct, i int) RawField {
 	v := st.Field(i)
-	return RawField{Name: v.Name(), Tag: st.Tag(i), Embedded: v.Embedded(), IsMap: IsMap(v.Type())}
+	t := v.Type()
+	if ptr, ok := t.Underlying().(*types.Pointer); ok {
+		t = ptr.Elem()
+	}
+	_, is_struct := t.Underlying().(*types.Struct)
+	return RawField{Name: v.Name(), Tag: st.Tag(i), Embedded: v.Embedded(), IsMap: IsMap(v.Type()), IsStruct: is_struct}
 }
 
 // RawField for a graph node's field (of the decoded struct, if a custom unmarshaler decodes into another struct)
 func NodeRawField(n CTypeNode, field string) RawField {
 	if n.DecodedFields != nil {
 		d := n.DecodedFields[field]
-		return RawField{Name: field, Tag: d.Tag, Embedded: d.Embedded, IsMap: d.IsMap}
+		return RawField{Name: field, Tag: d.Tag, Embedded: d.Embedded, IsMap: d.IsMap, IsStruct: d.Embedded}
 	}
-	return RawField{Name: field, Tag: n.Tags[field], Embedded: n.EmbeddedFields[field], IsMap: n.MapFields[field]}
+	embedded := n.EmbeddedFields[field]
+	return RawField{Name: field, Tag: n.Tags[field], Embedded: embedded, IsMap: n.MapFields[field], IsStruct: embedded}
 }
 
 // Whether go-yaml v2 calls the type's own UnmarshalYAML instead of applying its default rules:
@@ -149,19 +162,35 @@ func ImplementsYAMLUnmarshaler(typ types.Type) bool {
 	return ok && iface.Empty()
 }
 
-// Whether *T implements encoding.TextUnmarshaler (UnmarshalText([]byte) error), possibly promoted.
-// go-yaml v2 uses this for scalar values (after checking for Unmarshaler).
-func ImplementsTextUnmarshaler(typ types.Type) bool {
-	sig := lookupMethod(typ, "UnmarshalText")
-	if sig == nil || sig.Params().Len() != 1 || !returnsOnlyError(sig) {
-		return false
+// Whether encoding/json calls the type's own UnmarshalJSON instead of applying its default rules: whether *T
+// implements json.Unmarshaler, i.e. has UnmarshalJSON([]byte) error, possibly promoted from an embedded field.
+func ImplementsJSONUnmarshaler(typ types.Type) bool {
+	sig := lookupMethod(typ, "UnmarshalJSON")
+	return sig != nil && sig.Params().Len() == 1 && returnsOnlyError(sig) && isByteSlice(sig.Params().At(0).Type())
+}
+
+// Whether the format's library calls the type's own unmarshaler (go-yaml v2's Unmarshaler, json.Unmarshaler)
+func ImplementsUnmarshaler(typ types.Type, format Format) bool {
+	if format == JSON {
+		return ImplementsJSONUnmarshaler(typ)
 	}
-	slice, ok := sig.Params().At(0).Type().Underlying().(*types.Slice)
+	return ImplementsYAMLUnmarshaler(typ)
+}
+
+func isByteSlice(typ types.Type) bool {
+	slice, ok := typ.Underlying().(*types.Slice)
 	if !ok {
 		return false
 	}
 	elem, ok := slice.Elem().Underlying().(*types.Basic)
 	return ok && elem.Kind() == types.Byte
+}
+
+// Whether *T implements encoding.TextUnmarshaler (UnmarshalText([]byte) error), possibly promoted.
+// go-yaml v2 and encoding/json use this for scalar values (after checking for their own Unmarshaler).
+func ImplementsTextUnmarshaler(typ types.Type) bool {
+	sig := lookupMethod(typ, "UnmarshalText")
+	return sig != nil && sig.Params().Len() == 1 && returnsOnlyError(sig) && isByteSlice(sig.Params().At(0).Type())
 }
 
 // Signature of the exported method `name` in *T's method set (or T's, if T is already a pointer), or nil.
@@ -213,14 +242,15 @@ type DecodedField struct {
 	Kind     ValueKind `json:",omitempty"`
 }
 
-// Classify what the node's custom UnmarshalYAML decodes into, from the uses of its unmarshal func parameter
-// (see golang.FuncParamCalls), and set UnmarshalKinds, DecodedFields, IsMap, ScalarLike and Kind accordingly.
+// Classify what the node's custom unmarshaler decodes into, from what it decodes the config value into (calls):
+// for UnmarshalYAML, the calls of its unmarshal func parameter; for UnmarshalJSON, the json.Unmarshal calls on its
+// data parameter (see golang.FuncParamCalls). Sets UnmarshalKinds, DecodedFields, IsMap, ScalarLike and Kind accordingly.
 // With no uses found, the unmarshaler is treated as dynamic.
 // TODO(CT) This only records what type the value is decoded into, not what the unmarshaler then does with it. It could
 // be extended to detect unmarshalers that change the value before storing it - e.g. relabel.Action's UnmarshalYAML
 // (prometheus/model/relabel/relabel.go) stores strings.ToLower(s), so `action: Replace` is in memory as "replace" -
 // so that callers searching memory for config values know to look for the changed value.
-func ClassifyUnmarshaler(node *CTypeNode, calls []golang.FuncParamCall) {
+func ClassifyUnmarshaler(node *CTypeNode, calls []golang.FuncParamCall, format Format) {
 	kinds := map[UnmarshalKind]bool{}
 	decoded := map[string]DecodedField{}
 	map_kinds := map[ValueKind]bool{}
@@ -244,7 +274,7 @@ func ClassifyUnmarshaler(node *CTypeNode, calls []golang.FuncParamCall) {
 					kind = UnmarshalScalar // including `type plain T` for a T with a basic underlying type
 				} else if types.TypeString(u, nil) == types.TypeString(node.TypeInfo.Underlying(), nil) {
 					kind = UnmarshalPlain
-				} else if st, ok := u.(*types.Struct); ok && !ImplementsYAMLUnmarshaler(arg) {
+				} else if st, ok := u.(*types.Struct); ok && !ImplementsUnmarshaler(arg, format) {
 					kind = UnmarshalStruct
 					for i := range st.NumFields() {
 						raw := StructRawField(st, i)
@@ -282,9 +312,14 @@ func ClassifyUnmarshaler(node *CTypeNode, calls []golang.FuncParamCall) {
 	}
 }
 
+// Whether the type has a custom unmarshaler for the graph's format
+func (n CTypeNode) CustomUnmarshaler() bool {
+	return n.YAMLUnmarshaler || n.JSONUnmarshaler
+}
+
 // Whether the unmarshaler is unknown, so may populate yaml:"-" fields (see UnmarshalDynamic)
 func (n CTypeNode) DynamicUnmarshaler() bool {
-	return n.YAMLUnmarshaler && (len(n.UnmarshalKinds) == 0 || slices.Contains(n.UnmarshalKinds, UnmarshalDynamic))
+	return n.CustomUnmarshaler() && (len(n.UnmarshalKinds) == 0 || slices.Contains(n.UnmarshalKinds, UnmarshalDynamic))
 }
 
 // Whether config values of this type are scalars (no keys below them), following go-yaml:

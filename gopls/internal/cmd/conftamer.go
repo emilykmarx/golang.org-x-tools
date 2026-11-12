@@ -49,7 +49,7 @@ type ConftamerConfig struct {
 	// Flags for unmarshaler subgraph/accessors
 	ShouldFindAccessors bool `yaml:"find_accessors" flag:"a,find_accessors" help:"Whether to find the accessors too (not just the unmarshaler subgraph)"`
 	// Format of the config file, determining whose unmarshaling behavior to follow
-	Format string `yaml:"format" flag:"format" help:"Config file format: yaml (follow gopkg.in/yaml.v2; default) or json (follow encoding/json; not yet supported)"`
+	Format string `yaml:"format" flag:"format" help:"Config file format: yaml (follow gopkg.in/yaml.v2; default) or json (follow encoding/json)"`
 
 	// Flags shared with the parser
 	parse.ParserConfig `yaml:",inline"`
@@ -208,22 +208,36 @@ func (c *Conftamer) ignoreCType(typ golang.TypeInfo, neigh_find NeighFind, neigh
 	return false
 }
 
-// For a new node with a custom UnmarshalYAML, find what it decodes the config value into (see ct.ClassifyUnmarshaler)
+// For a new node with a custom unmarshaler (UnmarshalYAML or UnmarshalJSON, by format), find what it decodes the
+// config value into (see ct.ClassifyUnmarshaler)
 func (c *Conftamer) classifyUnmarshaler(node *ct.CTypeNode) {
-	if !node.YAMLUnmarshaler {
+	if !node.CustomUnmarshaler() {
 		return
 	}
-	calls, err := c.local_server.FuncParamCalls(c.ctx, node.GoplsInfo[0].Loc, "UnmarshalYAML", 0)
-	if err != nil {
-		graph.Logf(c.log, slog.LevelWarn, "Treating UnmarshalYAML of %v as dynamic: %v", ct.CTypeNodeHash(*node), err)
-		calls = nil
+	method, decode_func := "UnmarshalYAML", "" // the calls of its unmarshal func parameter
+	if c.format == ct.JSON {
+		method, decode_func = "UnmarshalJSON", "encoding/json.Unmarshal" // json.Unmarshal(data, &v)
 	}
-	ct.ClassifyUnmarshaler(node, calls)
-	graph.Logf(c.log, slog.LevelInfo, "UnmarshalYAML of %v decodes into: %v (decoded fields %v)", ct.CTypeNodeHash(*node), node.UnmarshalKinds, ct.KeyFieldNames(*node))
+	var calls []golang.FuncParamCall
+	if c.format == ct.JSON && ct.IsScalarType(node.TypeInfo) {
+		// JSON only (so YAML graphs are unchanged): a type whose own values are scalars (a basic type, or a slice of
+		// them) holds no keys, whatever its UnmarshalJSON does with the data (e.g. Caddy's PublicKeyAlgorithm parses
+		// string(b) itself)
+		calls = []golang.FuncParamCall{{Arg: node.TypeInfo}}
+	} else {
+		var err error
+		calls, err = c.local_server.FuncParamCalls(c.ctx, node.GoplsInfo[0].Loc, method, 0, decode_func)
+		if err != nil {
+			graph.Logf(c.log, slog.LevelWarn, "Treating %v of %v as dynamic: %v", method, ct.CTypeNodeHash(*node), err)
+			calls = nil
+		}
+	}
+	ct.ClassifyUnmarshaler(node, calls, c.format)
+	graph.Logf(c.log, slog.LevelInfo, "%v of %v decodes into: %v (decoded fields %v)", method, ct.CTypeNodeHash(*node), node.UnmarshalKinds, ct.KeyFieldNames(*node))
 }
 
 // Whether config values of the type are scalars (see ct.CTypeNode.ScalarLike), as its node would be classified if added:
-// from ct.CopyKeyInfo, or for types with a custom UnmarshalYAML, from classifyUnmarshaler
+// from ct.CopyKeyInfo, or for types with a custom unmarshaler, from classifyUnmarshaler
 func (c *Conftamer) scalarLike(typ golang.TypeInfo) bool {
 	name := ct.TypeName(typ.TypeInfo)
 	if scalar, ok := c.scalar_like[name]; ok {
@@ -233,7 +247,7 @@ func (c *Conftamer) scalarLike(typ golang.TypeInfo) bool {
 		return false // only non-scalar types are added
 	}
 	node := ct.CTypeNode{TypeInfo: typ.TypeInfo.Type(), Names: []ct.FullTypeName{name}, GoplsInfo: []golang.TypeInfo{typ}}
-	ct.CopyKeyInfo(&node)
+	ct.CopyKeyInfo(&node, c.format)
 	c.classifyUnmarshaler(&node)
 	if c.scalar_like == nil {
 		c.scalar_like = map[ct.FullTypeName]bool{}

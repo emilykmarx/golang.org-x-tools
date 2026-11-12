@@ -53,6 +53,7 @@ type MarshalableNode struct {
 	EmbeddedFields map[string]bool `json:",omitempty"`
 	// Custom unmarshalers (see CTypeNode)
 	YAMLUnmarshaler bool                    `json:",omitempty"`
+	JSONUnmarshaler bool                    `json:",omitempty"`
 	TextUnmarshaler bool                    `json:",omitempty"`
 	UnmarshalKinds  []UnmarshalKind         `json:",omitempty"`
 	DecodedFields   map[string]DecodedField `json:",omitempty"`
@@ -63,7 +64,8 @@ type MarshalableNode struct {
 
 func (n *CTypeNode) MarshalJSON() ([]byte, error) {
 	m := MarshalableNode{Names: n.Names, Methods: n.Methods, Tags: n.Tags, IsMap: n.IsMap, MapFields: n.MapFields,
-		EmbeddedFields: n.EmbeddedFields, YAMLUnmarshaler: n.YAMLUnmarshaler, TextUnmarshaler: n.TextUnmarshaler,
+		EmbeddedFields: n.EmbeddedFields, YAMLUnmarshaler: n.YAMLUnmarshaler, JSONUnmarshaler: n.JSONUnmarshaler,
+		TextUnmarshaler: n.TextUnmarshaler,
 		UnmarshalKinds: n.UnmarshalKinds, DecodedFields: n.DecodedFields, ScalarLike: n.ScalarLike,
 		Kind: n.Kind, FieldKinds: n.FieldKinds}
 	return json.Marshal(m)
@@ -83,6 +85,7 @@ func (n *CTypeNode) UnmarshalJSON(b []byte) error {
 	n.MapFields = m.MapFields
 	n.EmbeddedFields = m.EmbeddedFields
 	n.YAMLUnmarshaler = m.YAMLUnmarshaler
+	n.JSONUnmarshaler = m.JSONUnmarshaler
 	n.TextUnmarshaler = m.TextUnmarshaler
 	n.UnmarshalKinds = m.UnmarshalKinds
 	n.DecodedFields = m.DecodedFields

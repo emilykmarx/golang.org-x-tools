@@ -150,7 +150,7 @@ func main() {
 	flag.StringVar(&unmarshaler_subgraph, "unmarshaler-subgraph", "", "File containing serialized unmarshaler subgraph")
 	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
 	flag.StringVar(&output, "output", "", "Output csv")
-	flag.StringVar(&format_arg, "format", string(ct.YAML), "Config file format: yaml (follow gopkg.in/yaml.v2) or json (follow encoding/json; not yet supported) - use the format the graph was generated with")
+	flag.StringVar(&format_arg, "format", string(ct.YAML), "Config file format: yaml (follow gopkg.in/yaml.v2) or json (follow encoding/json) - use the format the graph was generated with")
 	flag.StringVar(&root, "root", "", "Node to search from, as named in the serialized graph (e.g. /config.Config) - optional, default all roots")
 	flag.StringVar(&through, "through", "", "Only output keys (and paths) whose paths go through this node, e.g. /config.ScrapeConfig (optional)")
 	flag.Parse()

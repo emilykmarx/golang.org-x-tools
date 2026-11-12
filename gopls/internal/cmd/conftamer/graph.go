@@ -82,9 +82,11 @@ type CTypeNode struct {
 	MapFields      map[string]bool // Field name => true if field is a map (populated if struct)
 	EmbeddedFields map[string]bool // Field name => true if field is embedded (populated if struct)
 	// Whether *T has a custom unmarshaler that the library calls instead of its default rules (see fieldkeys.go)
+	// (Only the graph's format's is set: see CopyKeyInfo; CustomUnmarshaler is either)
 	YAMLUnmarshaler bool // gopkg.in/yaml.v2 Unmarshaler
-	TextUnmarshaler bool // encoding.TextUnmarshaler (used by go-yaml for scalars)
-	// For YAMLUnmarshaler: what it decodes the config value into (see ClassifyUnmarshaler)
+	JSONUnmarshaler bool // encoding/json Unmarshaler
+	TextUnmarshaler bool // encoding.TextUnmarshaler (used by go-yaml and encoding/json for scalars)
+	// For a custom unmarshaler: what it decodes the config value into (see ClassifyUnmarshaler)
 	UnmarshalKinds []UnmarshalKind
 	DecodedFields  map[string]DecodedField // Field name => field, if it decodes into another struct
 	ScalarLike     bool                    // config values of this type are scalars (no keys below it)
@@ -260,7 +262,11 @@ func (c *CTypes) AddCType(typ golang.TypeInfo, neigh_info *NeighInfo) (TypeNameE
 	// TODO(CT) if we combine nodes, do we need to add the methods of the new type?
 	CopyMethods(&new_ctype)
 	CopyTags(&new_ctype)
-	CopyKeyInfo(&new_ctype)
+	format := c.Format
+	if format == "" {
+		format = YAML
+	}
+	CopyKeyInfo(&new_ctype, format)
 	if c.KeyInfoHook != nil {
 		c.KeyInfoHook(&new_ctype)
 	}

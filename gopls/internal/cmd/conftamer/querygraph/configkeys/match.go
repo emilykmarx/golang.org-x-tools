@@ -184,8 +184,13 @@ func (f *finder) fieldKey(n ct.CTypeNode, field string, embedded bool) ct.FieldK
 	return ct.NodeFieldKey(n, field, embedded, f.format)
 }
 
-// Appended to paths ending at a node because of its custom unmarshaler
-const CUSTOM_SUFFIX = " (custom UnmarshalYAML)"
+// Appended to paths ending at a node because of its custom unmarshaler (stats.py's CUSTOM_SUFFIXES)
+func (f *finder) customSuffix() string {
+	if f.format == ct.JSON {
+		return " (custom UnmarshalJSON)"
+	}
+	return " (custom UnmarshalYAML)"
+}
 
 // Matches any one key segment (see ct.MAP_KEY)
 const MAP_KEY = ct.MAP_KEY
@@ -340,7 +345,7 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 	// (Other custom unmarshalers are classified: see ct.ClassifyUnmarshaler.)
 	if f.acc.n_full == n_full_before && n.DynamicUnmarshaler() && n.Tags == nil && !via_inline && remaining != key {
 		// The custom unmarshaler decides the section's keys (and the kind of the values)
-		f.acc.recordFull(f.pathString(path, module_prefix)+CUSTOM_SUFFIX, []string{ct.JoinKey(prefix, MAP_KEY)}, "")
+		f.acc.recordFull(f.pathString(path, module_prefix)+f.customSuffix(), []string{ct.JoinKey(prefix, MAP_KEY)}, "")
 		return
 	}
 

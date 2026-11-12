@@ -119,10 +119,10 @@ func (e *enumerator) visit(node ct.CTypeHash, prefix string, path []ct.CTypeHash
 		}
 	}
 
-	// A non-struct with a dynamic custom unmarshaler that go-yaml will call: any key below (dfs: CUSTOM_SUFFIX)
+	// A non-struct with a dynamic custom unmarshaler that the library will call: any key below (dfs: customSuffix)
 	if n.DynamicUnmarshaler() && n.Tags == nil && !via_inline && prefix != "" {
 		map_key := ct.JoinKey(prefix, MAP_KEY)
-		e.emit(map_key, path_str+CUSTOM_SUFFIX, []string{map_key}, "")
+		e.emit(map_key, path_str+e.customSuffix(), []string{map_key}, "")
 	}
 }
 
@@ -132,7 +132,7 @@ func instanceOf(key, pattern string) bool {
 	return ok && rest == "" && strings.Count(key, ".") == strings.Count(pattern, ".")
 }
 
-// Path strings of a key's full paths, as nodes (without CUSTOM_SUFFIX)
+// Path strings of a key's full paths, as nodes (without customSuffix)
 func pathNodes(path_str string) []string {
 	path_str, _, _ = strings.Cut(path_str, " (")
 	return strings.Split(path_str, " => ")
