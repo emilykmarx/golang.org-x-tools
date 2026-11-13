@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Emily Marx <emilykmarx@alumni.stanford.edu>
+Date: Thu, 12 Nov 2026 20:44:28 -0800
+Subject: [PATCH] add sleep to Prom release deployment during wait for Prom PR
+
+Cherry-picked from the fork's 50201fd.
+---
+ .../benchmark/5_prometheus-test-release_deployment.yaml          | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/prombench/manifests/prombench/benchmark/5_prometheus-test-release_deployment.yaml b/prombench/manifests/prombench/benchmark/5_prometheus-test-release_deployment.yaml
+index 6a25c2b..3da3e87 100644
+--- a/prombench/manifests/prombench/benchmark/5_prometheus-test-release_deployment.yaml
++++ b/prombench/manifests/prombench/benchmark/5_prometheus-test-release_deployment.yaml
+@@ -783,6 +783,7 @@ spec:
+           until [ -f /tmp/peer-ready ]; do
+             sleep 1
+           done
++          sleep 30
+       containers:
+       - name: prometheus
+         image: quay.io/prometheus/prometheus:{{ .RELEASE }}

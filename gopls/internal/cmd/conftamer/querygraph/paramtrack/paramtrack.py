@@ -18,7 +18,7 @@ import sys
 import common
 import modules  # (modules/<module>/module.py: each module's settings and hooks)
 from common import ARGMATCH_LABELS, CT, GOPLS, QUERYGRAPH, log_command, run, say
-from testbeds import TESTBEDS
+from testbeds import TESTBEDS, PrombenchVM
 
 # stats.py's full key and section rules (STATISTICS.md); step 8 runs it
 STATS = f"{QUERYGRAPH}/configkeys/stats"
@@ -145,7 +145,7 @@ class Workflow:
         overrides = dict(kv.split("=", 1) for kv in self.a.argmatch_arg)
         tb = TESTBEDS[self.a.testbed](wait=self.a.wait, argmatch_args=overrides, vm=self.a.vm)
         settings = {"testbed": self.a.testbed, "wait": tb.wait, "argmatch_args": tb.argmatch_args}
-        if self.a.testbed == "prombench":
+        if isinstance(tb, PrombenchVM):
             settings["vm"] = tb.vm
         with open(f"{d}/testbed.json", "w") as f:
             json.dump(settings, f, indent=2)

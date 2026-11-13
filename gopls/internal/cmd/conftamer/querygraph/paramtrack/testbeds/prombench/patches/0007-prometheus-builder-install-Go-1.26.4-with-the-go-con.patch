@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Emily Marx <emilykmarx@alumni.stanford.edu>
+Date: Thu, 12 Nov 2026 20:44:41 -0800
+Subject: [PATCH] prometheus-builder: install Go 1.26.4 with the
+ go-conftamer-ancestry patch GOPATCH applied
+
+From the fork's 545455b and eac4f52. paramtrack's image
+(prometheus/prombench-argmatch.Dockerfile) builds FROM this image, tagged
+prometheus-builder:conftamer; the build context conftamer is the
+go-conftamer-ancestry checkout.
+---
+ tools/prometheus-builder/Dockerfile | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/tools/prometheus-builder/Dockerfile b/tools/prometheus-builder/Dockerfile
+index 3d1ab82..ab42391 100644
+--- a/tools/prometheus-builder/Dockerfile
++++ b/tools/prometheus-builder/Dockerfile
+@@ -1,5 +1,17 @@
+ FROM quay.io/prometheus/golang-builder:1.26-base
+ 
++# Replace Go with this version, and apply patch to it from conftamer build context
++ARG GO_VERSION=1.26.4
++ARG GOPATCH
++ENV GOTOOLCHAIN=local
++
++RUN rm -rf /usr/local/go && \
++    curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz | tar -C /usr/local -xz
++
++COPY --from=conftamer $GOPATCH /tmp/go-inlibrary.patch
++RUN cd /usr/local/go && git apply --verbose /tmp/go-inlibrary.patch && \
++    go version && go build std
++
+ RUN mkdir -p /go/src/github.com
+ 
+ COPY ./build.sh /go/src/github.com/build.sh

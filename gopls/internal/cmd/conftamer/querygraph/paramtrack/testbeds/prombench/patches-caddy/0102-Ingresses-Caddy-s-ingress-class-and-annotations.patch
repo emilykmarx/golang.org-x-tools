@@ -1,0 +1,131 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Emily Marx <emilykmarx@alumni.stanford.edu>
+Date: Thu, 12 Nov 2026 20:57:32 -0800
+Subject: [PATCH] Ingresses: Caddy's ingress class and annotations
+
+From Jamie Anzai-Wurfbain's fbc6eb1 and Emily Marx's f1af45d: ingressClassName
+caddy, caddy.ingress.kubernetes.io/disable-ssl-redirect instead of the nginx
+annotations, and service ports by number.
+---
+ prombench/manifests/cluster-infra/3b_prometheus-meta.yaml  | 6 +++---
+ .../cluster-infra/7b_commentmonitor_deployment.yaml        | 6 +++---
+ prombench/manifests/cluster-infra/8b_parca.yaml            | 6 +++---
+ prombench/manifests/cluster-infra/grafana_deployment.yaml  | 6 +++---
+ .../prombench/benchmark/7_nginx-ingress-routes.yaml        | 7 ++-----
+ 5 files changed, 14 insertions(+), 17 deletions(-)
+
+diff --git a/prombench/manifests/cluster-infra/3b_prometheus-meta.yaml b/prombench/manifests/cluster-infra/3b_prometheus-meta.yaml
+index 6a18a1a..cfafe2b 100644
+--- a/prombench/manifests/cluster-infra/3b_prometheus-meta.yaml
++++ b/prombench/manifests/cluster-infra/3b_prometheus-meta.yaml
+@@ -297,9 +297,9 @@ kind: Ingress
+ metadata:
+   name: ingress-prometheus-meta
+   annotations:
+-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
++    caddy.ingress.kubernetes.io/disable-ssl-redirect: "true"
+ spec:
+-  ingressClassName: nginx
++  ingressClassName: caddy
+   tls:
+   - hosts:
+     - prombench.prometheus.io
+@@ -311,6 +311,6 @@ spec:
+           service:
+             name: prometheus-meta
+             port:
+-              name: prom-web
++              number: 80
+         path: /prometheus-meta
+         pathType: Prefix
+diff --git a/prombench/manifests/cluster-infra/7b_commentmonitor_deployment.yaml b/prombench/manifests/cluster-infra/7b_commentmonitor_deployment.yaml
+index e00e803..1eab6a4 100644
+--- a/prombench/manifests/cluster-infra/7b_commentmonitor_deployment.yaml
++++ b/prombench/manifests/cluster-infra/7b_commentmonitor_deployment.yaml
+@@ -71,9 +71,9 @@ kind: Ingress
+ metadata:
+   name: ingress-comment-monitor
+   annotations:
+-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
++    caddy.ingress.kubernetes.io/disable-ssl-redirect: "true"
+ spec:
+-  ingressClassName: nginx
++  ingressClassName: caddy
+   rules:
+   - http:
+       paths:
+@@ -81,6 +81,6 @@ spec:
+           service:
+             name: comment-monitor
+             port:
+-              name: cm-port
++              number: 80
+         path: /hook
+         pathType: Prefix
+diff --git a/prombench/manifests/cluster-infra/8b_parca.yaml b/prombench/manifests/cluster-infra/8b_parca.yaml
+index 0816674..f9088b8 100644
+--- a/prombench/manifests/cluster-infra/8b_parca.yaml
++++ b/prombench/manifests/cluster-infra/8b_parca.yaml
+@@ -125,9 +125,9 @@ kind: Ingress
+ metadata:
+   name: ingress-parca
+   annotations:
+-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
++    caddy.ingress.kubernetes.io/disable-ssl-redirect: "true"
+ spec:
+-  ingressClassName: nginx
++  ingressClassName: caddy
+   rules:
+   - http:
+       paths:
+@@ -135,6 +135,6 @@ spec:
+           service:
+             name: parca
+             port:
+-              name: parca-web
++              number: 80
+         path: /profiles
+         pathType: Prefix
+diff --git a/prombench/manifests/cluster-infra/grafana_deployment.yaml b/prombench/manifests/cluster-infra/grafana_deployment.yaml
+index 0d526ec..cfc1d1d 100644
+--- a/prombench/manifests/cluster-infra/grafana_deployment.yaml
++++ b/prombench/manifests/cluster-infra/grafana_deployment.yaml
+@@ -95,9 +95,9 @@ kind: Ingress
+ metadata:
+   name: ingress-grafana
+   annotations:
+-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
++    caddy.ingress.kubernetes.io/disable-ssl-redirect: "true"
+ spec:
+-  ingressClassName: nginx
++  ingressClassName: caddy
+   rules:
+   - http:
+       paths:
+@@ -105,6 +105,6 @@ spec:
+           service:
+             name: grafana
+             port:
+-              name: grafana-web
++              number: 80
+         path: /grafana
+         pathType: Prefix
+diff --git a/prombench/manifests/prombench/benchmark/7_nginx-ingress-routes.yaml b/prombench/manifests/prombench/benchmark/7_nginx-ingress-routes.yaml
+index 34c8e2f..12e3d29 100644
+--- a/prombench/manifests/prombench/benchmark/7_nginx-ingress-routes.yaml
++++ b/prombench/manifests/prombench/benchmark/7_nginx-ingress-routes.yaml
+@@ -4,12 +4,9 @@ metadata:
+   name: ingress-prometheus
+   namespace: prombench-{{ .PR_NUMBER }}
+   annotations:
+-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+-    nginx.ingress.kubernetes.io/proxy-connect-timeout: '605'
+-    nginx.ingress.kubernetes.io/proxy-send-timeout: '605'
+-    nginx.ingress.kubernetes.io/proxy-read-timeout: '605'
++    caddy.ingress.kubernetes.io/disable-ssl-redirect: "true"
+ spec:
+-  ingressClassName: nginx
++  ingressClassName: caddy
+   rules:
+   - http:
+       paths:

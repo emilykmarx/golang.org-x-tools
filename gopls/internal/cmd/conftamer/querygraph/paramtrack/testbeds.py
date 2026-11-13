@@ -1,7 +1,8 @@
 """Testbeds for paramtrack's dynamic phase: each builds the module with argmatch and contexttrack, runs it with the
 concrete config under a workload, and collects contexttrack's events and argmatch's matches. See README.md.
 
-Also run on the VM by PrombenchVM: testbeds.py prombench --out DIR --config FILE [--stacklog FILE --matchfile FILE]
+Also run on the VM by PrombenchVM: testbeds.py prombench|prombench-caddy --out DIR --config FILE
+[--stacklog FILE --matchfile FILE]
 """
 
 import argparse
@@ -18,6 +19,10 @@ import urllib.request
 
 import common
 from common import CT, log_command, popen, run, say
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "testbeds", "prombench"))
+import upstream  # noqa: E402
 
 OUTPUTS = ("events.jsonl", "matches.csv", "matches.calls.csv")
 
@@ -50,13 +55,16 @@ ARGMATCH_ARGS = {
 }
 
 
-class PrometheusImage(Testbed):
-    """Builds Prometheus under argmatch and contexttrack, from prometheus/prombench-argmatch.Dockerfile"""
+class ArgmatchImage(Testbed):
+    """Builds the module under argmatch and contexttrack from DOCKERFILE, with $CT as the build context. The module's
+    checkout is $CT/SRC."""
 
-    DOCKERFILE = "prometheus/prombench-argmatch.Dockerfile"
-    VERSION = "v3.2.1"
+    DOCKERFILE = None
+    SRC = None
+    BUILD_ARGS = {}
 
     def build(self, tag, out_dir, stacklog, matchfile):
+        upstream.ensure_builder(out_dir)  # the image the Dockerfile builds FROM
         if stacklog:
             overrides = {"STACKLOG": self.in_build_context(stacklog, "paramtrack-stacklog.txt"),
                          "MATCHFILE": self.in_build_context(matchfile, "paramtrack-matches.txt")}
@@ -64,16 +72,18 @@ class PrometheusImage(Testbed):
             # argmatch needs -func or -stacklog: name a function that doesn't exist
             overrides = {"FUNC": "main.paramtrackNone", "MATCH": "paramtrack-none"}
         a = {**self.argmatch_args, **overrides}
-        cmd = ["docker", "build", "--progress=plain", "-f", self.DOCKERFILE, "--build-arg", f"VERSION={self.VERSION}"]
+        cmd = ["docker", "build", "--progress=plain", "-f", self.DOCKERFILE]
+        for k, v in sorted(self.BUILD_ARGS.items()):
+            cmd += ["--build-arg", f"{k}={v}"]
         for k, v in sorted(a.items()):
             cmd += ["--build-arg", f"ARGMATCH_{k}={v}"]
         say(f"building {tag} (about 5 minutes if what argmatch instruments changed)")
         run(cmd + ["-t", tag, "."], cwd=CT, log=f"{out_dir}/build.log", timeout=2400)
 
     def in_build_context(self, path, name):
-        """Copies a file into the Prometheus source directory, which the Dockerfile copies to /src; returns its path
-        there. (The build reads the stack log and match file at build time.)"""
-        shutil.copy(path, f"{CT}/prometheus/{name}")
+        """Copies a file into the module's checkout, which the Dockerfile copies to /src; returns its path there.
+        (The build reads the stack log and match file at build time.)"""
+        shutil.copy(path, f"{CT}/{self.SRC}/{name}")
         return f"/src/{name}"
 
     def summarize(self, out_dir, what, log):
@@ -82,6 +92,22 @@ class PrometheusImage(Testbed):
         n_events = sum(1 for _ in open(f"{out_dir}/events.jsonl"))
         n_calls = max(0, sum(1 for _ in open(f"{out_dir}/matches.calls.csv")) - 1)
         say(f"{what}: {n_events} events; {n_calls} lines of argmatch calls")
+
+
+class PrometheusImage(ArgmatchImage):
+    """Prometheus, from prometheus/prombench-argmatch.Dockerfile"""
+
+    VERSION = "v3.2.1"
+    DOCKERFILE = f"{CT}/prometheus/prombench-argmatch.Dockerfile"
+    SRC = "prometheus"
+    BUILD_ARGS = {"VERSION": VERSION}
+
+
+class CaddyIngressImage(ArgmatchImage):
+    """Caddy's ingress controller, from modules/caddy/argmatch.Dockerfile"""
+
+    DOCKERFILE = f"{HERE}/modules/caddy/argmatch.Dockerfile"
+    SRC = "caddyserver-ingress"
 
 
 class PrometheusDocker(PrometheusImage):
@@ -180,34 +206,24 @@ class PrometheusDocker(PrometheusImage):
 
 
 class Prombench(PrometheusImage):
-    """prombench's prometheus-meta, in the kind cluster on the machine this runs on (deployed with
-    prometheus-test-infra/prombench/deploy.sh). Ported from dump_ancestors/argmatch/experiment/run_on_vm.sh: builds
+    """prombench's prometheus-meta, in the kind cluster on the machine this runs on (testbeds/prombench/upstream.py
+    deploys it if the cluster doesn't exist). Ported from dump_ancestors/argmatch/experiment/run_on_vm.sh: builds
     prometheus-conftamer:v3.2.1 (the image the deployment runs), loads it into the main node, sets the prometheus-meta
     config map to the concrete config and CONFTAMER_EVENTS on the deployment, and restarts prometheus-meta. Once it's
     ready, a simulated person views Grafana's dashboards until the capture (the experiment's view_dashboards.py), and
     30 s later the experiment's reload_on_vm.sh reloads a changed config and then the concrete config again. Stops
     after `wait` seconds from the restart."""
 
-    CTX = "kind-prombench"
+    CTX = upstream.CTX
+    VARIANT = "nginx"
     TAG = "prometheus-conftamer:v3.2.1"
-    OUTDIR = f"{CT}/dump_ancestors/argmatch-out"  # mounted at /argmatch-out in prometheus-meta
+    OUTDIR = upstream.ARGMATCH_OUT  # mounted at /argmatch-out in prometheus-meta
     CONFIG_DIR = "/etc/prometheus/config"  # where prometheus-meta mounts its ConfigMap
     EXPERIMENT = f"{CT}/dump_ancestors/argmatch/experiment"
     RELOAD_AFTER = 30
 
     def k(self, *args, timeout=120, log=None):
         return run(["kubectl", "--context", self.CTX, *args], timeout=timeout, log=log)
-
-    def load(self):
-        say("loading the image into the main node")
-        with tempfile.NamedTemporaryFile(suffix=".tar") as tar:
-            run(["docker", "save", self.TAG, "-o", tar.name], timeout=600)
-            nodes = self.k("get", "nodes", "-l", "cloud.google.com/gke-nodepool=main-node", "-o", "name").split()
-            for n in nodes:
-                cmd = ["docker", "exec", "-i", n.removeprefix("node/"), "ctr", "-n", "k8s.io", "images", "import", "-"]
-                log_command(cmd + ["<", tar.name])
-                with open(tar.name, "rb") as f:
-                    subprocess.run(cmd, stdin=f, check=True, capture_output=True, timeout=600)
 
     def restart(self, config, files=None):
         """Restarts prometheus-meta with the config, the files it refers to (added to the ConfigMap, so they appear in
@@ -242,7 +258,7 @@ class Prombench(PrometheusImage):
 
     def run(self, out_dir, config, stacklog=None, matchfile=None, files=None):
         self.build(self.TAG, out_dir, stacklog, matchfile)
-        self.load()
+        deploy_or_load(self.VARIANT, self.TAG, out_dir)
         self.restart(config, files)
         start = time.time()
         helpers = []  # background processes, stopped at the capture
@@ -295,14 +311,174 @@ class Prombench(PrometheusImage):
         self.summarize(out_dir, "prometheus-meta", f"{out_dir}/pod.log")
 
 
+def deploy_or_load(variant, tag, out_dir):
+    """Loads the module's image into the prombench cluster, or deploys the cluster (with the image) if there's none or
+    it's the other variant"""
+    have = upstream.cluster_variant()
+    if have == variant:
+        upstream.load(tag)
+    else:
+        say(f"prombench cluster: {have or 'none'}; deploying the {variant} variant (about 5 minutes)")
+        upstream.deploy(variant, tag, f"{out_dir}/deploy")  # (loads the image)
+
+
+class PrombenchCaddy(CaddyIngressImage):
+    """Caddy's ingress controller in prombench (upstream.py's caddy variant: it replaces ingress-nginx), in the kind
+    cluster on the machine this runs on. The concrete config is Caddy's JSON config, which the controller otherwise
+    generates from the cluster's Ingresses and its ConfigMap. Builds the controller (caddy-ingress-conftamer:latest,
+    which the deployment runs), deploys the cluster or loads the image, and restarts the controller with
+    CONFTAMER_EVENTS set. Once the controller has loaded its own config, loads the concrete config in its place
+    through Caddy's admin API (POST /load, which validates and provisions it and rolls back on failure); the
+    controller doesn't reload while its generated config is unchanged, and the run fails if the running config
+    isn't the concrete config at the capture. The workload is Prombench's, through the ingress: the dashboard viewer
+    reaches Grafana through the controller's service, the loadgen querier queries the benchmark Prometheus instances
+    through it, and `RELOAD_AFTER` seconds after the config is loaded, it's loaded again (forced: Caddy skips an
+    unchanged config). Stops after `wait` seconds from the restart."""
+
+    CTX = upstream.CTX
+    VARIANT = "caddy"
+    TAG = "caddy-ingress-conftamer:latest"
+    NS = "caddy-system"
+    DEPLOY = "deploy/caddy-caddy-ingress-controller"
+    SERVICE = "svc/caddy-caddy-ingress-controller"
+    LABEL = "app.kubernetes.io/name=caddy-ingress-controller"
+    CONFIG_DIR = "/tmp/paramtrack-files"  # where the config's files go in the controller's container (emptyDir /tmp)
+    CONFIG_IN_POD = "/tmp/paramtrack-config.json"
+    OUTDIR = upstream.ARGMATCH_OUT
+    EXPERIMENT = Prombench.EXPERIMENT
+    RELOAD_AFTER = 30
+
+    def k(self, *args, timeout=120, log=None):
+        return run(["kubectl", "--context", self.CTX, "-n", self.NS, *args], timeout=timeout, log=log)
+
+    def exec(self, *cmd, stdin=None, timeout=60):
+        full = ["kubectl", "--context", self.CTX, "-n", self.NS, "exec", *(["-i"] if stdin else []), self.DEPLOY,
+                "--", *cmd]
+        log_command(full + (["<", stdin.name] if stdin else []))
+        return subprocess.run(full, stdin=stdin, capture_output=True, text=stdin is None, timeout=timeout)
+
+    def restart(self):
+        """Restarts the controller with CONFTAMER_EVENTS set and no earlier outputs; returns once it's ready"""
+        self.k("scale", self.DEPLOY, "--replicas=0")
+        cmd = ["kubectl", "--context", self.CTX, "-n", self.NS, "wait", "--for=delete", "pod", "-l", self.LABEL,
+               "--timeout=300s"]
+        log_command(cmd)
+        subprocess.run(cmd, capture_output=True, timeout=360)
+        self.k("set", "env", self.DEPLOY, "CONFTAMER_EVENTS=/argmatch-out/events.jsonl")
+        run(["sudo", "rm", "-f"] + [f"{self.OUTDIR}/{f}" for f in OUTPUTS], timeout=60)
+        self.k("scale", self.DEPLOY, "--replicas=1")
+        self.k("rollout", "status", self.DEPLOY, "--timeout=600s", timeout=660)
+        say("controller restarted")
+
+    def install(self, config, files):
+        """Copies the config and its files into the controller's container"""
+        self.exec("mkdir", "-p", self.CONFIG_DIR)
+        for name, path in [(f"{self.CONFIG_DIR}/{n}", f"{files}/{n}") for n in sorted(os.listdir(files))] \
+                if files else []:
+            with open(path, "rb") as f:
+                p = self.exec("sh", "-c", f"cat > {shlex.quote(name)}", stdin=f)
+            if p.returncode != 0:
+                raise RuntimeError(f"copying {path} into the controller failed: {p.stderr[-500:]}")
+        with open(config, "rb") as f:
+            p = self.exec("sh", "-c", f"cat > {self.CONFIG_IN_POD}", stdin=f)
+        if p.returncode != 0:
+            raise RuntimeError(f"copying the config into the controller failed: {p.stderr[-500:]}")
+
+    @staticmethod
+    def admin_address(cfg):
+        """Where the admin API listens, per a Caddy config (default localhost:2019)"""
+        listen = (cfg.get("admin") or {}).get("listen") or "localhost:2019"
+        if listen.startswith("unix/"):
+            raise RuntimeError(f"the config's admin API listens on a unix socket ({listen}), which the testbed can't "
+                               "reach with wget")
+        return listen.removeprefix("tcp/")
+
+    def running_config(self, admin):
+        p = self.exec("wget", "-qO-", f"http://{admin}/config/")
+        return json.loads(p.stdout) if p.returncode == 0 and p.stdout.strip() else None
+
+    def load_config(self, admin, force=False):
+        """POSTs the config in the container to the admin API's /load; returns (ok, response)"""
+        p = self.exec("wget", "-qO-", "-S", "--header", "Content-Type: application/json",
+                      *(["--header", "Cache-Control: must-revalidate"] if force else []),
+                      f"--post-file={self.CONFIG_IN_POD}", f"http://{admin}/load", timeout=300)
+        return p.returncode == 0, (p.stdout + p.stderr).strip()
+
+    def run(self, out_dir, config, stacklog=None, matchfile=None, files=None):
+        cfg = json.load(open(config))
+        self.build(self.TAG, out_dir, stacklog, matchfile)
+        deploy_or_load(self.VARIANT, self.TAG, out_dir)
+        self.restart()
+        start = time.time()
+        helpers = []  # background processes, stopped at the capture
+        loaded = reloaded = None
+        try:
+            # The controller's own config first (else it could replace the concrete config when it loads it)
+            while True:
+                running = self.running_config("localhost:2019")
+                if running and running.get("apps"):
+                    break
+                if time.time() - start > 300:
+                    raise RuntimeError("the controller hasn't loaded its own config 300s after the restart")
+                time.sleep(5)
+            open(f"{out_dir}/generated-config.json", "w").write(json.dumps(running, indent=2) + "\n")
+            self.install(config, files)
+            ok, resp = self.load_config("localhost:2019")
+            open(f"{out_dir}/load.log", "w").write(resp + "\n")
+            if not ok:
+                raise RuntimeError(f"the admin API rejected the concrete config (see {out_dir}/load.log): "
+                                   f"{resp[-1500:]}")
+            admin = self.admin_address(cfg)
+            loaded = time.time() - start
+            say(f"concrete config loaded {loaded:.0f}s after the restart")
+            pf = popen(["kubectl", "--context", self.CTX, "-n", self.NS, "port-forward", self.SERVICE, "3000:80"],
+                       stdout=open(f"{out_dir}/port-forward.log", "w"), stderr=subprocess.STDOUT)
+            time.sleep(2)
+            viewer = popen([sys.executable, f"{self.EXPERIMENT}/view_dashboards.py", "--url",
+                            "http://localhost:3000/grafana", "--duration", str(int(self.wait - loaded))],
+                           stdout=open(f"{out_dir}/viewer.log", "w"), stderr=subprocess.STDOUT)
+            helpers += [pf, viewer]
+            while (t := time.time() - start) < self.wait:
+                if reloaded is None and t >= loaded + self.RELOAD_AFTER:
+                    # Check early that contexttrack is recording
+                    events = f"{self.OUTDIR}/events.jsonl"
+                    if not os.path.exists(events) or os.path.getsize(events) == 0:
+                        raise RuntimeError(f"no events {t:.0f}s after the restart (is CONFTAMER_EVENTS set?)")
+                    ok, resp = self.load_config(admin, force=True)
+                    open(f"{out_dir}/reload.log", "w").write(resp + "\n")
+                    reloaded = t
+                    say("config reloaded" if ok else f"config reload failed; see {out_dir}/reload.log")
+                time.sleep(5)
+            say(f"capturing after {time.time() - start:.0f}s")
+            for f in OUTPUTS:
+                if os.path.exists(f"{self.OUTDIR}/{f}"):
+                    run(["sudo", "cp", f"{self.OUTDIR}/{f}", f"{out_dir}/{f}"], timeout=120)
+                    run(["sudo", "chown", f"{os.getuid()}:{os.getgid()}", f"{out_dir}/{f}"], timeout=60)
+                else:
+                    open(f"{out_dir}/{f}", "w").close()
+            running = self.running_config(admin)
+            if running != cfg:
+                if running is not None:
+                    open(f"{out_dir}/running-config.json", "w").write(json.dumps(running, indent=2) + "\n")
+                raise RuntimeError(f"the running config isn't the concrete config at the capture (see "
+                                   f"{out_dir}/running-config.json): did the controller replace it?")
+        finally:
+            for p in helpers:
+                p.terminate()
+            self.k("logs", "--timestamps", self.DEPLOY, log=f"{out_dir}/pod.log", timeout=300)
+        self.summarize(out_dir, "caddy ingress controller", f"{out_dir}/pod.log")
+
+
 class PrombenchVM(Testbed):
     """Prombench on a GCE VM (--vm): copies this code and the run's inputs there, runs the Prombench testbed on it, and
-    copies the outputs back. The VM needs the checkouts that prometheus-test-infra/prombench/vm_setup.sh makes, at the
-    same paths as here, and prombench deployed (deploy.sh)."""
+    copies the outputs back. The VM needs what testbeds/prombench/vm_setup.sh installs and clones, at the same paths
+    as here."""
 
     ZONE = "us-central1-b"
     PROJECT = "conftamer"
     REMOTE = "/tmp/paramtrack-testbed"
+    TESTBED = "prombench"  # the testbed it runs there (main's choices)
+    DOCKERFILES = []  # Dockerfiles under HERE that the testbed builds
 
     POLL = 30  # seconds between checks on the run
     GIVE_UP = 1200  # seconds of failed ssh calls before giving up
@@ -341,11 +517,19 @@ class PrombenchVM(Testbed):
         if not self.vm:
             raise RuntimeError("the prombench testbed needs --vm")
         here = os.path.dirname(os.path.abspath(__file__))
-        inputs = {"testbeds.py": f"{here}/testbeds.py", "common.py": f"{here}/common.py", "config.yaml": config}
+        config_name = "config" + os.path.splitext(config)[1]
+        inputs = {"testbeds.py": f"{here}/testbeds.py", "common.py": f"{here}/common.py", config_name: config,
+                  "testbeds/prombench/upstream.py": f"{here}/testbeds/prombench/upstream.py"}
+        for d in ("patches", "patches-caddy"):
+            for p in sorted(os.listdir(f"{here}/testbeds/prombench/{d}")):
+                inputs[f"testbeds/prombench/{d}/{p}"] = f"{here}/testbeds/prombench/{d}/{p}"
+        for d in self.DOCKERFILES:
+            inputs[d] = f"{here}/{d}"
         if stacklog:
             inputs |= {"stacklog.txt": stacklog, "matches.txt": matchfile}
         with tempfile.TemporaryDirectory() as tmp:
             for name, path in inputs.items():
+                os.makedirs(os.path.dirname(f"{tmp}/{name}"), exist_ok=True)
                 shutil.copy(path, f"{tmp}/{name}")
             if files:
                 shutil.copytree(files, f"{tmp}/files")
@@ -355,7 +539,7 @@ class PrombenchVM(Testbed):
         say(f"copying inputs to {self.vm}")
         self.ssh(f"rm -rf {self.REMOTE} && mkdir -p {self.REMOTE}/out && tar -C {self.REMOTE} -xf -", timeout=300,
                  stdin=_bytes_file(tar))
-        args = ["python3", "testbeds.py", "prombench", "--out", "out", "--config", "config.yaml", "--wait",
+        args = ["python3", "testbeds.py", self.TESTBED, "--out", "out", "--config", config_name, "--wait",
                 str(self.wait)]
         if stacklog:
             args += ["--stacklog", "stacklog.txt", "--matchfile", "matches.txt"]
@@ -365,8 +549,9 @@ class PrombenchVM(Testbed):
             if ARGMATCH_ARGS.get(k) != v:
                 args += ["--argmatch-arg", f"{k}={v}"]
         # Start the run detached on the VM, so that it survives ssh dropping; it writes out/testbed.log and, when it
-        # exits, out/exit. Build (up to 40 min) + load + up to 10 min to be ready + the wait + the capture.
-        limit = 2400 + 600 + 600 + self.wait + 900
+        # exits, out/exit. Builds (up to 40 min each: the builder image if missing, then Prometheus's) + deploying
+        # (if there's no cluster, about 20 min) or loading + up to 10 min to be ready + the wait + the capture.
+        limit = 2400 + 2400 + 3600 + 600 + self.wait + 900
         inner = f"timeout {limit} {shlex.join(args)} > out/testbed.log 2>&1; echo $? > out/exit"
         # (If ssh drops after starting it, the retry mustn't start it again)
         self.ssh(f"cd {self.REMOTE} && {{ [ -e out/testbed.log ] || (setsid nohup bash -c {shlex.quote(inner)} "
@@ -409,13 +594,21 @@ def _bytes_file(data):
     return f
 
 
-TESTBEDS = {"docker": PrometheusDocker, "prombench": PrombenchVM}
+class PrombenchCaddyVM(PrombenchVM):
+    """PrombenchCaddy on the GCE VM (--vm), as PrombenchVM. The VM also needs the caddyserver-ingress checkout."""
+
+    TESTBED = "prombench-caddy"
+    DOCKERFILES = ["modules/caddy/argmatch.Dockerfile"]
+
+
+TESTBEDS = {"docker": PrometheusDocker, "prombench": PrombenchVM, "prombench-caddy": PrombenchCaddyVM}
+ON_VM = {"prombench": Prombench, "prombench-caddy": PrombenchCaddy}
 
 
 def main():
     """Runs a testbed here; used by PrombenchVM on the VM"""
     ap = argparse.ArgumentParser()
-    ap.add_argument("testbed", choices=["prombench"])
+    ap.add_argument("testbed", choices=sorted(ON_VM))
     ap.add_argument("--out", required=True)
     ap.add_argument("--config", required=True)
     ap.add_argument("--stacklog")
@@ -428,7 +621,7 @@ def main():
     # (PrombenchVM copies out/ back into the step's directory, next to its commands.log)
     common.COMMANDS_LOG = os.path.abspath(f"{a.out}/vm-commands.log")
     log_command(sys.argv)
-    Prombench(wait=a.wait, argmatch_args=dict(kv.split("=", 1) for kv in a.argmatch_arg)).run(
+    ON_VM[a.testbed](wait=a.wait, argmatch_args=dict(kv.split("=", 1) for kv in a.argmatch_arg)).run(
         os.path.abspath(a.out), os.path.abspath(a.config), a.stacklog and os.path.abspath(a.stacklog),
         a.matchfile and os.path.abspath(a.matchfile), a.files and os.path.abspath(a.files))
 

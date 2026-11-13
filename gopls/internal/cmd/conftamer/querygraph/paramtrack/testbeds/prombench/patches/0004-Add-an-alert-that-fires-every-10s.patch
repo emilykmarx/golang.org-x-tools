@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Emily Marx <emilykmarx@alumni.stanford.edu>
+Date: Thu, 12 Nov 2026 20:44:28 -0800
+Subject: [PATCH] Add an alert that fires every 10s
+
+Cherry-picked from the fork's b38f120: a flapping alert on the benchmark
+Prometheus instances' query latency, sent to Alertmanager every 10s and
+notified on every 10s, so a run sees prometheus-meta -> Alertmanager and
+Alertmanager -> amgithubnotifier messages.
+---
+ .../cluster-infra/3b_prometheus-meta.yaml     | 26 +++++++++++++++++++
+ .../5a_alertmanager_deployment.yaml           |  8 ++++++
+ 2 files changed, 34 insertions(+)
+
+diff --git a/prombench/manifests/cluster-infra/3b_prometheus-meta.yaml b/prombench/manifests/cluster-infra/3b_prometheus-meta.yaml
+index 37876cf..a3b94cc 100644
+--- a/prombench/manifests/cluster-infra/3b_prometheus-meta.yaml
++++ b/prombench/manifests/cluster-infra/3b_prometheus-meta.yaml
+@@ -29,6 +29,29 @@ data:
+           description: >
+             Benchmark tests are running for {{"{{"}} $value {{"}}"}} days!
+             If this is intended ignore this message otherwise you can cancel it by commenting: `/prombench cancel`
++    - name: benchmark-query-latency
++      # Checked every 10s
++      interval: 10s
++      rules:
++      # Loadgen instant queries run every 10-15s, so this flaps between firing and resolved
++      # for each benchmark Prometheus instance.
++      - alert: benchmarkQueryLatencyAboveAverage
++        expr: |
++          (
++            rate(prometheus_http_request_duration_seconds_sum{job="prometheus",namespace=~"prombench-[0-9]+",prometheus=~"test-.*",handler="/api/v1/query"}[30s])
++            / rate(prometheus_http_request_duration_seconds_count{job="prometheus",namespace=~"prombench-[0-9]+",prometheus=~"test-.*",handler="/api/v1/query"}[30s])
++          )
++          >
++          (
++            rate(prometheus_http_request_duration_seconds_sum{job="prometheus",namespace=~"prombench-[0-9]+",prometheus=~"test-.*",handler="/api/v1/query"}[10m])
++            / rate(prometheus_http_request_duration_seconds_count{job="prometheus",namespace=~"prombench-[0-9]+",prometheus=~"test-.*",handler="/api/v1/query"}[10m])
++          )
++        labels:
++          severity: info
++        annotations:
++          description: >
++            Instant query latency for {{"{{"}} $labels.prometheus {{"}}"}} over the last 30s
++            is {{"{{"}} $value {{"}}"}}s, above its 10m average.
+ ---
+ apiVersion: v1
+ kind: ConfigMap
+@@ -209,6 +232,9 @@ spec:
+         - "--storage.tsdb.path=/data"
+         - "--storage.tsdb.retention.size=500GB"  # 50% of the total storage available.
+         - "--web.enable-lifecycle"
++        # Time to wait between re-sending active alerts to Alertmanager (default is 1m).
++        # Less than the interval of the flapping alert, so flapping alert should be sent every time.
++        - "--rules.alert.resend-delay=5s"
+         - "--web.external-url=http://{{ .DOMAIN_NAME }}/prometheus-meta"
+         - "--enable-feature=promql-duration-expr"
+         - "--enable-feature=promql-extended-range-selectors"
+diff --git a/prombench/manifests/cluster-infra/5a_alertmanager_deployment.yaml b/prombench/manifests/cluster-infra/5a_alertmanager_deployment.yaml
+index a9c818c..772ca6c 100644
+--- a/prombench/manifests/cluster-infra/5a_alertmanager_deployment.yaml
++++ b/prombench/manifests/cluster-infra/5a_alertmanager_deployment.yaml
+@@ -13,6 +13,14 @@ data:
+       group_interval: 5m
+       repeat_interval: 2d
+       receiver: amgithubnotifier-bridge
++      routes:
++      # Notify on the frequently-firing latency alert several times a minute, per test Prometheus.
++      - matchers:
++        - alertname="benchmarkQueryLatencyAboveAverage"
++        group_by: ['alertname', 'namespace', 'prometheus']
++        group_wait: 10s
++        group_interval: 10s
++        repeat_interval: 10s
+ 
+     receivers:
+     - name: amgithubnotifier-bridge

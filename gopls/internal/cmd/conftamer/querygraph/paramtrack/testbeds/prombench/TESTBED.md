@@ -2,19 +2,17 @@
 
 The module runs as **prometheus-meta**, in prombench's kind cluster on the GCE VM `paramtrack-e2e` (zone
 `us-central1-b`, project `conftamer`): `gcloud compute ssh --zone us-central1-b paramtrack-e2e --project conftamer`.
-kubectl context `kind-prombench`. On the VM, the checkouts are under `/home/emily/projects/config_tracing`, with
-prombench at `prometheus-test-infra/prombench` (locally `prom-test-infra/prombench`). Deploying it is described in
-the argmatch experiment's README (`dump_ancestors/argmatch/experiment/README.md`) and paramtrack's README
-("Testbeds").
+kubectl context `kind-prombench`. On the VM, the checkouts are under `/home/emily/projects/config_tracing`.
+paramtrack's prombench testbed deploys prombench when the VM has no cluster: `upstream.py` (next to this file; its
+docstring says how) deploys upstream prometheus/test-infra at `e85cac548` with the patches in `patches/`, from the
+tree `$CT/paramtrack-prombench` on the VM.
 
-- **Shipped concrete config:** the config upstream prombench shipped when the user's fork (prom-test-infra, branch
-  `argmatch-prom`) branched off: the `prometheus.yaml` key of the `prometheus-meta` ConfigMap at commit `e85cac548`,
-  `git -C prom-test-infra show e85cac548:prombench/manifests/cluster-infra/3b_prometheus-meta.yaml` (141 lines, no
-  template placeholders; identical on upstream master as of 2026-11-05). The deployed testbed's ConfigMap instead
-  holds the fork's fuzzed config (`prom-test-infra/prombench/fuzzed_prometheus.yaml`): apply the shipped config
-  before taking a baseline, as paramtrack does with `--config`.
-- **Information about the testbed:** `prombench/` (manifests, deploy.sh), and the other components' manifests there:
-  what they are tells you which endpoints exist for new entries to target.
+- **Shipped concrete config:** the config upstream prombench ships at that commit: the `prometheus.yaml` key of the
+  `prometheus-meta` ConfigMap, `git -C $CT/prometheus-test-infra-upstream show
+  e85cac548:prombench/manifests/cluster-infra/3b_prometheus-meta.yaml` (141 lines, no template placeholders;
+  identical on upstream master as of 2026-11-05). The patches don't change it.
+- **Information about the testbed:** the deployed manifests, `$CT/paramtrack-prombench/prombench/manifests/` on the
+  VM: the other components' manifests there tell you which endpoints exist for new entries to target.
 
 ## Applying a config
 `cc_vm.py` (next to this file) does all of this section's and "Adding files"' procedures, and the health numbers: copy
@@ -59,20 +57,12 @@ After each applied config, for a minute or so, through `kubectl exec ... wget -q
 - `kubectl --context kind-prombench get pods -A`: no new restarts or failing pods anywhere.
 
 ## Message labels (constraint 2)
-The authoritative check, at the end (each run takes about 6 minutes, most of it the 240 s workload):
-Run paramtrack as its README says, from its directory, with its Python packages:
-`uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out <dir> --config <config>
---testbed prombench --until 3` (plain `python3` fails at import).
-1. **Baseline**, once per testbed deployment: paramtrack with the shipped config, `--testbed prombench --until 3`
-   (its run 1: contexttrack records events, argmatch instruments nothing). The events are in
-   `<out>/3-chains/events.jsonl`.
-2. **Candidate:** `scripts/check_labels.py --config <candidate> --baseline <baseline out> --out <another dir>
-   --testbed prombench` (with uv and the same packages): it runs the same with the candidate, reusing the baseline's
-   graph, then `scripts/count_labels.py`, which lists the labels missing from the candidate's run (exit 1 if any).
-
-Some labels depend on timing, not the config (e.g. `/-/ready` answering 503 while Prometheus starts). If a label is
-missing, check whether it plausibly depends on the config change before concluding: rerun the candidate, and if
-needed the baseline, and compare the union of runs.
+SKILL.md's constraint 2 says how to check them. On prombench:
+- **The baseline run** is made with `uv run --with pandas --with matplotlib --with tabulate python paramtrack.py
+  --module prometheus --out <dir> --config <shipped config> --testbed prombench --until 3`, from paramtrack's directory (plain `python3`
+  fails at import; `scripts/check_labels.py` needs the same packages). It and each check take about 6 minutes, most
+  of it the 240 s workload.
+- **Labels that depend on timing,** not the config: e.g. `/-/ready` answering 503 while Prometheus starts.
 
 paramtrack's testbed leaves the ConfigMap set to the config it ran. When done, put back whatever the user wants the
 testbed left with (the shipped config, unless told otherwise).

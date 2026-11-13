@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Emily Marx <emilykmarx@alumni.stanford.edu>
+Date: Thu, 12 Nov 2026 20:44:08 -0800
+Subject: [PATCH] kind: add the GKE node-pool labels the manifests'
+ nodeSelectors use
+
+Ported from the fork's 84466f7. The manifests schedule pods with
+nodeSelector cloud.google.com/gke-nodepool, which kind nodes don't have.
+---
+ prombench/manifests/cluster_kind.yaml | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/prombench/manifests/cluster_kind.yaml b/prombench/manifests/cluster_kind.yaml
+index 2b9d990..0e482b2 100644
+--- a/prombench/manifests/cluster_kind.yaml
++++ b/prombench/manifests/cluster_kind.yaml
+@@ -7,25 +7,25 @@ nodes:
+         kind: InitConfiguration
+         nodeRegistration:
+           kubeletExtraArgs:
+-            node-labels: "node-name=main-node"
++            node-labels: "node-name=main-node,cloud.google.com/gke-nodepool=main-node"
+   - role: worker
+     kubeadmConfigPatches:
+       - |
+         kind: JoinConfiguration
+         nodeRegistration:
+           kubeletExtraArgs:
+-            node-labels: "isolation=prometheus,node-name=prometheus-{{ .PR_NUMBER }}"
++            node-labels: "isolation=prometheus,node-name=prometheus-{{ .PR_NUMBER }},cloud.google.com/gke-nodepool=prometheus-{{ .PR_NUMBER }}"
+   - role: worker
+     kubeadmConfigPatches:
+       - |
+         kind: JoinConfiguration
+         nodeRegistration:
+           kubeletExtraArgs:
+-            node-labels: "isolation=prometheus,node-name=prometheus-{{ .PR_NUMBER }}"
++            node-labels: "isolation=prometheus,node-name=prometheus-{{ .PR_NUMBER }},cloud.google.com/gke-nodepool=prometheus-{{ .PR_NUMBER }}"
+   - role: worker
+     kubeadmConfigPatches:
+       - |
+         kind: JoinConfiguration
+         nodeRegistration:
+           kubeletExtraArgs:
+-            node-labels: "isolation=none,node-name=nodes-{{ .PR_NUMBER }}"
++            node-labels: "isolation=none,node-name=nodes-{{ .PR_NUMBER }},cloud.google.com/gke-nodepool=nodes-{{ .PR_NUMBER }}"
