@@ -96,10 +96,7 @@ class Workflow:
         # The static settings, defaults filled in, so later runs can match them (e.g. the concreteconfig skill's
         # score.py and check_labels.py match the baseline run's)
         with open(f"{d}/settings.json", "w") as f:
-            json.dump({"module": self.a.module, "module_dir": os.path.abspath(self.a.module_dir), "root": self.a.root,
-                       "format": self.a.format, "docs": os.path.abspath(self.a.docs),
-                       "ignore": os.path.abspath(self.a.ignore) if self.a.ignore else "",
-                       "transformed": os.path.abspath(self.a.transformed) if self.a.transformed else ""}, f, indent=2)
+            json.dump(self.static_settings(), f, indent=2)
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
         cmd = [self.configkeys_bin(), "--unmarshaler-subgraph", graph, "--module-prefix", self.a.module, "--format",
                self.a.format, "--output", f"{d}/configkeys_graph.csv"] + self.untagged_keys("--")
@@ -115,6 +112,45 @@ class Workflow:
         shutil.copy(self.a.config, f"{d}/{self.config_name()}")
         if self.config_files():
             shutil.copytree(self.config_files(), f"{d}/files")
+
+    def static_settings(self):
+        """The static settings step 2 records in settings.json, defaults filled in"""
+        return {"module": self.a.module, "module_dir": os.path.abspath(self.a.module_dir), "root": self.a.root,
+                "format": self.a.format, "docs": os.path.abspath(self.a.docs),
+                "ignore": os.path.abspath(self.a.ignore) if self.a.ignore else "",
+                "transformed": os.path.abspath(self.a.transformed) if self.a.transformed else ""}
+
+    # The recorded settings a resumed run must match (check_settings), per step. Not --ignore and --transformed:
+    # steps 2 and 8 read them as given to each invocation, so that step 8 can be redone with others. Not argmatch's
+    # args for run 1, which instruments nothing.
+    RESUME_SETTINGS = {
+        "2-full-keys": ("settings.json", ["module", "module_dir", "root", "format", "docs"]),
+        "3-chains": ("testbed.json", ["testbed", "wait", "vm"]),
+        "5-matches": ("testbed.json", ["testbed", "wait", "vm", "argmatch_args"]),
+    }
+
+    def check_settings(self, step, d):
+        """When resuming: stop if this invocation's settings differ from those the done step recorded"""
+        if step not in self.RESUME_SETTINGS:
+            return
+        name, fields = self.RESUME_SETTINGS[step]
+        path = f"{d}/{name}"
+        if not os.path.exists(path):
+            say(f"{step}: no {name} (a run from before paramtrack recorded it); can't check its settings")
+            return
+        recorded = json.load(open(path))
+        current = self.static_settings() if name == "settings.json" else self.testbed_settings(self.make_testbed())
+        diff = []
+        for k in fields:
+            r, c = recorded.get(k), current.get(k)
+            if isinstance(r, dict) and isinstance(c, dict):  # (argmatch's args: just the ones that differ)
+                diff += [f"{k} {a}: recorded {r.get(a)!r}, now {c.get(a)!r}" for a in sorted(r.keys() | c.keys())
+                         if r.get(a) != c.get(a)]
+            elif r != c:
+                diff.append(f"{k}: recorded {r!r}, now {c!r}")
+        if diff:
+            sys.exit(f"{step} was run with other settings ({path}):\n  " + "\n  ".join(diff) +
+                     f"\nrerun it with these (--redo {step.split('-', 1)[0]}), or resume with the recorded ones")
 
     def check_config_copy(self, d):
         """When resuming: stop if --config or its files differ from step 2's copies, which the later steps read"""
@@ -142,14 +178,21 @@ class Workflow:
     def testbed(self, d):
         """The testbed for a run, whose effective settings (defaults filled in) it records in <d>/testbed.json, so
         later runs can match them (e.g. the concreteconfig skill's label checks match the baseline run's)"""
+        tb = self.make_testbed()
+        with open(f"{d}/testbed.json", "w") as f:
+            json.dump(self.testbed_settings(tb), f, indent=2)
+        return tb
+
+    def make_testbed(self):
         overrides = dict(kv.split("=", 1) for kv in self.a.argmatch_arg)
-        tb = TESTBEDS[self.a.testbed](wait=self.a.wait, argmatch_args=overrides, vm=self.a.vm)
+        return TESTBEDS[self.a.testbed](wait=self.a.wait, argmatch_args=overrides, vm=self.a.vm)
+
+    def testbed_settings(self, tb):
+        """The testbed's effective settings, as recorded in testbed.json"""
         settings = {"testbed": self.a.testbed, "wait": tb.wait, "argmatch_args": tb.argmatch_args}
         if isinstance(tb, PrombenchVM):
             settings["vm"] = tb.vm
-        with open(f"{d}/testbed.json", "w") as f:
-            json.dump(settings, f, indent=2)
-        return tb
+        return settings
 
     def chains(self, d):
         """Run 1: contexttrack records message chains; argmatch instruments nothing"""
@@ -293,6 +336,7 @@ class Workflow:
             if os.path.exists(d):
                 if step == "2-full-keys":
                     self.check_config_copy(d)
+                self.check_settings(step, d)
                 say(f"{step}: done already ({d})")
                 continue
             if only and i not in only:
