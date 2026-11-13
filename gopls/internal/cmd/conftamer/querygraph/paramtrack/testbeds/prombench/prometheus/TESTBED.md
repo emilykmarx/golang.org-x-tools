@@ -1,11 +1,11 @@
-# prombench
+# prombench (module: Prometheus, as prometheus-meta)
 
 The module runs as **prometheus-meta**, in prombench's kind cluster on the GCE VM `paramtrack-e2e` (zone
 `us-central1-b`, project `conftamer`): `gcloud compute ssh --zone us-central1-b paramtrack-e2e --project conftamer`.
 kubectl context `kind-prombench`. On the VM, the checkouts are under `/home/emily/projects/config_tracing`.
-paramtrack's prombench testbed deploys prombench when the VM has no cluster: `upstream.py` (next to this file; its
-docstring says how) deploys upstream prometheus/test-infra at `e85cac548` with the patches in `patches/`, from the
-tree `$CT/paramtrack-prombench` on the VM.
+paramtrack's prombench testbed deploys prombench when the VM has no cluster (or the other variant's):
+`../upstream.py` (its docstring says how) deploys upstream prometheus/test-infra at `e85cac548` with the patches in
+`../patches/`, from the tree `$CT/paramtrack-prombench` on the VM.
 
 - **Shipped concrete config:** the config upstream prombench ships at that commit: the `prometheus.yaml` key of the
   `prometheus-meta` ConfigMap, `git -C $CT/prometheus-test-infra-upstream show
