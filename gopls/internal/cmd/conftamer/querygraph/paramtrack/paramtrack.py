@@ -105,7 +105,7 @@ class Workflow:
         run(cmd, log=f"{d}/configkeys.log", timeout=600)
         run([sys.executable, f"{STATS}/stats.py", "--full-keys-only", "--configkeys", f"{d}/configkeys_graph.csv",
              "--graph", graph, "--docs", self.a.docs, "--module", self.a.module, "--module-dir", self.a.module_dir,
-             "--out", d] + self.ignore(),
+             "--root", self.a.root or "", "--out", d] + self.ignore(),
             log=f"{d}/stats.log", timeout=600)
         # The concrete config is an input, generated beforehand by the /concreteconfig skill (README.md, "Use with
         # /concreteconfig")
