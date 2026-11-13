@@ -64,9 +64,15 @@ type FieldKey struct {
 	Untagged bool
 }
 
-// Whether the field's key can appear in the config file, applying our untagged exception
+// Whether to lift our untagged-field exception (FieldKey.Untagged), so untagged exported fields are keys as the
+// library keys them: a per-module setting (paramtrack's module.py UNTAGGED_KEYS; e.g. Caddy's ingress controller's
+// secret_store module has untagged fields), set by gopls conftamer's -untagged-keys and configkeys' --untagged-keys.
+// Finding Unmarshalers by struct tags still requires a tag.
+var UntaggedAreKeys bool
+
+// Whether the field's key can appear in the config file, applying our untagged exception (unless UntaggedAreKeys)
 func (k FieldKey) IsKey() bool {
-	return !k.Skip && !k.Untagged
+	return !k.Skip && (!k.Untagged || UntaggedAreKeys)
 }
 
 // Find how a struct field maps to config file keys, following the library for the format.
@@ -260,6 +266,17 @@ func ClassifyUnmarshaler(node *CTypeNode, calls []golang.FuncParamCall, format F
 			arg := call.Arg
 			if ptr, ok := arg.Underlying().(*types.Pointer); ok {
 				arg = ptr.Elem()
+			}
+			// Lists add no key segments (as in IsMap): classify by what they hold (e.g. Caddy's MatchNot decodes into
+			// a []caddy.ModuleMap: a map), unless they're scalars as they are (e.g. []string)
+			for !IsScalarType(arg) {
+				if s, ok := arg.Underlying().(*types.Slice); ok {
+					arg = s.Elem()
+				} else if a, ok := arg.Underlying().(*types.Array); ok {
+					arg = a.Elem()
+				} else {
+					break
+				}
 			}
 			switch u := arg.Underlying().(type) {
 			case *types.Interface:

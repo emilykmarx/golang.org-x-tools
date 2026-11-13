@@ -92,3 +92,17 @@ func (s *Server) TaggedTypes(ctx context.Context, is_tagged func(st *types.Struc
 	}
 	return golang.TaggedTypes(ctx, snapshots, is_tagged)
 }
+
+// See golang.NamedTypes
+func (s *Server) NamedTypes(ctx context.Context, names []string, source golang.TypeSource) ([]golang.TypeInfo, error) {
+	var snapshots []*cache.Snapshot
+	for _, v := range s.session.Views() {
+		snapshot, release, err := v.Snapshot()
+		if err != nil {
+			continue // snapshot is shutting down
+		}
+		defer release()
+		snapshots = append(snapshots, snapshot)
+	}
+	return golang.NamedTypes(ctx, snapshots, names, source)
+}

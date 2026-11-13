@@ -14,6 +14,11 @@ Used by querygraph/configkeys (key <=> path) and the DOT edge labels. */
 // Stands for any one key segment: a map key, or the key a custom unmarshaler picks for a yaml:"-" field
 const MAP_KEY = "*"
 
+// Prefix of an AST path entry that adds literal key segment(s) after the field's key: on the AST paths of extra edges
+// (conftamer's -extra), e.g. "ConfigKey:http" (a module map's key) or "ConfigKey:handler=reverse_proxy" (a module
+// picked by a key inside the object). Other AST path readers ignore it.
+const CONFIG_KEY_PREFIX = "ConfigKey:"
+
 // The config file key segment for one AST path of an edge (from a parent CType to a child)
 type KeySegment struct {
 	// Dot-separated, possibly with MAP_KEY parts; "" if no key is consumed (e.g. inline field, slice element)
@@ -22,6 +27,14 @@ type KeySegment struct {
 	// Via a yaml:"-" field: the library ignores it, so only a custom unmarshaler of the parent can populate it,
 	// under a key it chooses (callers decide whether to treat that as a MAP_KEY segment)
 	Dash bool
+	// An extra edge's segment (its AST path has a CONFIG_KEY_PREFIX entry): Field is the field's key alone, and
+	// Selector, for a module picked by a key inside the object (e.g. "handler=reverse_proxy"), that key under the
+	// field (e.g. "handle.handler"): a key of the parent's section, whose value picks the module
+	Extra    bool
+	Field    string
+	Selector string
+	// The Go name of the (last) field the path goes through, if any (e.g. to tell an extra edge's field's other edges)
+	GoField string
 }
 
 // Join key parts with ".", skipping empty ones
@@ -69,14 +82,23 @@ func ASTPathKeySegment(src, target CTypeNode, ast_path ASTPath, format Format) (
 		if !add_field(NodeFieldKey(src, field, true, format)) {
 			return seg, false
 		}
+		seg.GoField = field
 	}
 	for _, ast_edge := range ast_path {
 		if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
 			if !add_field(NodeFieldKey(src, field, false, format)) {
 				return seg, false
 			}
+			seg.GoField = field
 		} else if ast_edge == "MapType.Value" {
 			seg.Pattern = JoinKey(seg.Pattern, MAP_KEY)
+		} else if key, ok := strings.CutPrefix(ast_edge, CONFIG_KEY_PREFIX); ok {
+			// The extra edge names the key, so a "-" field's key isn't left to the custom unmarshaler (no MAP_KEY)
+			seg.Extra, seg.Field, seg.Dash = true, seg.Pattern, false
+			if inline_key, _, found := strings.Cut(key, "="); found {
+				seg.Selector = JoinKey(seg.Pattern, inline_key)
+			}
+			seg.Pattern = JoinKey(seg.Pattern, key)
 		}
 	}
 	return seg, true

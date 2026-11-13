@@ -100,6 +100,8 @@ const (
 	Implementer     TypeSource = "implementation"
 	UnmarshalArg    TypeSource = "passed as arg to a function (generally Unmarshal)"
 	StructTags      TypeSource = "has struct tags"
+	ExtraRoot       TypeSource = "named as an extra root"
+	ExtraChild      TypeSource = "named as an extra edge's child"
 	TypeSourceError TypeSource = "type not found"
 )
 
