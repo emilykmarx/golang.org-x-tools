@@ -16,7 +16,6 @@ paramtrack's does. <out> is paramtrack's --out; paramtrack's log is <out>/paramt
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 
@@ -47,12 +46,11 @@ def main():
     # The baseline run's graph (reused, so paramtrack doesn't rebuild it), and its static and testbed settings, which
     # the candidate's run must match
     try:
-        base_graph = baseline.graph(base)
+        baseline.graph(base)  # (checks the baseline's graph is usable)
         args = baseline.static_args(baseline.settings(base)) + baseline.testbed_args(base)
     except baseline.MissingInput as e:
         fail(str(e))
-    os.makedirs(f"{out}/1-unmarshaler-graph", exist_ok=True)
-    shutil.copy(base_graph, f"{out}/1-unmarshaler-graph/")
+    baseline.copy_graph(base, out)
     cmd = [sys.executable, f"{QUERYGRAPH}/paramtrack/paramtrack.py", "--out", out, "--config",
            os.path.abspath(a.config), "--until", "3", "--redo", "2"] + args
     if a.config_files:

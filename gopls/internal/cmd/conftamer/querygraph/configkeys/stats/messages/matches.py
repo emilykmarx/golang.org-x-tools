@@ -58,11 +58,13 @@ def unambiguous_keys(run):
     key => its values and full keys, from step 4's configkeys.csv) and section_of (in-scope full key => section, from
     step 8's full_keys.csv)."""
     settings = json.load(open(f"{run}/2-full-keys/settings.json"))
+    if hasattr(stats.modules.load(settings["module"]), "extra_graph") and \
+            not os.path.exists(f"{run}/1-unmarshaler-graph/extra.json"):
+        sys.exit(f"{run} predates the module's extra graph edges (no 1-unmarshaler-graph/extra.json): its configkeys "
+                 f"csv has `*` for the keys custom unmarshalers pick; redo its steps from 1")
     fkdf = pd.read_csv(f"{run}/8-stats/full_keys.csv", keep_default_na=False, dtype=str)
     section_of = dict(zip(fkdf.key, fkdf.section))
-    stats.MAP_FIELDS.update(stats.map_field_keys(f"{run}/1-unmarshaler-graph/unmarshaler_subgraph.text"))
-    custom = stats.modules.load(settings["module"]).CustomKeys(settings["module_dir"])
-    _, config, _ = stats.load_configkeys(f"{run}/4-configkeys/configkeys.csv", custom)
+    _, config = stats.load_configkeys(f"{run}/4-configkeys/configkeys.csv")
     covered_by = collections.defaultdict(set)
     for k, c in config.items():
         for fk in c["full_keys"]:

@@ -19,7 +19,6 @@ import argparse
 import csv
 import os
 import re
-import shutil
 import subprocess
 import sys
 
@@ -57,13 +56,12 @@ def main():
     a = ap.parse_args()
     out, base = os.path.abspath(a.out), os.path.abspath(a.baseline)
     try:
-        base_graph, st = baseline.graph(base), baseline.settings(base)
+        baseline.graph(base)  # (checks the baseline's graph is usable)
+        st = baseline.settings(base)
     except baseline.MissingInput as e:
         print(f"score.py: {e}", file=sys.stderr)
         sys.exit(2)
-    os.makedirs(f"{out}/1-unmarshaler-graph", exist_ok=True)
-    graph = f"{out}/1-unmarshaler-graph/unmarshaler_subgraph.text"
-    shutil.copy(base_graph, graph)
+    baseline.copy_graph(base, out)
     run([sys.executable, f"{QUERYGRAPH}/paramtrack/paramtrack.py", "--out", out, "--config", os.path.abspath(a.config),
          "--only", "full-keys", "--only", "configkeys"] + baseline.static_args(st),
         f"{out}/paramtrack.log", cwd=f"{QUERYGRAPH}/paramtrack", timeout=900)

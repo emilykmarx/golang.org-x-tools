@@ -3,6 +3,7 @@ package main
 // Walk a config file, with the format's own parser, collecting its scalar values and their keys
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,7 +28,10 @@ type occurrence struct {
 
 // Scalar values of the config file in document order. Empty values are skipped. YAML aliases are followed (so each
 // use is a separate occurrence), and merge keys (<<) add the merged mapping's keys to the enclosing mapping.
-func readDocument(path string, format ct.Format) []occurrence {
+// inline_keys (JSON): field key => the keys inside its objects whose value picks a module (from the graph's
+// selectors, e.g. handle => [handler]): the object's other keys get a `<inline key>=<value>` segment after the field's
+// key, as the graph's extra edges do (e.g. handle.handler=reverse_proxy.upstreams.dial).
+func readDocument(path string, format ct.Format, inline_keys map[string][]string) []occurrence {
 	contents, err := os.ReadFile(path)
 	ct.CheckErr(err)
 	out := []occurrence{}
@@ -39,9 +43,7 @@ func readDocument(path string, format ct.Format) []occurrence {
 		}
 		walkYAML(&doc, nil, &out)
 	case ct.JSON:
-		dec := json.NewDecoder(strings.NewReader(string(contents)))
-		dec.UseNumber() // keep numbers as written
-		if err := walkJSON(dec, nil, &out); err != nil {
+		if err := walkJSON(contents, nil, inline_keys, &out); err != nil {
 			log.Fatalf("Parsing %v: %v", path, err)
 		}
 	default:
@@ -87,7 +89,11 @@ func walkYAML(n *yaml.Node, path []string, out *[]occurrence) {
 	}
 }
 
-func walkJSON(dec *json.Decoder, path []string, out *[]occurrence) error {
+// Walk a JSON value (raw), at key path. Objects are read whole (keys and raw values, in order), so that an inline key's
+// value is known before the object's other keys are walked.
+func walkJSON(raw []byte, path []string, inline_keys map[string][]string, out *[]occurrence) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber() // keep numbers as written
 	tok, err := dec.Token()
 	if err != nil {
 		return err
@@ -101,26 +107,57 @@ func walkJSON(dec *json.Decoder, path []string, out *[]occurrence) error {
 	case json.Delim:
 		switch t {
 		case '{':
+			type member struct {
+				key   string
+				value json.RawMessage
+			}
+			members := []member{}
 			for dec.More() {
 				key_tok, err := dec.Token()
 				if err != nil {
 					return err
 				}
-				if err := walkJSON(dec, append(slices.Clone(path), key_tok.(string)), out); err != nil {
+				var v json.RawMessage
+				if err := dec.Decode(&v); err != nil {
+					return err
+				}
+				members = append(members, member{key_tok.(string), v})
+			}
+			// The module this object picks, if its field takes an inline key
+			selector, selector_key := "", ""
+			if len(path) > 0 {
+				for _, k := range inline_keys[path[len(path)-1]] {
+					for _, m := range members {
+						var name string
+						if m.key == k && json.Unmarshal(m.value, &name) == nil {
+							selector, selector_key = k+"="+name, k
+						}
+					}
+				}
+			}
+			for _, m := range members {
+				p := slices.Clone(path)
+				if selector != "" && m.key != selector_key {
+					p = append(p, selector)
+				}
+				if err := walkJSON(m.value, append(p, m.key), inline_keys, out); err != nil {
 					return err
 				}
 			}
 		case '[':
 			for dec.More() {
-				if err := walkJSON(dec, path, out); err != nil {
+				var v json.RawMessage
+				if err := dec.Decode(&v); err != nil {
+					return err
+				}
+				if err := walkJSON(v, path, inline_keys, out); err != nil {
 					return err
 				}
 			}
 		default:
 			return fmt.Errorf("unexpected %v", t)
 		}
-		_, err := dec.Token() // closing delimiter
-		return err
+		return nil
 	case string:
 		add(t, true)
 	case json.Number:

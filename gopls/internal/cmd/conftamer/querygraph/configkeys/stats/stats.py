@@ -29,8 +29,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 STAR = "*"
-# configkeys' suffix for a path ending at a custom unmarshaler (match.go's customSuffix), by format
-CUSTOM_SUFFIXES = (" (custom UnmarshalYAML)", " (custom UnmarshalJSON)")
 
 # Reference palette (dataviz skill, light mode)
 BLUE, ORANGE, GRAY, INK, INK2 = "#2a78d6", "#eb6834", "#c9c8c2", "#0b0b0b", "#52514e"
@@ -51,45 +49,10 @@ def path_nodes(path):
     return path.split(" (")[0].split(" => ")
 
 
-def map_field_keys(graph_path):
-    """Graph node => keys of its map fields (fields whose values are a map, by their yaml tag; the decoded struct's
-    fields if it has DecodedFields). Also records the
-    graph's map nodes in MAP_NODES."""
-    out = {}
-    for v in json.load(open(graph_path))["Vertices"]:
-        if v.get("IsMap"):
-            MAP_NODES.add(v["Names"][0])
-        keys = set()
-        # The decoded struct's fields, if a custom unmarshaler decodes into another struct (as configkeys' KeyFieldNames)
-        if v.get("DecodedFields"):
-            map_tags = [d.get("Tag", "") for d in v["DecodedFields"].values() if d.get("IsMap")]
-        else:
-            map_tags = [(v.get("Tags") or {}).get(field, "") for field in v.get("MapFields") or {}]
-        for tag in map_tags:
-            m = re.search(r'yaml:"([^",]*)', tag)
-            if m and m.group(1) not in ("", "-"):
-                keys.add(m.group(1))
-        out[v["Names"][0]] = keys
-    return out
-
-
-MAP_FIELDS = {}  # set in main
-MAP_NODES = set()  # graph nodes that are maps; set in main
-
-
-def section(fk, path):
-    """Section of full key fk via path: its parent key and Unmarshaler (the path's last node). As in configkeys'
-    `section keys`, a map's values (<map key>.*) are in the section of the struct holding the map: for a map field,
-    the Unmarshaler's, and for a map that's its own node, the node before it on the path's."""
-    s = segs(fk)
-    nodes = path_nodes(path)
-    u = nodes[-1]
-    if s[-1] == STAR and len(s) >= 2:
-        if u in MAP_NODES and len(nodes) > 1:
-            return f"{'.'.join(s[:-2])} @ {nodes[-2]}"
-        if s[-2] in MAP_FIELDS.get(u, ()):
-            return f"{'.'.join(s[:-2])} @ {u}"
-    return f"{parent(fk)} @ {u}"
+def section(info, path):
+    """The section (TERMINOLOGY.md) of a full key (info: its entry in load_configkeys' full) via path, as configkeys
+    names it (its `section` column)"""
+    return info["sections"][path]
 
 
 def parent(key):
@@ -125,36 +88,33 @@ def unambiguous_key(values, unambiguous_value):
 # Inputs
 
 
-def load_configkeys(path, custom):
-    """Full keys (graph patterns with the custom `*`s resolved by custom, the module's CustomKeys) and concrete keys,
-    from the configkeys csv."""
+def load_configkeys(path):
+    """Full keys (configkeys' keys from the graph) and concrete keys (with the full keys they instantiate), from the
+    configkeys csv"""
     ck = pd.read_csv(path, keep_default_na=False, dtype=str)
     ck.columns = [c.replace(" ", "_") for c in ck.columns]
+    # Rows: a full key from the graph (no concrete key), a concrete key (with the full keys it instantiates), or both
+    from_graph = (ck.concrete_key == "") | (ck.concrete_key == ck.full_key)
     full = {}  # full key => info
-    catchall = set()
-    for r in ck[ck.source != "config"].itertuples():
-        for p in split(r.Unmarshaler_Path):
-            fk = custom.full_key(r.param_key, path_nodes(p), p.endswith(CUSTOM_SUFFIXES))
-            if fk is None:
-                catchall.add(r.param_key)
-                continue
-            info = full.setdefault(fk, {"pattern": r.param_key, "unmarshalers": set(), "paths": set(), "kind": r.value_kind})
+    for r in ck[from_graph].itertuples():
+        for p, sec in zip(split(r.Unmarshaler_Path), split(r.section), strict=True):
+            fk = r.full_key
+            info = full.setdefault(fk, {"unmarshalers": set(), "paths": set(), "sections": {}, "kind": r.value_kind})
             info["unmarshalers"].add(path_nodes(p)[-1])
             info["paths"].add(p)
+            info["sections"][p] = sec  # (configkeys' `section` column: one per path, in the same order)
 
     config = {}  # concrete key => info
-    for r in ck[ck.source != "graph"].itertuples():
+    for r in ck[ck.concrete_key != ""].itertuples():
         info = {"values": json.loads(r.values) if r.values else [], "full_keys": set(), "unmarshalers": set(),
                 "kind": r.value_kind, "paths": split(r.Unmarshaler_Path)}
-        patterns = split(r.pattern) or [r.param_key]
         for p in info["paths"]:
-            for pat in patterns:
-                fk = custom.full_key(pat, path_nodes(p), p.endswith(CUSTOM_SUFFIXES))
-                if fk is not None and instance_of(r.param_key, fk) and fk in full:
+            for fk in split(r.full_key):
+                if instance_of(r.concrete_key, fk) and fk in full:
                     info["full_keys"].add(fk)
                     info["unmarshalers"].add(path_nodes(p)[-1])
-        config[r.param_key] = info
-    return full, config, catchall
+        config[r.concrete_key] = info
+    return full, config
 
 
 def read_patterns(path):
@@ -184,24 +144,20 @@ def apply_ignore(full, config, patterns):
     return len(ignored), dropped
 
 
-def check_sections(fkdf, n_full, configkeys_csv, out):
+def check_sections(fkdf, configkeys_csv, out):
     """Check that the sections computed here (<parent key> @ <Unmarshaler>) have the same keys as configkeys'
-    `section keys` column. Comparable where a full key's pattern resolves to just that full key (all keys outside
-    service discovery, and SD keys whose pattern is in only one SD config): elsewhere configkeys combines the sections of
-    all SD configs with the key. n_full counts each pattern's full keys before --ignore, since configkeys' column
-    still combines the ignored SD configs' sections. Compared as patterns (the column has them, with the SD `*`)."""
-    ck = pd.read_csv(configkeys_csv, keep_default_na=False, dtype=str).set_index("param_key")
-    pattern_of = dict(zip(fkdf.key, fkdf.pattern))
-    groups = fkdf.groupby("section").key.apply(lambda ks: {pattern_of[k] for k in ks})
-    comparable = fkdf.drop_duplicates("key")
-    comparable = comparable[comparable.pattern.map(n_full) == 1]
+    `section keys` column, for every full key (the graph resolves the keys custom unmarshalers pick, so configkeys'
+    keys are the full keys)."""
+    ck = pd.read_csv(configkeys_csv, keep_default_na=False, dtype=str)
+    ck = ck[(ck["concrete key"] == "") | (ck["concrete key"] == ck["full key"])].set_index("full key")
+    groups = fkdf.groupby("section").key.apply(set)
+    keys = fkdf.drop_duplicates("key")
     mismatches = []
-    for r in comparable.itertuples():
-        column = {k for k in ck.loc[r.pattern, "section keys"].split("; ") if k}
+    for r in keys.itertuples():
+        column = {k for k in ck.loc[r.key, "section keys"].split("; ") if k}
         if groups[r.section] != column:
             mismatches.append(r.key)
-    out.p(f"- Check: sections computed here vs configkeys' `section keys` column, for the {len(comparable)} full keys "
-          f"whose pattern resolves to just that key ({(~comparable.sd).sum()} outside service discovery): "
+    out.p(f"- Check: sections computed here vs configkeys' `section keys` column, for the {len(keys)} full keys: "
           f"{len(mismatches)} mismatches" + (f": {mismatches}" if mismatches else ""))
     if mismatches:
         print(f"Warning: {len(mismatches)} full keys' sections differ from configkeys' section keys: {mismatches[:10]}")
@@ -608,6 +564,12 @@ def fill_from_run(args):
         return path
 
     settings = json.load(open(need(f"{run}/2-full-keys/settings.json")))
+    # Since 2026-11-12 the graph resolves the keys custom unmarshalers pick (the module's extra_graph); an older run's
+    # configkeys csv has `*` there, which load_configkeys would take for full keys
+    if hasattr(modules.load(settings["module"]), "extra_graph") and \
+            not os.path.exists(f"{run}/1-unmarshaler-graph/extra.json"):
+        raise FileNotFoundError(f"no {run}/1-unmarshaler-graph/extra.json: the run predates the module's extra graph "
+                                f"edges; redo its steps from 1 (or point the step dirs at a redone graph)")
     args.configkeys = args.configkeys or need(f"{run}/4-configkeys/configkeys.csv")
     args.param_values = args.param_values or need(f"{run}/4-configkeys/param_values.txt")
     args.graph = args.graph or need(f"{run}/1-unmarshaler-graph/unmarshaler_subgraph.text")
@@ -689,11 +651,9 @@ def main():
     out.p(f"# Statistics the concrete config controls ({mod.TITLE})" if cfg_only else
           f"# Statistics tables ({mod.TITLE})")
 
-    MAP_FIELDS.update(map_field_keys(args.graph))
     custom = mod.CustomKeys(args.module_dir)
-    full, config, catchall = load_configkeys(args.configkeys, custom)
+    full, config = load_configkeys(args.configkeys)
     full_all = dict(full)  # before --ignore: for the whole-graph visualization
-    n_full = collections.Counter(info["pattern"] for info in full.values())  # (for check_sections)
     ignore = read_patterns(args.ignore)
     transformed = read_patterns(args.transformed)
     n_ignored, n_dropped = apply_ignore(full, config, ignore)
@@ -709,8 +669,8 @@ def main():
     def full_key_rows(full, docs):
         rows = []
         for fk, info in sorted(full.items()):
-            for u, sec in sorted({(path_nodes(p)[-1], section(fk, p)) for p in info["paths"]}):
-                rows.append({"key": fk, "pattern": info["pattern"], "unmarshaler": u, "kind": info["kind"],
+            for u, sec in sorted({(path_nodes(p)[-1], section(info, p)) for p in info["paths"]}):
+                rows.append({"key": fk, "unmarshaler": u, "kind": info["kind"],
                              "top": segs(fk)[0], "section": sec, "map_key": segs(fk)[-1] == STAR,
                              "in_config": fk in covered_by, "documented": fk in docs,
                              "searchable_kind": searchable_kind(info["kind"]),
@@ -737,8 +697,7 @@ def main():
 
     # =============================================================================================================
     out.h("Inputs")
-    out.p(f"- Full keys (graph patterns, SD `*` resolved by Name()): {len(full)}; excluded catch-all patterns of "
-          f"discovery.Configs' dynamic unmarshaler: {', '.join(sorted(catchall))}")
+    out.p(f"- Full keys (the graph's extra edges resolve the keys custom unmarshalers pick): {len(full)}")
     out.p(f"- SD config types found (Name()): {len(set(custom.names.values()))}")
     if args.ignore:
         out.p(f"- Ignored (--ignore {args.ignore}): {n_ignored} full keys; {n_dropped} concrete keys left with no "
@@ -773,7 +732,7 @@ def main():
     secs = fkdf.groupby("section").agg(size=("key", "nunique"), in_config=("in_config", "sum"),
                                        top=("top", "first"), searchable_kind=("searchable_kind", "sum")).reset_index()
     secs["covered"] = secs.in_config > 0
-    check_sections(fkdf, n_full, args.configkeys, out)
+    check_sections(fkdf, args.configkeys, out)
     out.p(f"- Sections (keys with the same parent key and Unmarshaler) with at least one key in the config: "
           f"{pct(secs.covered.sum(), len(secs))}")
     sec_top = secs.groupby("top").agg(sections=("section", "size"), covered=("covered", "sum"))
@@ -890,7 +849,7 @@ def main():
     def describe(v, ks):
         fks = set().union(*(config[k]["full_keys"] for k in ks))
         us = set().union(*(config[k]["unmarshalers"] for k in ks))
-        secs_ = {section(fk, p) for fk in fks for p in full[fk]["paths"]}
+        secs_ = {section(full[fk], p) for fk in fks for p in full[fk]["paths"]}
         last = {segs(k)[-1] for k in ks}
         if len(ks) == 1:
             sim = "one key"
@@ -983,7 +942,7 @@ def main():
     def reach(vs):
         ks = set().union(*(occ[v] for v in vs)) if len(vs) else set()
         fks = set().union(*(config[k]["full_keys"] for k in ks)) if ks else set()
-        ss = {section(fk, p) for fk in fks for p in full[fk]["paths"]}
+        ss = {section(full[fk], p) for fk in fks for p in full[fk]["paths"]}
         ts = {u for fk in fks for u in full[fk]["unmarshalers"]}
         return len(ks), len(fks), len(ss), len(ts)
 

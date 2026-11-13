@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Runs the end-to-end param tracking workflow and joins its outputs into Message label => Full keys. See README.md.
 
-Run with: uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out DIR --config CONFIG [flags]
+Run with: uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out DIR --config CONFIG --module MODULE
+[flags]
 Exits 1 if the testbed failed, or some other error occurred.
 """
 
@@ -31,6 +32,7 @@ class Workflow:
     def __init__(self, args):
         self.a = args
         self.out = os.path.abspath(args.out)
+        self.mod = modules.load(args.module)  # the module's settings and hooks (modules/<module>/module.py)
 
     def dir(self, step):
         return f"{self.out}/{step}"
@@ -41,10 +43,27 @@ class Workflow:
     def unmarshaler_graph(self, d):
         gopls = f"{self.out}/bin/gopls"
         run(["go", "build", "-o", gopls, "."], cwd=GOPLS, log=f"{d}/build.log", timeout=600)
-        run([gopls, "conftamer", f"-m={self.a.module}", f"-format={self.a.format}", f"-out={d}"],
-            cwd=self.a.module_dir, log=f"{d}/conftamer.log", timeout=900)
+        cmd = [gopls, "conftamer", f"-m={self.a.module}", f"-format={self.a.format}", f"-out={d}"]
+        if hasattr(self.mod, "extra_graph"):
+            # Roots and edges the source doesn't show (e.g. Caddy's modules), from the module's hook
+            self.mod.extra_graph(self.a.module_dir, f"{d}/extra.json")
+            cmd.append(f"-extra={d}/extra.json")
+        cmd += self.untagged_keys("-")
+        run(cmd, cwd=self.a.module_dir, log=f"{d}/conftamer.log", timeout=900)
         if not os.path.exists(f"{d}/unmarshaler_subgraph.text"):
             raise RuntimeError(f"gopls conftamer wrote no {d}/unmarshaler_subgraph.text; see {d}/conftamer.log")
+
+    def config_name(self):
+        """Step 2's copy of the concrete config, named for its format (config.yaml, config.json)"""
+        return f"config.{self.a.format}"
+
+    def config_copy(self):
+        return self.file("2-full-keys", self.config_name())
+
+    def untagged_keys(self, dashes):
+        """The flag lifting our untagged-field exception, if the module sets UNTAGGED_KEYS (gopls conftamer's
+        -untagged-keys, configkeys' --untagged-keys: the graph and configkeys must agree)"""
+        return [f"{dashes}untagged-keys"] if getattr(self.mod, "UNTAGGED_KEYS", False) else []
 
     def configkeys_bin(self):
         bin = f"{self.out}/bin/configkeys"
@@ -83,7 +102,7 @@ class Workflow:
                        "transformed": os.path.abspath(self.a.transformed) if self.a.transformed else ""}, f, indent=2)
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
         cmd = [self.configkeys_bin(), "--unmarshaler-subgraph", graph, "--module-prefix", self.a.module, "--format",
-               self.a.format, "--output", f"{d}/configkeys_graph.csv"]
+               self.a.format, "--output", f"{d}/configkeys_graph.csv"] + self.untagged_keys("--")
         if self.a.root:
             cmd += ["--root", self.a.root]
         run(cmd, log=f"{d}/configkeys.log", timeout=600)
@@ -93,7 +112,7 @@ class Workflow:
             log=f"{d}/stats.log", timeout=600)
         # The concrete config is an input, generated beforehand by the /concreteconfig skill (README.md, "Use with
         # /concreteconfig")
-        shutil.copy(self.a.config, f"{d}/config.yaml")
+        shutil.copy(self.a.config, f"{d}/{self.config_name()}")
         if self.config_files():
             shutil.copytree(self.config_files(), f"{d}/files")
 
@@ -103,16 +122,16 @@ class Workflow:
             return {os.path.relpath(os.path.join(dp, f), root): os.path.join(dp, f)
                     for dp, _, fs in os.walk(root) for f in fs} if root and os.path.isdir(root) else {}
         given, copied = tree(self.config_files()), tree(f"{d}/files")
-        if not filecmp.cmp(self.a.config, f"{d}/config.yaml", shallow=False) or given.keys() != copied.keys() or \
+        if not filecmp.cmp(self.a.config, f"{d}/{self.config_name()}", shallow=False) or given.keys() != copied.keys() or \
                 any(not filecmp.cmp(given[f], copied[f], shallow=False) for f in given):
             sys.exit(f"--config or its files differ from step 2's copies in {d}; to use them, rerun from step 2 "
                      f"(--redo 2)")
 
     def configkeys(self, d):
         graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
-        cmd = [self.configkeys_bin(), "--config", self.file("2-full-keys", "config.yaml"), "--txt-dir", d,
+        cmd = [self.configkeys_bin(), "--config", self.config_copy(), "--txt-dir", d,
                "--strings-only", "--unmarshaler-subgraph", graph, "--module-prefix", self.a.module,
-               "--format", self.a.format, "--output", f"{d}/configkeys.csv"]
+               "--format", self.a.format, "--output", f"{d}/configkeys.csv"] + self.untagged_keys("--")
         if self.a.root:
             cmd += ["--root", self.a.root]
         run(cmd, log=f"{d}/configkeys.log", timeout=600)
@@ -134,14 +153,14 @@ class Workflow:
 
     def chains(self, d):
         """Run 1: contexttrack records message chains; argmatch instruments nothing"""
-        self.testbed(d).run(d, self.file("2-full-keys", "config.yaml"), files=self.step_files())
+        self.testbed(d).run(d, self.config_copy(), files=self.step_files())
         run([sys.executable, f"{ARGMATCH_LABELS}/events_to_stacklog.py", f"{d}/events.jsonl"],
             log=f"{d}/stacklog.txt", timeout=300)
 
     def matches(self, d):
         """Run 2: argmatch instruments the functions in run 1's chains and searches for the values; contexttrack
         records the messages to label"""
-        self.testbed(d).run(d, self.file("2-full-keys", "config.yaml"), files=self.step_files(),
+        self.testbed(d).run(d, self.config_copy(), files=self.step_files(),
                            stacklog=self.file("3-chains", "stacklog.txt"),
                            matchfile=self.file("4-configkeys", "param_values.txt"))
         if os.path.getsize(f"{d}/matches.calls.csv") == 0:
@@ -157,12 +176,9 @@ class Workflow:
 
     def label_keys(self, d):
         """Message label => Full keys, with a confidence for each (README.md, "label_keys.csv")"""
-        graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
-        stats.MAP_FIELDS.update(stats.map_field_keys(graph))
-        custom = modules.load(self.a.module).CustomKeys(self.a.module_dir)
-        full, config, _ = stats.load_configkeys(self.file("4-configkeys", "configkeys.csv"), custom)
+        full, config = stats.load_configkeys(self.file("4-configkeys", "configkeys.csv"))
 
-        sections = {fk: sorted({stats.section(fk, p) for p in info["paths"]}) for fk, info in full.items()}
+        sections = {fk: sorted({stats.section(info, p) for p in info["paths"]}) for fk, info in full.items()}
         section_keys = collections.defaultdict(set)
         for fk, secs in sections.items():
             for s in secs:
@@ -308,9 +324,9 @@ def main():
     ap.add_argument("--config-files", help="Directory of files the concrete config refers to, which the testbed "
                                            "installs (default: a files/ directory next to --config, if any)")
     # The module's settings: each default is the module's (modules/<module>/module.py)
-    ap.add_argument("--module", default="prometheus",
+    ap.add_argument("--module", required=True,
                     help="The module: its Go module path (as in go.mod) or its modules/ directory name; known: "
-                         + ", ".join(modules.names()) + " (default %(default)s)")
+                         + ", ".join(modules.names()))
     ap.add_argument("--module-dir", help="Module source checkout")
     ap.add_argument("--root", help="configkeys --root (empty: all roots)")
     ap.add_argument("--format", help="Config format: yaml (go-yaml v2) or json (encoding/json)")

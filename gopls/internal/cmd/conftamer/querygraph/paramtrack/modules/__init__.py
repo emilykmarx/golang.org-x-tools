@@ -6,13 +6,17 @@ specific to that module, and whose module.py holds the settings and hooks the wo
 - GOLITS_PACKAGE, GOLITS_TAGS: what stats.py's golits loads (the package compiled into the module's binary, and its
   build tags)
 - TITLE: the module, for headings
-- CustomKeys(module_dir): resolves the `*`s that custom unmarshalers pick (TERMINOLOGY.md, "Full key"): .names (graph
-  type => the key it's under), .parents (the keys whose `*` it resolves), .full_key(pattern, nodes, ends_custom) (the
-  full key for a pattern and its path's nodes, or None for a catch-all path ending at a custom unmarshaler), .of(fk)
-  (the resolved key a full key is under, or None)
+- CustomKeys(module_dir): the keys custom unmarshalers pick (resolved in the graph by extra_graph's edges), for
+  stats.py's tables of them: .names (graph type => the key it's under), .parents (the keys they're under), .of(fk)
+  (the picked key a full key is under, or None)
 - docs_kind(type): the kind of Go value a documented type means (string, number, bool, map)
 - graph_docs_reason(key, in_graph): why a key is only in the graph (in_graph) or only in the docs
 - UNSET_REASONS: why the concreteconfig skill left target keys unset: (reason, fnmatch patterns)
+- UNTAGGED_KEYS (optional, default False): lift our exception for untagged fields (gopls conftamer -untagged-keys,
+  configkeys --untagged-keys; see ct.UntaggedAreKeys)
+- extra_graph(module_dir, out_path) (optional): write gopls conftamer's -extra file (roots and edges the source code
+  doesn't show: the keys a custom unmarshaler or run-time decoding picks, e.g. Prometheus' SD configs, Caddy's
+  modules); paramtrack's step 1 runs it into its directory
 """
 
 import glob

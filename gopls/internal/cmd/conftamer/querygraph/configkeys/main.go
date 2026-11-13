@@ -1,7 +1,7 @@
 package main
 
 // Map config keys to their paths through the Unmarshaler Subgraph: the keys in a config file (concrete keys), and all
-// keys the graph allows (patterns). Also writes the config file's values and keys for searching memory
+// keys the graph allows (full keys, with * for map keys). Also writes the config file's values and keys for searching memory
 // (param_values.txt, param_keys.txt). See README.md.
 
 import (
@@ -63,20 +63,22 @@ func readKeysCSV(keys_csv string) []string {
 	return slices.Compact(keys)
 }
 
-// One output row: a concrete key from the config, a pattern from the graph, or both (a pattern with no MAP_KEY)
+// One output row: a concrete key from the config, a full key from the graph, or both (a full key with no MAP_KEY)
 type row struct {
 	key       string
 	in_config bool
 	in_graph  bool
 	values    []string // config values, in document order
-	patterns  []string // for concrete keys: the patterns it instantiates via the same path
+	full_keys []string // for concrete keys: the full keys it instantiates via the same path
 	acc       *acc
 }
 
 // What a row's paths say about its key
 type summary struct {
-	full         bool     // has a full path (else paths are partial)
-	paths        []string // full paths, or if none, partial paths with " (matched: ...)"
+	full         bool     // has a full path
+	dynamic      bool     // no full path, but a path ending at a dynamic custom unmarshaler (see acc.dynamic)
+	paths        []string // full paths; or if none, dynamic paths; or if none, partial paths with " (matched: ...)"
+	sections     []string // for full paths: each one's section name (as paths, in order)
 	unmarshalers []string // last node of each path
 	section_keys []string // keys in the sections containing the key (full paths only)
 	kinds        []ct.ValueKind
@@ -86,13 +88,18 @@ func (a *acc) summarize() summary {
 	s := summary{full: len(a.full) > 0}
 	if s.full {
 		section, kinds := map[string]bool{}, map[ct.ValueKind]bool{}
-		for p, info := range a.full {
+		for _, p := range slices.Sorted(maps.Keys(a.full)) {
+			info := a.full[p]
 			s.paths = append(s.paths, p)
+			s.sections = append(s.sections, strings.Join(slices.Sorted(maps.Keys(info.section_names)), " & "))
 			maps.Copy(section, info.section)
 			maps.Copy(kinds, info.kinds)
 		}
 		s.section_keys = slices.Sorted(maps.Keys(section))
 		s.kinds = slices.Sorted(maps.Keys(kinds))
+	} else if len(a.dynamic) > 0 {
+		s.dynamic = true
+		s.paths = slices.Collect(maps.Keys(a.dynamic))
 	} else {
 		s.paths = slices.Collect(maps.Keys(a.partial))
 	}
@@ -140,13 +147,14 @@ func kindsString(kinds []ct.ValueKind) string {
 
 func main() {
 	var config, keys_csv, keys_txt, txt_dir, unmarshaler_subgraph, module_prefix, output, root, through, format_arg string
-	var enumerate, strings_only bool
+	var enumerate, strings_only, untagged_keys bool
+	flag.BoolVar(&untagged_keys, "untagged-keys", false, "Treat untagged exported fields as keys (lifts our exception: see ct.UntaggedAreKeys) - use the setting the graph was generated with (gopls conftamer -untagged-keys)")
 	flag.StringVar(&config, "config", "", "Config file: its keys are matched, and its values written to --txt-dir (optional)")
 	flag.StringVar(&keys_txt, "keys-txt", "", `Instead of --config: file with lines "<value>:<key>[,<key>...]", e.g. param_keys.txt (optional)`)
 	flag.StringVar(&keys_csv, "keys-csv", "", "Instead of --config: csv with a param_keys column (optional)")
 	flag.StringVar(&txt_dir, "txt-dir", "", "With --config: directory to write param_values.txt and param_keys.txt to (optional)")
 	flag.BoolVar(&strings_only, "strings-only", false, "With --txt-dir: only write values stored as strings, byte arrays/slices or structs (see keepString)")
-	flag.BoolVar(&enumerate, "enumerate", true, "Also output all keys the graph allows, as patterns (* for any one segment)")
+	flag.BoolVar(&enumerate, "enumerate", true, "Also output all keys the graph allows: the full keys (* for any one segment)")
 	flag.StringVar(&unmarshaler_subgraph, "unmarshaler-subgraph", "", "File containing serialized unmarshaler subgraph")
 	flag.StringVar(&module_prefix, "module-prefix", "", "module as in go.mod")
 	flag.StringVar(&output, "output", "", "Output csv")
@@ -165,6 +173,7 @@ func main() {
 		log.Fatalf("Missing mandatory argument, or invalid combination")
 	}
 
+	ct.UntaggedAreKeys = untagged_keys
 	format, err := ct.ParseFormat(format_arg)
 	if err != nil {
 		log.Fatalf("--format: %v", err)
@@ -192,7 +201,7 @@ func main() {
 	var keys []string
 	switch {
 	case config != "":
-		occs = readDocument(config, format)
+		occs = readDocument(config, format, f.inlineKeys())
 		for _, occ := range occs {
 			keys = append(keys, occ.key)
 		}
@@ -200,6 +209,22 @@ func main() {
 		keys = readKeysTxt(keys_txt)
 	case keys_csv != "":
 		keys = readKeysCSV(keys_csv)
+	}
+	// The graph's full keys (also for --enumerate, step 3)
+	var patterns map[string]*acc
+	if enumerate || format == ct.JSON {
+		patterns = f.enumerate(module_prefix)
+	}
+	// JSON: encoding/json matches keys to fields case-insensitively, so spell each key as the module does (e.g. a
+	// document's leaseId as the field's LeaseID), so it matches the full keys and the rest of the workflow
+	if format == ct.JSON {
+		canon := canonicalKeys(keys, patterns)
+		for i, key := range keys {
+			keys[i] = canon[key]
+		}
+		for i := range occs {
+			occs[i].key = canon[occs[i].key]
+		}
 	}
 	for _, key := range keys {
 		if _, ok := rows[key]; !ok {
@@ -223,12 +248,11 @@ func main() {
 		writeTxt(txt_dir, kept)
 	}
 
-	// 3. Patterns, linked to the concrete keys that instantiate them via the same path
+	// 3. Full keys, linked to the concrete keys that instantiate them via the same path
 	n_patterns, n_unlinked := 0, 0
 	if enumerate {
-		patterns := f.enumerate(module_prefix)
 		n_patterns = len(patterns)
-		by_path := map[string][]string{} // full path => patterns
+		by_path := map[string][]string{} // full path => full keys
 		for pattern, a := range patterns {
 			for p := range a.full {
 				by_path[p] = append(by_path[p], pattern)
@@ -246,62 +270,67 @@ func main() {
 			}
 			for p := range r.acc.full {
 				for _, pattern := range by_path[p] {
-					if instanceOf(r.key, pattern) && !slices.Contains(r.patterns, pattern) {
-						r.patterns = append(r.patterns, pattern)
+					if instanceOf(r.key, pattern) && !slices.Contains(r.full_keys, pattern) {
+						r.full_keys = append(r.full_keys, pattern)
 					}
 				}
 			}
-			slices.Sort(r.patterns)
-			if len(r.acc.full) > 0 && len(r.patterns) == 0 {
+			slices.Sort(r.full_keys)
+			if len(r.acc.full) > 0 && len(r.full_keys) == 0 {
 				n_unlinked++
-				log.Printf("Warning: config key %v has a full path, but no pattern via the same path", r.key)
+				log.Printf("Warning: config key %v has a full path, but no full key via the same path", r.key)
 			}
 		}
 	}
 
 	// 4. Output
-	// Groups: 0 = no full path, 1 = multiple unmarshalers, 2 = one unmarshaler
-	groups := make([][]*row, 3)
-	n_config := [3]int{}
+	// Groups: 0 = no path, 1 = under a dynamic custom unmarshaler, 2 = multiple unmarshalers, 3 = one unmarshaler
+	groups := make([][]*row, 4)
+	n_config := [4]int{}
 	for _, key := range slices.Sorted(maps.Keys(rows)) {
 		r := rows[key]
 		if through != "" && !r.acc.filterThrough(through) {
 			continue
 		}
 		s := r.acc.summarize()
-		group := 2
+		group := 3
 		switch {
+		case s.dynamic:
+			group = 1
 		case !s.full:
 			group = 0
 		case len(s.unmarshalers) > 1:
-			group = 1
+			group = 2
 		}
 		groups[group] = append(groups[group], r)
 		if r.in_config {
 			n_config[group]++
 		}
 	}
-	fmt.Printf("config keys: %v (no path: %v, multiple unmarshalers: %v, one unmarshaler: %v)\n",
-		n_config[0]+n_config[1]+n_config[2], n_config[0], n_config[1], n_config[2])
+	fmt.Printf("config keys: %v (no path: %v, under a dynamic custom unmarshaler: %v, multiple unmarshalers: %v, one "+
+		"unmarshaler: %v)\n", n_config[0]+n_config[1]+n_config[2]+n_config[3], n_config[0], n_config[1], n_config[2],
+		n_config[3])
 	if enumerate {
-		fmt.Printf("graph patterns: %v; config keys with a full path but no pattern: %v\n", n_patterns, n_unlinked)
+		fmt.Printf("graph full keys: %v; config keys with a full path but no full key: %v\n", n_patterns, n_unlinked)
 	}
 
 	fd, err := os.Create(output)
 	ct.CheckErr(err)
 	defer fd.Close()
 	w := csv.NewWriter(fd)
-	ct.CheckErr(w.Write([]string{"param_key", "source", "pattern", "values", "value kind",
-		"Unmarshaler", "Num Unmarshalers", "Unmarshaler Path", "section keys"}))
+	// A row is a full key from the graph (concrete key empty), a concrete key from the config with the full key(s) it
+	// instantiates (empty if none), or both at once (a full key with no MAP_KEY that the config sets as it is)
+	ct.CheckErr(w.Write([]string{"full key", "concrete key", "values", "value kind",
+		"Unmarshaler", "Num Unmarshalers", "Unmarshaler Path", "section", "section keys"}))
 	for _, group := range groups {
 		for _, r := range group {
 			s := r.acc.summarize()
-			source := "config"
+			full_key, concrete_key := strings.Join(r.full_keys, "; "), ""
 			if r.in_graph {
-				source = "graph"
-				if r.in_config {
-					source = "both"
-				}
+				full_key = r.key
+			}
+			if r.in_config {
+				concrete_key = r.key
 			}
 			values := ""
 			if len(r.values) > 0 {
@@ -309,14 +338,14 @@ func main() {
 				ct.CheckErr(err)
 				values = string(b)
 			}
-			// Unmarshalers of partial paths don't count
+			// Unmarshalers of dynamic and partial paths don't count
 			num_unmarshalers := 0
 			if s.full {
 				num_unmarshalers = len(s.unmarshalers)
 			}
-			ct.CheckErr(w.Write([]string{r.key, source, strings.Join(r.patterns, "; "), values, kindsString(s.kinds),
+			ct.CheckErr(w.Write([]string{full_key, concrete_key, values, kindsString(s.kinds),
 				strings.Join(s.unmarshalers, "; "), strconv.Itoa(num_unmarshalers), strings.Join(s.paths, "; "),
-				strings.Join(s.section_keys, "; ")}))
+				strings.Join(s.sections, "; "), strings.Join(s.section_keys, "; ")}))
 		}
 	}
 	w.Flush()

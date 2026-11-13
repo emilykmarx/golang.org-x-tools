@@ -25,46 +25,83 @@ type finder struct {
 	adj    map[ct.CTypeHash][]outEdge
 	roots  []ct.CTypeHash
 	format ct.Format
+	// Per node, from its extra edges (gopls conftamer's -extra, e.g. Caddy's modules, Prometheus' SD configs): the
+	// keys of the fields that hold modules (their keys come only from the extra edges), and the selector keys (see
+	// ct.KeySegment.Selector)
+	module_fields map[ct.CTypeHash]map[string]bool
+	selectors     map[ct.CTypeHash][]string
+	// Keys (relative to the node) of modules whose type is scalar-like (e.g. Caddy's match.host, caddyhttp.MatchHost, a
+	// []string) => the kind of their values: keys of the node's section, like its scalar fields
+	scalar_modules map[ct.CTypeHash]map[string]ct.ValueKind
+	// Likewise for modules whose type is a leaf map (see leafMap; e.g. Caddy's match.header, caddyhttp.MatchHeader):
+	// their map keys (<key>.*) are keys of the node's section, as a map field's are
+	map_modules map[ct.CTypeHash]map[string]ct.ValueKind
 
-	acc *acc // results for the key being matched
+	acc           *acc   // results for the key being matched
+	module_prefix string // cut from node names (set by find and enumerate)
 }
 
-// Accumulated paths for one key (concrete or pattern)
+// Accumulated paths for one key (concrete, or a full key from the graph)
 type acc struct {
-	full    map[string]*pathInfo // path string => info
-	n_full  int                  // number of times a full path was recorded (including duplicates)
-	partial map[string]bool      // path string (with matched suffix) => true
+	full map[string]*pathInfo // path string => info
+	// Number of times a full or dynamic path was recorded (including duplicates): whether a search below found
+	// anything
+	n_full int
+	// Paths (with customSuffix) ending at a dynamic custom unmarshaler, which decides the keys below it: not full
+	// paths (the key isn't a full key), but more than a partial path says
+	dynamic map[string]bool
+	partial map[string]bool // path string (with matched suffix) => true
 }
 
 // What a full path says about its key
 type pathInfo struct {
-	section map[string]bool       // keys in the section containing the key
-	kinds   map[ct.ValueKind]bool // kind of the Go value the key's values are stored as ("" if unknown)
+	section       map[string]bool       // keys in the section containing the key
+	section_names map[string]bool       // the section's name, <key prefix> @ <node> (one, normally)
+	kinds         map[ct.ValueKind]bool // kind of the Go value the key's values are stored as ("" if unknown)
+}
+
+// A section (TERMINOLOGY.md): its name, <key prefix> @ <node> (the node holding the keys, with the module prefix
+// cut, and the key that leads to it), and its keys
+type section struct {
+	name string
+	keys []string
 }
 
 func newAcc() *acc {
-	return &acc{full: map[string]*pathInfo{}, partial: map[string]bool{}}
+	return &acc{full: map[string]*pathInfo{}, dynamic: map[string]bool{}, partial: map[string]bool{}}
 }
 
-func (a *acc) recordFull(path_str string, section_keys []string, kind ct.ValueKind) {
+// A path ending at a dynamic custom unmarshaler (see acc.dynamic)
+func (a *acc) recordDynamic(path_str string) {
+	a.dynamic[path_str] = true
+	a.n_full++
+}
+
+func (a *acc) recordFull(path_str string, sec section, kind ct.ValueKind) {
 	info, ok := a.full[path_str]
 	if !ok {
-		info = &pathInfo{section: map[string]bool{}, kinds: map[ct.ValueKind]bool{}}
+		info = &pathInfo{section: map[string]bool{}, section_names: map[string]bool{}, kinds: map[ct.ValueKind]bool{}}
 		a.full[path_str] = info
 	}
 	a.n_full++
-	for _, k := range section_keys {
+	for _, k := range sec.keys {
 		info.section[k] = true
 	}
+	info.section_names[sec.name] = true
 	info.kinds[kind] = true
 }
 
 // Add b's paths to a
 func (a *acc) merge(b *acc) {
 	for path_str, info := range b.full {
-		for k := range info.kinds {
-			a.recordFull(path_str, slices.Collect(maps.Keys(info.section)), k)
+		for name := range info.section_names {
+			for k := range info.kinds {
+				a.recordFull(path_str, section{name: name, keys: slices.Collect(maps.Keys(info.section))}, k)
+			}
 		}
+	}
+	for p := range b.dynamic {
+		a.dynamic[p] = true
 	}
 	for p := range b.partial {
 		a.partial[p] = true
@@ -128,8 +165,8 @@ func (f *finder) sectionFields(node ct.CTypeHash, prefix string) []sectionField 
 
 	fields := []sectionField{}
 	add := func(edge_key string, key string, field string) {
-		if other_edge[edge_key] {
-			return
+		if other_edge[edge_key] || f.module_fields[node][edge_key] {
+			return // (a module field's keys come from its extra edges)
 		}
 		sf := sectionField{key: key, kind: ct.NodeFieldKind(n, field), scalar_edge: scalar_edge[edge_key]}
 		if kind, ok := map_edge[edge_key]; ok {
@@ -155,26 +192,44 @@ func (f *finder) sectionFields(node ct.CTypeHash, prefix string) []sectionField 
 			add(field_key.Key, ct.JoinKey(prefix, field_key.Key), field)
 		}
 	}
+	// Selectors: keys whose value picks a module (e.g. a route's handle.handler), so strings
+	for _, sel := range f.selectors[node] {
+		fields = append(fields, sectionField{key: ct.JoinKey(prefix, sel), kind: ct.KindString})
+	}
+	// Modules whose type is scalar-like: keys here, as scalar fields are
+	for _, k := range slices.Sorted(maps.Keys(f.scalar_modules[node])) {
+		fields = append(fields, sectionField{key: ct.JoinKey(prefix, k), kind: f.scalar_modules[node][k], scalar_edge: true})
+	}
+	// Modules whose type is a leaf map: their map keys are keys here (emitted at the map's node, via the edge)
+	for _, k := range slices.Sorted(maps.Keys(f.map_modules[node])) {
+		fields = append(fields, sectionField{key: ct.JoinKey(prefix, k, MAP_KEY), kind: f.map_modules[node][k], map_node: true})
+	}
 	return fields
 }
 
-// Keys in the section of `node` at `prefix` (see sectionFields), plus `key` (already matched by the path)
-func (f *finder) sectionKeys(node ct.CTypeHash, prefix string, key string) []string {
+// The section of `node` at `prefix`: its keys (see sectionFields), plus `key` (already matched by the path)
+func (f *finder) sectionKeys(node ct.CTypeHash, prefix string, key string) section {
 	keys := []string{key}
 	for _, field := range f.sectionFields(node, prefix) {
 		keys = append(keys, field.key)
 	}
 	slices.Sort(keys)
-	return slices.Compact(keys)
+	return section{name: f.sectionName(node, prefix), keys: slices.Compact(keys)}
+}
+
+func (f *finder) sectionName(node ct.CTypeHash, prefix string) string {
+	short, _ := strings.CutPrefix(string(node), f.module_prefix)
+	return prefix + " @ " + short
 }
 
 // Section containing `key`, when the last edge followed consumed the rest of it, or ended at a leaf map node whose
 // map key is the rest of it: the section of the edge's source (the struct holding the field, or the map field).
-// If no edge consumed part of the key, just the key's `<prefix>.*`.
-func (f *finder) consumedSection(last lastConsume, key string) []string {
+// If no edge consumed part of the key, just the key's `<prefix>.*`, named for `node`, where the key ends.
+func (f *finder) consumedSection(last lastConsume, key string, node ct.CTypeHash) section {
 	if last.src == "" {
 		parts := strings.Split(key, ".")
-		return []string{ct.JoinKey(ct.JoinKey(parts[:len(parts)-1]...), MAP_KEY)}
+		prefix := ct.JoinKey(parts[:len(parts)-1]...)
+		return section{name: f.sectionName(node, prefix), keys: []string{ct.JoinKey(prefix, MAP_KEY)}}
 	}
 	return f.sectionKeys(last.src, last.prefix, key)
 }
@@ -184,7 +239,7 @@ func (f *finder) fieldKey(n ct.CTypeNode, field string, embedded bool) ct.FieldK
 	return ct.NodeFieldKey(n, field, embedded, f.format)
 }
 
-// Appended to paths ending at a node because of its custom unmarshaler (stats.py's CUSTOM_SUFFIXES)
+// Appended to paths ending at a node because of its dynamic custom unmarshaler (acc.dynamic)
 func (f *finder) customSuffix() string {
 	if f.format == ct.JSON {
 		return " (custom UnmarshalJSON)"
@@ -227,7 +282,95 @@ func newFinder(g ct.CTypeGraph, format ct.Format) *finder {
 		slices.SortFunc(adj[src], func(a, b outEdge) int { return strings.Compare(string(a.target), string(b.target)) })
 	}
 	f.adj, f.roots = adj, roots
+	f.useExtraEdges()
 	return f
+}
+
+// For nodes with extra edges: record their module fields and selectors, and drop the module fields' other edges
+// (e.g. Caddy's ModuleMap fields' edges to caddy.ModuleMap, a map of json.RawMessage, which would give `apps.*`):
+// a module field's keys are the modules its extra edges name
+func (f *finder) useExtraEdges() {
+	f.module_fields, f.selectors = map[ct.CTypeHash]map[string]bool{}, map[ct.CTypeHash][]string{}
+	f.scalar_modules, f.map_modules = map[ct.CTypeHash]map[string]ct.ValueKind{}, map[ct.CTypeHash]map[string]ct.ValueKind{}
+	for src, outs := range f.adj {
+		go_fields := map[string]bool{} // Go names of the module fields
+		for _, e := range outs {
+			for _, seg := range e.segments {
+				if !seg.Extra {
+					continue
+				}
+				if f.module_fields[src] == nil {
+					f.module_fields[src] = map[string]bool{}
+				}
+				f.module_fields[src][seg.Field] = true
+				go_fields[seg.GoField] = true
+
+				if seg.Selector != "" && !slices.Contains(f.selectors[src], seg.Selector) {
+					f.selectors[src] = append(f.selectors[src], seg.Selector)
+				}
+			}
+		}
+		slices.Sort(f.selectors[src])
+		if f.module_fields[src] == nil {
+			continue
+		}
+		kept := []outEdge{}
+		for _, e := range outs {
+			e.segments = slices.DeleteFunc(slices.Clone(e.segments), func(seg segment) bool {
+				return !seg.Extra && seg.GoField != "" && go_fields[seg.GoField]
+			})
+			if len(e.segments) > 0 {
+				kept = append(kept, e)
+			}
+		}
+		f.adj[src] = kept
+	}
+	// Modules whose type is scalar-like or a leaf map (once every node's module fields are known: a map whose keys come
+	// from extra edges, e.g. Caddy's MatchNot, isn't a leaf map here)
+	for src, outs := range f.adj {
+		for _, e := range outs {
+			target, err := f.g.Vertex(e.target)
+			ct.CheckErr(err)
+			for _, seg := range e.segments {
+				if !seg.Extra {
+					continue
+				}
+				switch {
+				case target.ScalarLike:
+					if f.scalar_modules[src] == nil {
+						f.scalar_modules[src] = map[string]ct.ValueKind{}
+					}
+					f.scalar_modules[src][seg.Pattern] = target.Kind
+				case f.leafMap(e.target) && f.noModules(e.target):
+					if f.map_modules[src] == nil {
+						f.map_modules[src] = map[string]ct.ValueKind{}
+					}
+					f.map_modules[src][seg.Pattern] = target.Kind
+				}
+			}
+		}
+	}
+}
+
+// Field key => the inline keys of its objects (from the selectors: e.g. handle.handler => handle: [handler]), for
+// reading JSON documents (see readDocument)
+func (f *finder) inlineKeys() map[string][]string {
+	keys := map[string][]string{}
+	for _, sels := range f.selectors {
+		for _, sel := range sels {
+			parts := strings.Split(sel, ".")
+			field, k := parts[len(parts)-2], parts[len(parts)-1]
+			if !slices.Contains(keys[field], k) {
+				keys[field] = append(keys[field], k)
+			}
+		}
+	}
+	return keys
+}
+
+// Whether node has no module fields (keys from extra edges)
+func (f *finder) noModules(node ct.CTypeHash) bool {
+	return len(f.module_fields[node]) == 0
 }
 
 func (f *finder) pathString(path []ct.CTypeHash, module_prefix string) string {
@@ -249,7 +392,7 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 	ct.CheckErr(err)
 	if remaining == "" {
 		// An edge consumed the rest: the key is in the section of the edge's source (or in a map, if it ended with a map key)
-		f.acc.recordFull(f.pathString(path, module_prefix), f.consumedSection(last, key), n.Kind)
+		f.acc.recordFull(f.pathString(path, module_prefix), f.consumedSection(last, key, node), n.Kind)
 		return
 	}
 	n_full_before := f.acc.n_full
@@ -264,10 +407,19 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 		return
 	}
 	for _, field := range ct.KeyFieldNames(n) {
-		if field_key := f.fieldKey(n, field, false); field_key.IsKey() && !field_key.Inline && field_key.Key == remaining {
+		if field_key := f.fieldKey(n, field, false); field_key.IsKey() && !field_key.Inline && field_key.Key == remaining &&
+			!f.module_fields[node][remaining] {
 			f.acc.recordFull(f.pathString(path, module_prefix), f.sectionKeys(node, prefix, key), ct.NodeFieldKind(n, field))
 			return
 		}
+	}
+	if slices.Contains(f.selectors[node], remaining) {
+		f.acc.recordFull(f.pathString(path, module_prefix), f.sectionKeys(node, prefix, key), ct.KindString)
+		return
+	}
+	if kind, ok := f.scalar_modules[node][remaining]; ok {
+		f.acc.recordFull(f.pathString(path, module_prefix), f.sectionKeys(node, prefix, key), kind)
+		return
 	}
 
 	matched := false
@@ -309,13 +461,13 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 	// No field or key-consuming edge matched => remaining key may be a map key of a map whose value type isn't a CType
 	// (so no edge with MapType.Value): a map node + one segment, or a map field's key + one segment
 	if !consumed {
-		if map_section, kind, ok := f.mapKeyMatch(n, remaining); ok {
+		if map_section, kind, ok := f.mapKeyMatch(node, n, remaining); ok {
 			// A map's values are in the section of the struct holding the map, as for the struct's other fields:
 			// this node's, for a map field or inline map, or for a map that's its own node, the node holding the
 			// field that led here (as in enumerate)
 			section := f.sectionKeys(node, prefix, key)
 			if n.IsMap && map_section == MAP_KEY {
-				section = f.consumedSection(last, key)
+				section = f.consumedSection(last, key, node)
 			}
 			f.acc.recordFull(f.pathString(path, module_prefix), section, kind)
 			return
@@ -344,8 +496,8 @@ func (f *finder) dfs(node ct.CTypeHash, key, remaining string, path []ct.CTypeHa
 	// we don't know how its keys map to types, so attribute the rest of the key to it.
 	// (Other custom unmarshalers are classified: see ct.ClassifyUnmarshaler.)
 	if f.acc.n_full == n_full_before && n.DynamicUnmarshaler() && n.Tags == nil && !via_inline && remaining != key {
-		// The custom unmarshaler decides the section's keys (and the kind of the values)
-		f.acc.recordFull(f.pathString(path, module_prefix)+f.customSuffix(), []string{ct.JoinKey(prefix, MAP_KEY)}, "")
+		// The custom unmarshaler decides the keys below (and the kind of the values): not a full key
+		f.acc.recordDynamic(f.pathString(path, module_prefix) + f.customSuffix())
 		return
 	}
 
@@ -367,11 +519,12 @@ func (f *finder) recordPartial(path []ct.CTypeHash, key, remaining string, modul
 // Whether `remaining` is a map key of the node (if a map), or a map field's key followed by a map key.
 // If so, also return the map's key pattern relative to the node (MAP_KEY, or <field key>.MAP_KEY),
 // and the kind of the map's values.
-func (f *finder) mapKeyMatch(n ct.CTypeNode, remaining string) (string, ct.ValueKind, bool) {
+func (f *finder) mapKeyMatch(node ct.CTypeHash, n ct.CTypeNode, remaining string) (string, ct.ValueKind, bool) {
 	field_key, map_key, found := strings.Cut(remaining, ".")
 	if !found {
-		// One segment: map key of the node itself, or of an inline map field
-		if n.IsMap {
+		// One segment: map key of the node itself (unless its keys come from extra edges: see enumerate), or of an
+		// inline map field
+		if n.IsMap && f.noModules(node) {
 			return MAP_KEY, n.Kind, true
 		}
 		for _, field := range ct.KeyFieldNames(n) {
@@ -385,7 +538,8 @@ func (f *finder) mapKeyMatch(n ct.CTypeNode, remaining string) (string, ct.Value
 		return "", "", false
 	}
 	for _, field := range ct.KeyFieldNames(n) {
-		if k := f.fieldKey(n, field, false); ct.NodeRawField(n, field).IsMap && k.IsKey() && !k.Inline && k.Key == field_key {
+		if k := f.fieldKey(n, field, false); ct.NodeRawField(n, field).IsMap && k.IsKey() && !k.Inline && k.Key == field_key &&
+			!f.module_fields[node][field_key] {
 			return ct.JoinKey(field_key, MAP_KEY), ct.NodeFieldKind(n, field), true
 		}
 	}
@@ -417,7 +571,7 @@ func matchSegment(seg, remaining string) (string, bool) {
 
 // Paths for a concrete config key, from all roots (full paths, or if none, the longest partial paths)
 func (f *finder) find(key, module_prefix string) *acc {
-	f.acc = newAcc()
+	f.acc, f.module_prefix = newAcc(), module_prefix
 	for _, root := range f.roots {
 		f.dfs(root, key, key, []ct.CTypeHash{root}, 1, false, lastConsume{}, map[ct.CTypeHash]bool{root: true}, module_prefix)
 	}

@@ -37,9 +37,25 @@ d: *base
 		if err := os.WriteFile(path, []byte(test.doc), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if got := readDocument(path, test.format); !slices.Equal(got, test.want) {
+		if got := readDocument(path, test.format, nil); !slices.Equal(got, test.want) {
 			t.Errorf("%v:\ngot  %v\nwant %v", test.format, got, test.want)
 		}
+	}
+}
+
+// JSON objects whose field takes an inline key: their other keys get a <inline key>=<value> segment
+func TestReadDocumentInlineKeys(t *testing.T) {
+	doc := `{"handle": [{"upstreams": [{"dial": "a:1"}], "handler": "reverse_proxy"}, {"handler": "rewrite", "uri": "/x"}],
+		"other": {"handler": "not inline here", "v": "y"}}`
+	want := []occurrence{{"a:1", "handle.handler=reverse_proxy.upstreams.dial", true},
+		{"reverse_proxy", "handle.handler", true}, {"rewrite", "handle.handler", true},
+		{"/x", "handle.handler=rewrite.uri", true}, {"not inline here", "other.handler", true}, {"y", "other.v", true}}
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readDocument(path, ct.JSON, map[string][]string{"handle": {"handler"}}); !slices.Equal(got, want) {
+		t.Errorf("got  %v\nwant %v", got, want)
 	}
 }
 
@@ -56,6 +72,24 @@ func TestInstanceOf(t *testing.T) {
 	} {
 		if got := instanceOf(test.key, test.pattern); got != test.want {
 			t.Errorf("instanceOf(%q, %q) = %v, want %v", test.key, test.pattern, got, test.want)
+		}
+	}
+}
+
+// JSON keys spelled as the module does (encoding/json matches them case-insensitively)
+func TestCanonicalKeys(t *testing.T) {
+	patterns := map[string]*acc{"storage.module=secret_store.LeaseID": nil, "apps.*.Listen": nil, "a.b": nil, "a.B": nil}
+	got := canonicalKeys([]string{"storage.module=secret_store.leaseId", "apps.myServer.listen", "a.b", "x.y", "A.b"}, patterns)
+	want := map[string]string{
+		"storage.module=secret_store.leaseId": "storage.module=secret_store.LeaseID", // case-folded match
+		"apps.myServer.listen":                "apps.myServer.Listen",                // map key keeps its spelling
+		"a.b":                                 "a.b",                                 // exact match wins
+		"x.y":                                 "x.y",                                 // no pattern
+		"A.b":                                 "A.b",                                 // two spellings (a.b, a.B): unchanged
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%v: got %v, want %v", k, got[k], v)
 		}
 	}
 }

@@ -5,6 +5,7 @@ candidate and must match it: score.py and check_labels.py. paramtrack records it
 
 import json
 import os
+import shutil
 import sys
 
 # paramtrack's modules (moved: old runs' paths to the ignore and transformed-keys files)
@@ -24,10 +25,25 @@ def _load(path, what):
     return json.load(open(path))
 
 
+def copy_graph(baseline, out):
+    """Copy the baseline's step 1 (its graph, and the module's extra graph edges if any) to run out"""
+    os.makedirs(f"{out}/1-unmarshaler-graph", exist_ok=True)
+    shutil.copy(graph(baseline), f"{out}/1-unmarshaler-graph/")
+    extra = f"{baseline}/1-unmarshaler-graph/extra.json"
+    if os.path.exists(extra):
+        shutil.copy(extra, f"{out}/1-unmarshaler-graph/")
+
+
 def graph(baseline):
     path = f"{baseline}/1-unmarshaler-graph/unmarshaler_subgraph.text"
     if not os.path.exists(path):
         raise MissingInput(f"no {path}: the baseline run must be paramtrack through step 3 (3-chains)")
+    # Since 2026-11-12 the graph resolves the keys custom unmarshalers pick (the module's extra_graph: e.g.
+    # Prometheus' <name>_sd_configs); a graph from before has `*` there, which would now pass for full keys
+    mod = modules.load(settings(baseline)["module"])
+    if hasattr(mod, "extra_graph") and not os.path.exists(f"{baseline}/1-unmarshaler-graph/extra.json"):
+        raise MissingInput(f"{path} predates the module's extra graph edges (no extra.json next to it): redo the "
+                           f"baseline's step 1 (paramtrack --redo 1 --until 3), or the whole baseline")
     return path
 
 
