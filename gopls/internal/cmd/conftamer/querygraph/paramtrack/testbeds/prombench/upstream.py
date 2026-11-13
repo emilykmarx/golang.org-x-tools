@@ -171,6 +171,9 @@ def deploy(variant, image, log_dir):
             # kube-proxy and promtail crash-loop with the default 128 (vm_setup.sh makes it permanent)
             run(["sudo", "sysctl", "fs.inotify.max_user_instances=512"], timeout=60)
     os.makedirs(ARGMATCH_OUT, exist_ok=True)  # must exist before the cluster is created
+    # Writable by any user: Caddy's ingress controller runs as root but drops every capability (so it can't write to
+    # a directory it doesn't own)
+    os.chmod(ARGMATCH_OUT, 0o777)
     prepare(v)
     if cluster_exists():
         say(f"deleting the kind cluster {CLUSTER}")

@@ -172,11 +172,18 @@ def go_string_literals(module_dir, mod):
     return {json.loads(line).replace("\n", "\\n") for line in out.splitlines()}
 
 
-def read_docs(path):
-    """Documented keys => type, with map keys as `<key>.*` and the docs' <placeholder> segments as `*`"""
+def read_docs(path, mod=None):
+    """Documented keys => type, with map keys as `<key>.*` and the docs' <placeholder> segments as `*`. The module's
+    optional docs_entry(key, type) hook normalizes its docs' lines first: it returns the (key, type) to use, with
+    type "map" for maps, or None for a line that isn't a key."""
     docs = {}
     for line in open(path):
         key, _, typ = line.rstrip("\n").partition("\t")
+        if mod is not None and hasattr(mod, "docs_entry"):
+            entry = mod.docs_entry(key, typ)
+            if entry is None:
+                continue
+            key, typ = entry
         key = ".".join(STAR if s.startswith("<") else s for s in segs(key))
         if typ == "map":
             key += "." + STAR
@@ -353,7 +360,7 @@ def write_visuals(fkdf, fkdf_all, config, covered_by, searched, matched, custom,
     under = keys.assign(sd_key=keys.key.map(custom.of))
     sd_df = pd.DataFrame([{"node": n, "sd_key": k, "keys": int((under.sd_key == k).sum()),
                            "keys_matched": int(under[under.sd_key == k].matched.sum())} for n, k in sorted(custom.names.items())
-                          if n in set(nodes.node)])
+                          if n in set(nodes.node)], columns=["node", "sd_key", "keys", "keys_matched"])
     sd_df["left_out"] = sd_df["keys"] == 0
     sd_df.to_csv(f"{args.out}/sd_configs.csv", index=False)
     node_rows(fkdf, args.graph).to_csv(f"{args.out}/node_coverage_keyed.csv", index=False)
@@ -657,7 +664,7 @@ def main():
     ignore = read_patterns(args.ignore)
     transformed = read_patterns(args.transformed)
     n_ignored, n_dropped = apply_ignore(full, config, ignore)
-    docs_all = read_docs(args.docs)
+    docs_all = read_docs(args.docs, mod)
     docs = {k: t for k, t in docs_all.items() if not matches_any(k, ignore)}
 
     # Per full key: section, top-level section, coverage by the config
@@ -698,7 +705,8 @@ def main():
     # =============================================================================================================
     out.h("Inputs")
     out.p(f"- Full keys (the graph's extra edges resolve the keys custom unmarshalers pick): {len(full)}")
-    out.p(f"- SD config types found (Name()): {len(set(custom.names.values()))}")
+    if custom.names:  # (modules whose CustomKeys has no SD-like tables, e.g. Caddy, leave them out)
+        out.p(f"- SD config types found (Name()): {len(set(custom.names.values()))}")
     if args.ignore:
         out.p(f"- Ignored (--ignore {args.ignore}): {n_ignored} full keys; {n_dropped} concrete keys left with no "
               f"full key dropped")
@@ -754,11 +762,12 @@ def main():
             prefix = f"{parent_key}.{name}."
             ks = keys[keys.key.str.startswith(prefix)]
             sd_rows.append({"parent": parent_key, "sd": name, "full_keys": len(ks), "in_config": ks.in_config.sum()})
-    sddf = pd.DataFrame(sd_rows)
-    used = sddf[sddf.in_config > 0]
-    out.p(f"- Service discovery configs used by the config: {len(used)} of {len(sddf)} (parent, SD) pairs: "
-          + ", ".join(f"{r.parent}.{r.sd} ({r.in_config}/{r.full_keys})" for r in used.itertuples()))
-    out.p(f"  - Their keys are {pct(sddf.full_keys.sum(), len(keys))} of all full keys")
+    if sd_rows:
+        sddf = pd.DataFrame(sd_rows)
+        used = sddf[sddf.in_config > 0]
+        out.p(f"- Service discovery configs used by the config: {len(used)} of {len(sddf)} (parent, SD) pairs: "
+              + ", ".join(f"{r.parent}.{r.sd} ({r.in_config}/{r.full_keys})" for r in used.itertuples()))
+        out.p(f"  - Their keys are {pct(sddf.full_keys.sum(), len(keys))} of all full keys")
 
     # Summary
     s_ = fkdf.groupby("section").in_config.any()
@@ -898,7 +907,7 @@ def main():
     out.p("Values whose keys have different fields and types (searched):")
     out.table(vals[vals.searched & (vals.similarity == "different fields and types")]
               .sort_values("keys", ascending=False)[["value", "keys", "key_list"]].head(25))
-    out.p(f"- Searched values that also appear as a string literal in the code compiled into Prometheus (golits/) "
+    out.p(f"- Searched values that also appear as a string literal in the code compiled into the module's binary (golits/) "
           f"(so a match may not come from the config): {pct(vals[vals.searched].go_literal.sum(), vals.searched.sum())}"
           + ": " + ", ".join(f"`{v}`" for v in sorted(vals[vals.searched & vals.go_literal].value)))
     def signal(r):

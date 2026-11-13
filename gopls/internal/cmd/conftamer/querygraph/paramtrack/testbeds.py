@@ -7,6 +7,7 @@ Also run on the VM by PrombenchVM: testbeds.py prombench|prombench-caddy --out D
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import shlex
@@ -366,32 +367,39 @@ class PrombenchCaddy(CaddyIngressImage):
         subprocess.run(cmd, capture_output=True, timeout=360)
         self.k("set", "env", self.DEPLOY, "CONFTAMER_EVENTS=/argmatch-out/events.jsonl")
         run(["sudo", "rm", "-f"] + [f"{self.OUTDIR}/{f}" for f in OUTPUTS], timeout=60)
+        # The controller runs as root but drops every capability, so it can only write to a directory any user can
+        run(["sudo", "chmod", "777", self.OUTDIR], timeout=60)
         self.k("scale", self.DEPLOY, "--replicas=1")
         self.k("rollout", "status", self.DEPLOY, "--timeout=600s", timeout=660)
         say("controller restarted")
 
+    def copy_in(self, path, dest):
+        """Copies a local file into the controller's container (kubectl cp: `kubectl exec -i ... cat > file` sometimes
+        truncates stdin at 32 or 64 KiB), and checks its md5 there"""
+        pod = self.k("get", "pod", "-l", self.LABEL, "-o", "jsonpath={.items[0].metadata.name}").strip()
+        self.k("cp", path, f"{pod}:{dest}", timeout=300)
+        want = hashlib.md5(open(path, "rb").read()).hexdigest()
+        p = self.exec("md5sum", dest)
+        if p.returncode != 0 or p.stdout.split()[:1] != [want]:
+            raise RuntimeError(f"copying {path} into the controller failed: md5 {p.stdout.strip()} {p.stderr[-300:]}, "
+                               f"want {want}")
+
     def install(self, config, files):
         """Copies the config and its files into the controller's container"""
         self.exec("mkdir", "-p", self.CONFIG_DIR)
-        for name, path in [(f"{self.CONFIG_DIR}/{n}", f"{files}/{n}") for n in sorted(os.listdir(files))] \
-                if files else []:
-            with open(path, "rb") as f:
-                p = self.exec("sh", "-c", f"cat > {shlex.quote(name)}", stdin=f)
-            if p.returncode != 0:
-                raise RuntimeError(f"copying {path} into the controller failed: {p.stderr[-500:]}")
-        with open(config, "rb") as f:
-            p = self.exec("sh", "-c", f"cat > {self.CONFIG_IN_POD}", stdin=f)
-        if p.returncode != 0:
-            raise RuntimeError(f"copying the config into the controller failed: {p.stderr[-500:]}")
+        for n in sorted(os.listdir(files)) if files else []:
+            self.copy_in(f"{files}/{n}", f"{self.CONFIG_DIR}/{n}")
+        self.copy_in(config, self.CONFIG_IN_POD)
 
     @staticmethod
     def admin_address(cfg):
-        """Where the admin API listens, per a Caddy config (default localhost:2019)"""
-        listen = (cfg.get("admin") or {}).get("listen") or "localhost:2019"
+        """Where the admin API listens, per a Caddy config (default localhost:2019, which is 127.0.0.1's)"""
+        listen = (cfg.get("admin") or {}).get("listen") or "127.0.0.1:2019"
         if listen.startswith("unix/"):
             raise RuntimeError(f"the config's admin API listens on a unix socket ({listen}), which the testbed can't "
                                "reach with wget")
-        return listen.removeprefix("tcp/")
+        # (busybox wget tries localhost's ::1 first; Caddy's default listens on 127.0.0.1 only)
+        return listen.removeprefix("tcp/").replace("localhost:", "127.0.0.1:")
 
     def running_config(self, admin):
         p = self.exec("wget", "-qO-", f"http://{admin}/config/")
@@ -401,7 +409,8 @@ class PrombenchCaddy(CaddyIngressImage):
         """POSTs the config in the container to the admin API's /load; returns (ok, response)"""
         p = self.exec("wget", "-qO-", "-S", "--header", "Content-Type: application/json",
                       *(["--header", "Cache-Control: must-revalidate"] if force else []),
-                      f"--post-file={self.CONFIG_IN_POD}", f"http://{admin}/load", timeout=300)
+                      f"--post-file={self.CONFIG_IN_POD}", f"http://{admin}/load",
+                      timeout=1200)  # (under argmatch, provisioning a large config can take minutes)
         return p.returncode == 0, (p.stdout + p.stderr).strip()
 
     def run(self, out_dir, config, stacklog=None, matchfile=None, files=None):
@@ -415,7 +424,7 @@ class PrombenchCaddy(CaddyIngressImage):
         try:
             # The controller's own config first (else it could replace the concrete config when it loads it)
             while True:
-                running = self.running_config("localhost:2019")
+                running = self.running_config("127.0.0.1:2019")
                 if running and running.get("apps"):
                     break
                 if time.time() - start > 300:
@@ -423,7 +432,7 @@ class PrombenchCaddy(CaddyIngressImage):
                 time.sleep(5)
             open(f"{out_dir}/generated-config.json", "w").write(json.dumps(running, indent=2) + "\n")
             self.install(config, files)
-            ok, resp = self.load_config("localhost:2019")
+            ok, resp = self.load_config("127.0.0.1:2019")
             open(f"{out_dir}/load.log", "w").write(resp + "\n")
             if not ok:
                 raise RuntimeError(f"the admin API rejected the concrete config (see {out_dir}/load.log): "

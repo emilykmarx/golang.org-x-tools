@@ -87,6 +87,17 @@ class CustomKeys:
         return None
 
 
+def docs_entry(key, typ):
+    """stats.read_docs' hook for caddy_keys_*.txt: `map[...]` types are maps (their keys are `<key>.*`); `{}` (a
+    module choice with no fields of its own, e.g. logging.sink.writer.output=discard) and `recursive:...` (where the
+    list stops expanding a module that nests itself) aren't keys"""
+    if typ == "{}" or typ.startswith("recursive"):
+        return None
+    if typ.startswith("map["):
+        return key, "map"
+    return key, typ
+
+
 def docs_kind(typ):
     """Kind of Go value we'd expect for a documented type (caddy_keys_*.txt: Go-like types, e.g. string,
     int:v2.Duration, []string, map[string][]string, module_id:http.handlers)"""

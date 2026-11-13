@@ -1,0 +1,215 @@
+{
+  "admin": {},
+  "apps": {
+    "http": {
+      "servers": {
+        "ingress_server": {
+          "automatic_https": {
+            "skip_certificates": [
+              "prombench.prometheus.io"
+            ]
+          },
+          "listen": [
+            ":80",
+            ":443"
+          ],
+          "routes": [
+            {
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "transport": {
+                    "protocol": "http"
+                  },
+                  "upstreams": [
+                    {
+                      "dial": "comment-monitor.default.svc.cluster.local:80"
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "path": [
+                    "/hook",
+                    "/hook/*"
+                  ]
+                }
+              ]
+            },
+            {
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "transport": {
+                    "protocol": "http"
+                  },
+                  "upstreams": [
+                    {
+                      "dial": "grafana.default.svc.cluster.local:80"
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "path": [
+                    "/grafana",
+                    "/grafana/*"
+                  ]
+                }
+              ]
+            },
+            {
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "transport": {
+                    "protocol": "http"
+                  },
+                  "upstreams": [
+                    {
+                      "dial": "parca.default.svc.cluster.local:80"
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "path": [
+                    "/profiles",
+                    "/profiles/*"
+                  ]
+                }
+              ]
+            },
+            {
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "transport": {
+                    "protocol": "http"
+                  },
+                  "upstreams": [
+                    {
+                      "dial": "prometheus-meta.default.svc.cluster.local:80"
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "path": [
+                    "/prometheus-meta",
+                    "/prometheus-meta/*"
+                  ]
+                }
+              ]
+            },
+            {
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "transport": {
+                    "protocol": "http"
+                  },
+                  "upstreams": [
+                    {
+                      "dial": "prometheus-test-v3-2-1.prombench-16075.svc.cluster.local:80"
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "path": [
+                    "/16075/prometheus-release",
+                    "/16075/prometheus-release/*"
+                  ]
+                }
+              ]
+            },
+            {
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "transport": {
+                    "protocol": "http"
+                  },
+                  "upstreams": [
+                    {
+                      "dial": "prometheus-test-pr-16075.prombench-16075.svc.cluster.local:80"
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "path": [
+                    "/16075/prometheus-pr",
+                    "/16075/prometheus-pr/*"
+                  ]
+                }
+              ]
+            }
+          ],
+          "tls_connection_policies": [
+            {}
+          ]
+        },
+        "metrics_server": {
+          "automatic_https": {
+            "disable": true
+          },
+          "listen": [
+            ":9765"
+          ],
+          "routes": [
+            {
+              "handle": [
+                {
+                  "handler": "metrics"
+                }
+              ],
+              "match": [
+                {
+                  "path": [
+                    "/metrics"
+                  ]
+                }
+              ]
+            },
+            {
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "status_code": 200
+                }
+              ],
+              "match": [
+                {
+                  "path": [
+                    "/healthz"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "tls": {
+      "certificates": {
+        "load_folders": [
+          "/etc/caddy/certs"
+        ]
+      }
+    }
+  },
+  "logging": {},
+  "storage": {
+    "leaseId": "",
+    "module": "secret_store",
+    "namespace": "caddy-system"
+  }
+}

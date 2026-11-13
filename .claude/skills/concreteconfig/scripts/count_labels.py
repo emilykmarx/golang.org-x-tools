@@ -6,7 +6,9 @@ compares the union of their labels. The skill's hard requirement is that a new c
 SKILL.md, "Constraints").
 
 A label is (message kind, message label), without the label's `paths` field (how many distinct paths matched a route
-pattern): that depends on the workload's timing as much as on the config. Compare runs of the same length and workload: a shorter run can miss
+pattern): that depends on the workload's timing as much as on the config. Kubernetes-generated pod names in a label
+(`<deployment>-<pod template hash>-<5 random characters>`, e.g. in a path the module requests about its own pod) end
+in `-<pod>` instead: they change with every restart. Compare runs of the same length and workload: a shorter run can miss
 labels for that reason alone.
 
 Usage: count_labels.py <events.jsonl> [<events.jsonl> ...] [--baseline <events.jsonl>] [--list]
@@ -26,11 +28,13 @@ import join  # noqa: E402  (argmatch-labels' join.py: message_labels)
 
 
 PATHS = re.compile(r"(, )?paths: \d+\}$")  # (message_graph.py's _label_fields puts it last)
+POD = re.compile(r"-[bcdfghjklmnpqrstvwxz2456789]{6,10}-[bcdfghjklmnpqrstvwxz2456789]{5}(?=[/,} ?]|$)")
 
 
 def labels(path):
     events = [json.loads(line) for line in open(path) if line.strip()]
-    return {(events[i]["kind"], PATHS.sub("}", label)) for i, label in join.message_labels(events).items()}
+    return {(events[i]["kind"], POD.sub("-<pod>", PATHS.sub("}", label))) for i, label in
+            join.message_labels(events).items()}
 
 
 def main():
