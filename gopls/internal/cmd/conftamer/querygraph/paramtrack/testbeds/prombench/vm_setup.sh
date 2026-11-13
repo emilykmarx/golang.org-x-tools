@@ -66,7 +66,7 @@ git clone https://github.com/emilykmarx/prometheus.git
 pushd prometheus; git checkout prombench; popd
 git clone https://github.com/emilykmarx/argmatch.git dump_ancestors
 git clone https://github.com/emilykmarx/go-conftamer-ancestry.git
-# Caddy's ingress controller, for the prombench-caddy testbed
+# Caddy's ingress controller, for the prombench-caddyICingress-caddyIC testbed
 git clone https://github.com/emilykmarx/caddyserver-ingress.git
 git clone https://github.com/emilykmarx/conftamer
 pushd conftamer; git checkout argmatch; popd

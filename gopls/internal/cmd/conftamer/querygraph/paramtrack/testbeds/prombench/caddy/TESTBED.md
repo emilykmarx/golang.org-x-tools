@@ -1,4 +1,4 @@
-# prombench-caddy (prombench, module: Caddy's ingress controller)
+# prombench-caddyICingress-caddyIC (prombench, module: Caddy's ingress controller)
 
 prombench with Caddy's ingress controller in place of ingress-nginx. The module runs as the controller's deployment
 `caddy-caddy-ingress-controller` in namespace `caddy-system`, in prombench's kind cluster on the GCE VM
@@ -6,7 +6,7 @@ prombench with Caddy's ingress controller in place of ingress-nginx. The module 
 --project conftamer`. kubectl context `kind-prombench`. On the VM, the checkouts are under
 `/home/emily/projects/config_tracing`.
 
-paramtrack's `--testbed prombench-caddy` (`PrombenchCaddy` in `testbeds.py`) builds the controller under argmatch and
+paramtrack's `--testbed prombench-caddyICingress-caddyIC` (`PrombenchCaddy` in `testbeds.py`) builds the controller under argmatch and
 contexttrack, deploys the cluster if it isn't this variant (`../upstream.py`, variant `caddy`: about
 5 minutes, replacing the other variant's cluster), and loads the concrete config through Caddy's admin API.
 `../upstream.py`'s docstring and the patches in `../patches*/` say what's deployed and why.
@@ -50,9 +50,9 @@ After each applied config, through `cc_vm.py health`:
   querier in `prombench-<PR>`, which queries through Caddy).
 
 ## Message labels (constraint 2)
-SKILL.md's constraint 2 says how to check them. On prombench-caddy:
+SKILL.md's constraint 2 says how to check them. On prombench-caddyICingress-caddyIC:
 - **The baseline run** is made with `uv run --with pandas --with matplotlib --with tabulate python paramtrack.py
-  --module caddy --out <dir> --config <shipped config> --testbed prombench-caddy --until 3`, from paramtrack's
+  --module caddy --out <dir> --config <shipped config> --testbed prombench-caddyICingress-caddyIC --until 3`, from paramtrack's
   directory. It and each check take about 8 minutes, most of it the 240 s workload (plus a deploy if the cluster is
   the other variant).
 - **Labels that depend on timing,** not the config: e.g. requests that arrive while the controller restarts, and

@@ -18,7 +18,7 @@ Everything paramtrack's workflow needs that is specific to Prometheus is here or
 
 ## Prometheus-specific code outside this directory
 The workflow was first written for Prometheus, so these places outside `module.py` still assume it:
-- `../../testbeds.py`: `PrometheusImage` builds `prometheus/prombench-argmatch.Dockerfile` from the checkout. The `docker` and `prombench` testbeds run it (paramtrack's README, "Testbeds"; the prombench skill guidance is `../../testbeds/prombench/prometheus/TESTBED.md`).
+- `../../testbeds.py`: `PrometheusImage` builds `prometheus/prombench-argmatch.Dockerfile` from the checkout. The `docker` and `prombench-nginxingress-prom` testbeds run it (paramtrack's README, "Testbeds"; the prombench skill guidance is `../../testbeds/prombench/prometheus/TESTBED.md`).
 - stats.py's output still speaks of service discovery: `sd_configs.csv`, the `sd` column, and "SD config types found (Name())". It gets the content from `CustomKeys`.
 - `visualize.sh`'s graph descriptions mention SD configs. Its module prefix defaults to Prometheus's, and paramtrack passes the run's.
 - `messages/matches.py`'s `short()` also strips `github.com/prometheus/`, for prometheus/common's types.

@@ -1,7 +1,7 @@
 """Testbeds for paramtrack's dynamic phase: each builds the module with argmatch and contexttrack, runs it with the
 concrete config under a workload, and collects contexttrack's events and argmatch's matches. See README.md.
 
-Also run on the VM by PrombenchVM: testbeds.py prombench|prombench-caddy --out DIR --config FILE
+Also run on the VM by PrombenchVM: testbeds.py prombench-nginxingress-prom|prombench-caddyICingress-caddyIC --out DIR --config FILE
 [--stacklog FILE --matchfile FILE]
 """
 
@@ -486,7 +486,7 @@ class PrombenchVM(Testbed):
     ZONE = "us-central1-b"
     PROJECT = "conftamer"
     REMOTE = "/tmp/paramtrack-testbed"
-    TESTBED = "prombench"  # the testbed it runs there (main's choices)
+    TESTBED = "prombench-nginxingress-prom"  # the testbed it runs there (main's choices)
     DOCKERFILES = []  # Dockerfiles under HERE that the testbed builds
 
     POLL = 30  # seconds between checks on the run
@@ -606,12 +606,20 @@ def _bytes_file(data):
 class PrombenchCaddyVM(PrombenchVM):
     """PrombenchCaddy on the GCE VM (--vm), as PrombenchVM. The VM also needs the caddyserver-ingress checkout."""
 
-    TESTBED = "prombench-caddy"
+    TESTBED = "prombench-caddyICingress-caddyIC"
     DOCKERFILES = ["modules/caddy/argmatch.Dockerfile"]
 
 
-TESTBEDS = {"docker": PrometheusDocker, "prombench": PrombenchVM, "prombench-caddy": PrombenchCaddyVM}
-ON_VM = {"prombench": Prombench, "prombench-caddy": PrombenchCaddy}
+# The prombench testbeds are named <environment>-<ingress controller>ingress-<module> (testbeds/prombench/README.md)
+TESTBEDS = {"docker": PrometheusDocker, "prombench-nginxingress-prom": PrombenchVM, "prombench-caddyICingress-caddyIC": PrombenchCaddyVM}
+ON_VM = {"prombench-nginxingress-prom": Prombench, "prombench-caddyICingress-caddyIC": PrombenchCaddy}
+# Earlier names (2026-11-13), as runs before then recorded them in testbed.json
+RENAMED = {"prombench": "prombench-nginxingress-prom", "prombench-caddy": "prombench-caddyICingress-caddyIC"}
+
+
+def canonical(name):
+    """A testbed's current name, for a name a run may have recorded"""
+    return RENAMED.get(name, name)
 
 
 def main():

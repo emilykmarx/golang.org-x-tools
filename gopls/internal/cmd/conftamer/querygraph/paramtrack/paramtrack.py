@@ -18,7 +18,7 @@ import sys
 import common
 import modules  # (modules/<module>/module.py: each module's settings and hooks)
 from common import ARGMATCH_LABELS, CT, GOPLS, QUERYGRAPH, log_command, run, say
-from testbeds import TESTBEDS, PrombenchVM
+from testbeds import TESTBEDS, PrombenchVM, canonical
 
 # stats.py's full key and section rules (STATISTICS.md); step 8 runs it
 STATS = f"{QUERYGRAPH}/configkeys/stats"
@@ -139,6 +139,8 @@ class Workflow:
             say(f"{step}: no {name} (a run from before paramtrack recorded it); can't check its settings")
             return
         recorded = json.load(open(path))
+        if "testbed" in recorded:
+            recorded["testbed"] = canonical(recorded["testbed"])  # (runs before the testbeds were renamed)
         current = self.static_settings() if name == "settings.json" else self.testbed_settings(self.make_testbed())
         diff = []
         for k in fields:
@@ -379,8 +381,9 @@ def main():
                                      "none)")
     ap.add_argument("--transformed", help="Full keys whose values are stored transformed, which steps 2 and 8 mark "
                                           "(stats.py --transformed; empty: none)")
-    ap.add_argument("--testbed", default="docker", choices=sorted(TESTBEDS))
-    ap.add_argument("--vm", default="paramtrack-e2e", help="GCE VM for --testbed prombench")
+    ap.add_argument("--testbed", default="docker", type=canonical, choices=sorted(TESTBEDS),
+                    help="where the module runs (testbeds.py; earlier names, e.g. prombench, still work)")
+    ap.add_argument("--vm", default="paramtrack-e2e", help="GCE VM for the prombench-* testbeds")
     ap.add_argument("--wait", type=int, default=240, help="Seconds to run the module under the workload, per run")
     ap.add_argument("--argmatch-arg", action="append", default=[], metavar="KEY=VALUE",
                     help="Override an argmatch build arg (ARGMATCH_KEY), e.g. DEPTH=5; repeatable")

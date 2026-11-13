@@ -1,9 +1,9 @@
-# prombench (module: Prometheus, as prometheus-meta)
+# prombench-nginxingress-prom (prombench, module: Prometheus, as prometheus-meta)
 
 The module runs as **prometheus-meta**, in prombench's kind cluster on the GCE VM `paramtrack-e2e` (zone
 `us-central1-b`, project `conftamer`): `gcloud compute ssh --zone us-central1-b paramtrack-e2e --project conftamer`.
 kubectl context `kind-prombench`. On the VM, the checkouts are under `/home/emily/projects/config_tracing`.
-paramtrack's prombench testbed deploys prombench when the VM has no cluster (or the other variant's):
+paramtrack's `prombench-nginxingress-prom` testbed deploys prombench when the VM has no cluster (or the other variant's):
 `../upstream.py` (its docstring says how) deploys upstream prometheus/test-infra at `e85cac548` with the patches in
 `../patches/`, from the tree `$CT/paramtrack-prombench` on the VM.
 
@@ -59,7 +59,7 @@ After each applied config, for a minute or so, through `kubectl exec ... wget -q
 ## Message labels (constraint 2)
 SKILL.md's constraint 2 says how to check them. On prombench:
 - **The baseline run** is made with `uv run --with pandas --with matplotlib --with tabulate python paramtrack.py
-  --module prometheus --out <dir> --config <shipped config> --testbed prombench --until 3`, from paramtrack's directory (plain `python3`
+  --module prometheus --out <dir> --config <shipped config> --testbed prombench-nginxingress-prom --until 3`, from paramtrack's directory (plain `python3`
   fails at import; `scripts/check_labels.py` needs the same packages). It and each check take about 6 minutes, most
   of it the 240 s workload.
 - **Labels that depend on timing,** not the config: e.g. `/-/ready` answering 503 while Prometheus starts.
