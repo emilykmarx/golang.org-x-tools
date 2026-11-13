@@ -1,20 +1,28 @@
 # configkeys
 
 Finds every config key in the input file(s):
-- An Unmarshaler Subgraph (mandatory)
-  - Key = pattern the graph allows, e.g.:
-    - `global.external_labels.*`
-    - `scrape_configs.*.role`
-    - `global.scrape_interval`
-- A concrete config file (or a keys file) (optional)
-  - Key = concrete key, e.g.:
-    - `global.external_labels.cluster`
-    - `scrape_configs.kubernetes_sd_configs.role`
-    - `global.scrape_interval`
+- An Unmarshaler Subgraph (mandatory,  `--unmarshaler-subgraph`)
+- A concrete config file (optional, `--config`)
 
 For each key, find other keys in the same section.
 
-For each concrete key, output the corresponding values.
+With `--config`, also output the values corresponding to each concrete key.
+
+## Output
+A csv.
+- Columns: `full key,concrete key,values,value kind,Unmarshaler,Num Unmarshalers,Unmarshaler Path,section,section keys`
+- Rows of several types:
+
+| Row | `full key` | `concrete key` | Caddy test config |
+|---|---|---|---|
+| full key from the graph, not set by the config | the full key | empty | 1505 rows, e.g. `admin.config.load.module` |
+| full key the config sets as it is (no `*`) | the key | the same key | 5 rows, e.g. `apps.tls.automation.policies.issuers.module` |
+| concrete key | the full key it's an instance of | the concrete key | 11 rows, e.g. `apps.http.servers.*.automatic_https.disable` / `apps.http.servers.ingress_server.automatic_https.disable` |
+| concrete key with no full key: the graph doesn't know it, or it's under a dynamic custom unmarshaler (its path then ends with `(custom Unmarshal...)`) | empty | the concrete key | none in this config |
+
+If a concrete key is an instance of more than one full key, they're "; "-joined in full key.
+
+## NOTE THE REST OF THIS README IS NOT REVIEWED - e.g. "Output" still describes the old column header, and "Patterns" is out of date. The above ignores keys-txt and keys-csv - they're no longer unused, so should probably be remove.
 
 ## Patterns
 
@@ -38,7 +46,7 @@ go run . --config .../prom-test-infra/prombench/fuzzed_prometheus.yaml --txt-dir
   --unmarshaler-subgraph <dir>/unmarshaler_subgraph.text --module-prefix github.com/prometheus/prometheus \
   --root /config.Config --output keys.csv
 ```
-- `--format` is the config file's format, which determines whose unmarshaling behavior is followed: `yaml` follows `gopkg.in/yaml.v2` (the default), and `json` will follow `encoding/json` (not yet supported). Generate the graph with the same format (`gopls conftamer -format`).
+- `--format` is the config file's format, which determines whose unmarshaling behavior is followed: `yaml` follows `gopkg.in/yaml.v2` (the default), and `json` follows `encoding/json`. Generate the graph with the same format (`gopls conftamer -format`).
 - `--root` names the node as it appears in the serialized graph, i.e. with the module prefix cut. By default matching and enumeration start from every root of the graph. Other roots can be types for other files in the same format, e.g. promtool's test files, and they can add spurious matches and patterns.
 - `--through` keeps only keys with a path through the given node, and only those paths: the keys accessible from a (possibly non-root) type, e.g. `github.com/prometheus/common/config.TLSConfig`.
 - Concrete keys come from one of:

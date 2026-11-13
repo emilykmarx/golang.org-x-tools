@@ -2,26 +2,35 @@
 
 Runs a workflow that outputs a relationship between configuration parameters and messages for a Go module running in a testbed. Specifically, the workflow observes messages the module sends and receives while running in the testbed, and determines which of the module's own configuration parameters are likely to influence them: For sends, the existence and contents of the message; for receives, the way the message is handled. A parameter is considered to have influence when it is likely to be accessible when the message is sent/received. Observed messages are grouped by their "label" (see "Output"), and parameters are identified by their keys.
 
-As an example, we will use Prometheus as the module, YAML as the config format, and Prombench as the testbed.
-But the workflow must generalize to other modules (including Grafana and the Kubernetes API server), JSON as the config format, and other testbeds.
-
 
 ## Usage
 ```
-uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out <dir> --config <concrete config> \
+uv run --with pandas --with matplotlib --with tabulate python paramtrack.py \
+  --out <dir> \
+  --module <name of a directory in `modules/`> \
+  --config <concrete config> \
   [--config-files <dir>] \
-  [--module github.com/prometheus/prometheus] [--module-dir <checkout>] [--root /config.Config] [--format yaml] \
-  [--docs <documented keys>] [--ignore <full keys to ignore>] [--transformed <full keys stored transformed>] [--testbed docker|prombench] [--vm paramtrack-e2e] [--wait 240] [--argmatch-arg KEY=VALUE ...] [--redo <step>] [--until <step>] [--only <step> ...]
+  [--module-dir <checkout>] [--root /config.Config] \
+  [--docs <documented keys>] [--ignore <full keys to ignore>] [--transformed <full keys stored transformed>] \
+  [--format yaml|json] \
+  [--testbed docker|prombench] [--vm paramtrack-e2e] [--wait 240] [--argmatch-arg KEY=VALUE ...] [--redo <step>] [--until <step>] [--only <step> ...]
 ```
-The defaults are for Prometheus.
+The module-specific optional arguments (--module-dir, --root, --format, --docs, --ignore and --transformed) take their defaults from the module's module.py
 
-## Input files
-In addition to the concrete config, paramtrack takes the module-/testbed-specific files described below.
+## Inputs
+In addition to the concrete config, paramtrack takes the module-/testbed-specific info described below.
 
 ### `--config-files`
 The files in this directory are any that the concrete config references (e.g., `password_file:/etc/prometheus/config/password_file.txt`).
 
 paramtrack copies these into the testbed using module-/testbed-specific logic.
+
+### `--root`
+- The type the workflow will treat as the root of the config types and keys.
+- Most relevant when a module has multiple config sources, or a single source corresponding to multiple types, or when the user-facing config source is transformed into another source before the module loads it
+- E.g. in Prometheus, `/config.Config` holds the documented config keys, but the Unmarshaler graph has a few other roots
+- E.g. in the Caddy ingress controller, the user writes the controller's config into Kubernetes objects, which the controller then converts to Caddy JSON. This populates only the portion of Caddy's keys that the controller supports, and transforms the keys in the Kubernetes objects to Caddy's documented keys.
+  - To avoid adding special support for the Kubernetes objects, the controller uses Caddy's config type as the root (`--root github.com/caddyserver/caddy/v2.Config`)
 
 ### `--ignore`
 - A file listing keys the testbed is unlikely to be able to use
@@ -29,7 +38,6 @@ paramtrack copies these into the testbed using module-/testbed-specific logic.
 - Generated for each module on an ad hoc basis
 - Interaction with `argmatch`: The /concreteconfig skill does not typically set these (since they are not "target" - see [TERMINOLOGY](../configkeys/stats/TERMINOLOGY.md)), so `argmatch` will typically not search them.
   - But, the skill may e.g. if it finds that it must in order for the config to be valid. In this case, `argmatch` still searches for the corresponding value if it is a searchable kind, and the final step before the statistics still outputs those matches.
-
 
 ### `--transformed`
 - A file listing keys whose values are likely to have different contents in memory than in the config file
@@ -40,18 +48,23 @@ paramtrack copies these into the testbed using module-/testbed-specific logic.
 ### `--docs`
 A list of keys generated from the module's documentation using the `/documentedkeys` skill.
 
+### Module-specific inputs
+The workflow should generalize well to new Go modules (including Grafana, the Kubernetes API server, the Prometheus alertmanager).
+
+To that end, paramtrack keeps all module-specific (including testbed-specific) inputs separate from its module-agnostic functionality, in `modules/` and `testbeds/`.
+
 ## Steps and intermediate outputs
 Each step writes one subdirectory of `--out`, named after the step. All programs are built locally. In "Inputs" below, "concrete config" and "documented keys" are the ones paramtrack was run with (or a copy in the concrete config case), and the other filenames refer to outputs of previous steps.
 
 | Step | Programs | Inputs | Main outputs |
 |---|---|---|---|
-| `1-unmarshaler-graph` | `gopls conftamer` | Module source code | `unmarshaler_subgraph.text` |
-| `2-full-keys` | `configkeys (without --config, --txt-dir, --strings-only)`;<br>then `stats.py --full-keys-only (with the configkeys output)` | `unmarshaler_subgraph.text` for both,<br>documented keys (for `stats.py`) | `full_keys.yaml` |
+| `1-unmarshaler-graph` | `extra_graph` (from `modules/`), then `gopls conftamer` (with the extragraph output) | Module source code | `unmarshaler_subgraph.text` |
+| `2-full-keys` | `configkeys (without --config, --txt-dir, --strings-only)`;<br>then `stats.py --full-keys-only` (with the configkeys output) | `unmarshaler_subgraph.text` for both,<br>documented keys (for `stats.py`) | `full_keys.yaml` |
 | `3-chains` | testbed run 1: `contexttrack`,<br>with `argmatch` instrumenting nothing;<br>then `events_to_stacklog.py` | concrete config | `events.jsonl`,<br>`stacklog.txt` |
 | `4-configkeys` | `configkeys (with --config, --txt-dir, --strings-only)` | `unmarshaler_subgraph.text`,<br>concrete config | `configkeys.csv`,<br>`param_values.txt`,<br>`param_keys.txt` |
 | `5-matches` | testbed run 2: `contexttrack`,<br>with argmatch instrumenting 3's chains and searching 4's values | concrete config,<br>`stacklog.txt`,<br>`param_values.txt` | `matches.csv`,<br>`matches.calls.csv`,<br>`events.jsonl` |
 | `6-label-values` | `join.py` | `matches.calls.csv`,<br>`events.jsonl` (from matches, not chains) | `joined.csv` |
-| `7-label-keys` | `paramtrack` | `unmarshaler_subgraph.text`,<br>`configkeys.csv`,<br>`param_keys.txt`,<br>`param_values.txt`,<br>`joined.csv` | `label_keys.csv`,<br>`summary.txt` |
+| `7-label-keys` | `paramtrack` | `configkeys.csv`,<br>`param_keys.txt`,<br>`param_values.txt`,<br>`joined.csv` | `label_keys.csv`,<br>`summary.txt` |
 | `8-stats` | `stats.py`;<br>then `visualize.sh` | `unmarshaler_subgraph.text`,<br>`configkeys.csv`,<br>`param_values.txt`,<br>`matches.csv`,<br>`label_keys.csv`,<br>documented keys | see STATISTICS.md |
 
 ### Programs
@@ -114,7 +127,7 @@ Before going on, check that the skill succeeded: the first line of `$OUT_SKILL/r
 paramtrack.py \
   --out $OUT_CONCRETE \
   --testbed $TESTBED \
-  --config $OUT_SKILL/config.yaml
+  --config $OUT_SKILL/config.yaml|json
 ```
 ## Output
 The final output is `label_keys.csv`. It lists each message's keys, with a confidence for each. Message are identified by a *kind* and *label*, applied in [join.py](../../../../../../../dump_ancestors/argmatch-labels/README.md) using the logic in contexttrack's [message_graph.py](../../../../../../../conftamer/contexttrack/analysis/message_graph.py).
@@ -129,10 +142,10 @@ Columns:
 - `message_kind`, `message_label`, `needle`: a row of `joined.csv` (`needle` is empty in inferred rows)
 - `concrete_key`: a key at which the needle is a value in the concrete config (from `param_keys.txt`). A needle that stands for several concrete keys gets a row for each. Empty in inferred rows.
 - `full_key`: the concrete key's full key (empty if it has none), or the inferred key
-- `section`: the full key's section (`<parent key> @ <Unmarshaler>`); a row per section, if it has several
-- `section_keys`: the full keys in that section (joined with `; `), with custom unmarshaler `*` resolved
+- `section`: the full key's section; a row per section, if it has several
+- `section_keys`: the full keys in that section (joined with `; `)
 - `evidence`: whether the key is evidence for the message
-- `eligible`: whether the key could have been evidence - see TERMINOLOGY.md
+- `eligible`: whether the key could have been evidence for any message - see TERMINOLOGY.md
 - `confidence_all`, `confidence_eligible`: 1 for an evidence row. For an inferred row, the share of its section's in-scope keys that are evidence for the message: out of all of them (`confidence_all`), and out of its eligible keys (`confidence_eligible`).
 
 `summary.txt` counts rows (evidence and inferred), messages, full keys and sections, and lists needles with no concrete key and concrete keys with no full key.

@@ -1,12 +1,10 @@
 # Prometheus
 
-- **Checkout:** `/home/emily/projects/config_tracing/prometheus` (v3.2.1; on the prombench VM, the same path).
+- **Checkout:** `/home/emily/projects/config_tracing/prometheus` (same path locally and on the prombench VM; v3.2.1)
 - **Module and root:** `github.com/prometheus/prometheus`, `/config.Config` (paramtrack's defaults).
 - **Ignore file:** `ignore.txt` next to this file (paramtrack's
-  default `--ignore`): the 53 (parent, SD config) pairs the user's fuzzed config doesn't use (a fixed
-  scope; the shipped config uses only `kubernetes_sd_configs`). In scope:
-  `kubernetes_sd_configs` under `scrape_configs` and `alerting.alertmanagers`, and `dns_sd_configs`,
-  `file_sd_configs` and `static_configs` under `scrape_configs`. Pass it to `stats.py` and `scripts/score.py`.
+  default `--ignore`): Most keys involving Prometheus' service discovery (i.e. 53 `<parent>.<sd>_configs.*` keys, where `<sd>` is a name registered via Prometheus' `Name()` e.g. `kubernetes`), except `kubernetes_sd_configs` under `scrape_configs` and `alerting.alertmanagers`, and `dns_sd_configs`,
+  `file_sd_configs` and `static_configs` under `scrape_configs`.
 - **File helpers:** `prom_files.py` here writes the contents of Prometheus-specific files: a Google service account
   key file (`remote_write`'s `google_iam.credentials_file`) and a kubeconfig (`kubernetes_sd_configs`'
   `kubeconfig_file`). The generic ones (certs, keys, UUIDs) are the skill's `scripts/files.py`.
@@ -21,7 +19,7 @@ In the checkout, and in prometheus/common at the version it uses (`go list -m -f
 - The parsing and validation code, for what the docs leave out: `UnmarshalYAML` and `Validate` methods in
   `config/config.go`, `discovery/<sd>/`, `model/relabel/relabel.go`, and prometheus/common's `config/http_config.go`.
 - configkeys/stats/STATISTICS.md, Q4: the keys the graph has but the docs don't, and why.
-- Earlier configs for this testbed, as examples only (decide for yourself; don't copy their choices as decisions):
+- Earlier configs for this testbed, as examples only. Don't copy their choices without examining whether they are optimal. But, it is ok to reuse their code (if so, copy it into your own directory), and to learn from their choices (if so, include them in the reason you output):
   - `prom-test-infra/prombench/fuzzed_prometheus.yaml`: the user's hand-fuzzed config, which extends the shipped
     config with many more keys, each with a value meant to be distinctive and inert;
   - `gopls/internal/cmd/conftamer/querygraph/paramtrack/concreteconfig/prometheus-prombench-fuzzed-base-2026-11-04/`:
@@ -43,13 +41,10 @@ In the checkout, and in prometheus/common at the version it uses (`go list -m -f
 ## Keys to skip, or not to count
 - **`*_ref` keys** (secret-manager references, e.g. `password_ref`): they parse, but fail at runtime, since Prometheus
   sets no secret manager.
-- **Values stored transformed:** the search can't find them as written, so they add nothing to the statistics. Set
-  them only where the module or the shipped config needs them:
-  - regexes (`relabel.Regexp`: every `regex` in relabel configs): stored as `^(?s:<regex>)$`;
-  - URLs (`config.URL`, e.g. `proxy_url`, `api_server`; some, like `remote_read.url`, also keep a string copy and are
-    found);
-  - inline PEM blocks (`tls_config`'s `ca`, `cert`, `key`): parsed;
-  - `no_proxy`: parsed into a list.
+- **Values stored transformed:** listed in paramtrack's transformed-keys file,
+  `transformed.txt` next to this file (`scripts/score.py` leaves them out
+  of the target keys). The search can't find them as written, so they add nothing to the statistics. Set them only
+  where the module or the shipped config needs them.
 - **Numbers and bools:** not searched (`--strings-only`), so they don't count. Leave them at the shipped config's
   values, or unset.
 
