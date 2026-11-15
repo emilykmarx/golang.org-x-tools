@@ -1,6 +1,6 @@
 ---
 name: documentedkeys
-description: Start onboarding a new Go module to paramtrack's param tracking workflow, in a fresh background agent - work out what config the module takes (and in what format), and write a script that derives the module's documented config keys from its documentation, plus the generated list. Use when asked to find a module's documented keys, or to start running the workflow on a new module (e.g. Caddy's ingress controller, Grafana, the Kubernetes API server).
+description: Start onboarding a new Go module to paramtrack's param tracking workflow, in a fresh background agent - work out what config the module takes (and in what format), and write a script that derives the module's documented config keys from its documentation, plus the generated list. Use when asked to find a module's documented keys, or to start running the workflow on a new module (e.g. Grafana, the Kubernetes API server).
 ---
 
 # documentedkeys
@@ -11,14 +11,14 @@ means working out what the module's config even is. This skill runs that investi
 agent** (the Agent tool, `general-purpose`, `run_in_background: true`), not a fork: it needs none of this session's
 context, and the main session stays free meanwhile.
 
+
 ## 1. Gather the inputs
 Ask the user only for what you can't find:
 - **Module:** its name, and its Go module path(s).
 - **Checkouts:** local paths, usually under `/home/emily/projects/config_tracing/`; for a module that imports another
-  project's config code (e.g. Caddy's ingress controller and Caddy), all of them. Note each one's commit
-  (`git -C <dir> log --oneline -1`).
+  project's config code (e.g. Caddy's ingress controller and Caddy), all of them. Note the most recent tag in the checkout. If there are no recent tags, ask the user.
 - **Documentation website,** if the repos' docs might not be enough (e.g. https://caddyserver.com/).
-- **Output directory:** default `/home/emily/projects/config_tracing/<module>-config-keys/`, outside the checkouts.
+- **Output directory:** default to a `documentedkeys` directory under the module's directory in paramtrack (e.g. [here](../../../gopls/internal/cmd/conftamer/querygraph/paramtrack/modules/prometheus/documentedkeys) for Prometheus).
 
 ## 2. Check the checkouts for the user's notes
 Run `git -C <dir> status --short` in each checkout. Untracked files that don't look generated (notes, scratch
@@ -35,10 +35,7 @@ it will produce; don't wait or poll: the completion notification brings its repo
 - Relay the report: what config the module takes and how it's loaded, the sources, the files and counts, its
   judgment calls, and the open questions (which are the user's to decide).
 - Save a project memory for the module (what was found, where, the open questions), linked from MEMORY.md.
-
-## Examples
-- Prometheus (YAML): `prom-test-infra/prombench/prometheus_config_keys.txt`, made as
-  `prom-test-infra/prombench/config_keys_notes.md` describes.
-- Caddy's ingress controller (Kubernetes objects, generating Caddy JSON):
-  `/home/emily/projects/config_tracing/caddy-config-keys/` (its README.md), from the brief this skill generalizes
-  (2026-11-06).
+- Wire the list into paramtrack: create the module's directory and `module.py` under paramtrack's `modules/` if they
+  don't exist yet (`modules/__init__.py` lists the settings and hooks; start from an existing module's), then set its
+  `DOCS` to the list, and write its `docs_kind` for the list's types (the README lists them); add a `docs_entry` hook
+  only if some lines still need normalizing.
