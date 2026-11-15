@@ -40,26 +40,31 @@ def main():
     ap.add_argument("--list", action="store_true", help="count_labels.py --list: print every label, both runs'")
     a = ap.parse_args()
     out, base = os.path.abspath(a.out), os.path.abspath(a.baseline)
-    base_events = f"{base}/3-chains/events.jsonl"
+    try:
+        base_events = f"{baseline.layout.step_dir(baseline.run_dir(base), '3-chains')}/events.jsonl"
+    except baseline.MissingInput as e:
+        fail(str(e))
     if not os.path.exists(base_events):
         fail(f"no {base_events}: the baseline run must be paramtrack through step 3 (3-chains)")
     # The baseline run's graph (reused, so paramtrack doesn't rebuild it), and its static and testbed settings, which
     # the candidate's run must match
     try:
         baseline.graph(base)  # (checks the baseline's graph is usable)
-        args = baseline.static_args(baseline.settings(base)) + baseline.testbed_args(base)
+        st = baseline.settings(base)
+        root = baseline.root(st)
+        args = baseline.static_args(st) + baseline.testbed_args(base)
     except baseline.MissingInput as e:
         fail(str(e))
     baseline.copy_graph(base, out)
     cmd = [sys.executable, f"{QUERYGRAPH}/paramtrack/paramtrack.py", "--out", out, "--config",
-           os.path.abspath(a.config), "--until", "3", "--redo", "2"] + args
+           f"{root}={os.path.abspath(a.config)}", "--until", "3", "--redo", "2"] + args
     if a.config_files:
-        cmd += ["--config-files", os.path.abspath(a.config_files)]
+        cmd += ["--config-files", f"{root}={os.path.abspath(a.config_files)}"]
     with open(f"{out}/paramtrack.log", "w") as log:
         p = subprocess.run(cmd, cwd=f"{QUERYGRAPH}/paramtrack", stdout=log, stderr=subprocess.STDOUT)
     if p.returncode != 0:
         fail(f"paramtrack exited {p.returncode}; see {out}/paramtrack.log")
-    code = subprocess.run([sys.executable, f"{HERE}/count_labels.py", f"{out}/3-chains/events.jsonl",
+    code = subprocess.run([sys.executable, f"{HERE}/count_labels.py", f"{baseline.layout.step_dir(baseline.run_dir(out), '3-chains')}/events.jsonl",
                            "--baseline", base_events] + (["--list"] if a.list else [])).returncode
     sys.exit(code if code in (0, 1) else 2)
 

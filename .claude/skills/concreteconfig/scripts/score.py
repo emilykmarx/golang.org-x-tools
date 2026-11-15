@@ -58,15 +58,17 @@ def main():
     try:
         baseline.graph(base)  # (checks the baseline's graph is usable)
         st = baseline.settings(base)
+        root = baseline.root(st)
     except baseline.MissingInput as e:
         print(f"score.py: {e}", file=sys.stderr)
         sys.exit(2)
     baseline.copy_graph(base, out)
-    run([sys.executable, f"{QUERYGRAPH}/paramtrack/paramtrack.py", "--out", out, "--config", os.path.abspath(a.config),
-         "--only", "full-keys", "--only", "configkeys"] + baseline.static_args(st),
+    run([sys.executable, f"{QUERYGRAPH}/paramtrack/paramtrack.py", "--out", out, "--config",
+         f"{root}={os.path.abspath(a.config)}", "--only", "full-keys", "--only", "configkeys"] + baseline.static_args(st),
         f"{out}/paramtrack.log", cwd=f"{QUERYGRAPH}/paramtrack", timeout=900)
-    # stats.py takes the rest from the run in <out>: step 2's settings (the baseline's), step 4's configkeys
-    run([sys.executable, f"{QUERYGRAPH}/configkeys/stats/stats.py", "--config-only", "--run", out, "--out", out],
+    # stats.py takes the rest from the root's run in <out>: step 2's settings (the baseline's), step 4's configkeys
+    run([sys.executable, f"{QUERYGRAPH}/configkeys/stats/stats.py", "--config-only", "--run", baseline.run_dir(out),
+         "--out", out],
         f"{out}/stats.log", timeout=900)
 
     md = open(f"{out}/config_stats.md").read()

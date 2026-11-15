@@ -13,12 +13,10 @@ CT = "/home/emily/projects/config_tracing"
 
 GO_MODULE = "github.com/caddyserver/ingress"
 MODULE_DIR = f"{CT}/caddyserver-ingress"
-# The Caddy JSON the controller generates, as caddy.Load decodes it (a dependency's type: an -extra root)
-ROOT = "github.com/caddyserver/caddy/v2.Config"
 FORMAT = "json"
-DOCS = f"{HERE}/documentedkeys/caddy_keys_linked.txt"
-IGNORE = ""
-TRANSFORMED = ""
+# The Caddy JSON the controller generates, as caddy.Load decodes it (a dependency's type: an -extra root)
+ROOTS = {"caddy": {"root": "github.com/caddyserver/caddy/v2.Config",
+                   "docs": f"{HERE}/documentedkeys/caddy_keys_linked.txt"}}
 BINARY_PACKAGE = "./cmd/caddy"  # the controller's main package
 GOLITS_PACKAGE = BINARY_PACKAGE
 GOLITS_TAGS = ""
@@ -69,7 +67,7 @@ def extra_graph(module_dir, out_path, timeout=900):
             edges.append({"parent": f["parent"], "field": f["field"], "child": m["type"], "key": key})
     edges.sort(key=lambda e: (e["parent"], e["field"], e["key"]))
     with open(out_path, "w") as f:
-        json.dump({"roots": [ROOT], "edges": edges}, f, indent=2)
+        json.dump({"roots": [r["root"] for r in ROOTS.values()], "edges": edges}, f, indent=2)
     return registry
 
 

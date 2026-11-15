@@ -30,6 +30,7 @@ import sys
 import pandas as pd
 
 import chains  # (next to this file)
+import layout  # (paramtrack's: where a run's step outputs are; chains puts paramtrack on the path)
 import matches  # (next to this file)
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -61,14 +62,14 @@ LEGEND = [
 
 def load(run):
     """Everything the matrix needs, from the run directory"""
-    fkdf = pd.read_csv(f"{run}/8-stats/full_keys.csv", keep_default_na=False, dtype=str)
+    fkdf = pd.read_csv(f"{layout.step_dir(run, '8-stats')}/full_keys.csv", keep_default_na=False, dtype=str)
     section_of = dict(zip(fkdf.key, fkdf.section))  # in-scope full key => section
     section_keys = fkdf.groupby("section").key.apply(lambda ks: sorted(set(ks))).to_dict()  # section => its keys
     sections = sorted(set(fkdf.section), key=lambda s: (s.split(".")[0].split(" ")[0], s))
 
     # Unambiguous keys (matches.unambiguous_keys: stats.py's rule), with the concrete keys' values
     unamb_keys, covered_by, config, _ = matches.unambiguous_keys(run)
-    searched = set(open(f"{run}/4-configkeys/param_values.txt").read().splitlines())
+    searched = set(open(f"{layout.step_dir(run, '4-configkeys')}/param_values.txt").read().splitlines())
 
     # Eligible keys that are unambiguous, per section: set, with a value searched for; and the values of unambiguous
     # keys, with their sections (for anchors)
@@ -86,7 +87,7 @@ def load(run):
     evidence = collections.defaultdict(lambda: collections.defaultdict(set))
     # ((kind, message), section) => evidence full key => its matched values
     via = collections.defaultdict(lambda: collections.defaultdict(set))
-    for r in csv.DictReader(open(f"{run}/6-label-values/joined.csv", newline="")):
+    for r in csv.DictReader(open(f"{layout.step_dir(run, '6-label-values')}/joined.csv", newline="")):
         if r["message_kind"] not in SENT:
             continue
         msg = (r["message_kind"], chains.reduce_label(r["message_label"]))
@@ -304,7 +305,7 @@ td.addEventListener('blur',()=>tip.style.display='none')});""")
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", required=True, help="paramtrack --out directory (steps 1-8)")
+    ap.add_argument("--run", required=True, help="a paramtrack run: a root's directory, <out>/<module>/<root> (paramtrack's layout.py; a run from before 2026-11-15: its --out) (steps 1-8)")
     ap.add_argument("--out", required=True, help="output prefix: writes <prefix>.md, <prefix>-requests.html and "
                                                  "<prefix>-responses.html")
     a = ap.parse_args()

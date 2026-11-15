@@ -2,6 +2,7 @@
 
 Runs a workflow that outputs a relationship between configuration parameters and messages for a Go module running in a testbed. Specifically, the workflow observes messages the module sends and receives while running in the testbed, and determines which of the module's own configuration parameters are likely to influence them: For sends, the existence and contents of the message; for receives, the way the message is handled. A parameter is considered to have influence when it is likely to be accessible when the message is sent/received. Observed messages are grouped by their "label" (see "Output"), and parameters are identified by their keys.
 
+TODO when the workflow supports multiple modules: Update the opening para, usage, and use with concreteconfig
 
 ## Usage
 ```
@@ -10,51 +11,37 @@ uv run --with pandas --with matplotlib --with tabulate python paramtrack.py \
   --module <name of a directory in `modules/`> \
   --config <concrete config> \
   [--config-files <dir>] \
-  [--module-dir <checkout>] [--root /config.Config] \
-  [--docs <documented keys>] [--ignore <full keys to ignore>] [--transformed <full keys stored transformed>] \
-  [--format yaml|json] \
   [--testbed docker|prombench] [--vm paramtrack-e2e] [--wait 240] [--argmatch-arg KEY=VALUE ...] [--redo <step>] [--until <step>] [--only <step> ...]
 ```
-The module-specific optional arguments (--module-dir, --root, --format, --docs, --ignore and --transformed) take their defaults from the module's module.py
 
-## Inputs
-In addition to the concrete config, paramtrack takes the module-/testbed-specific info described below.
-
-### `--config-files`
-The files in this directory are any that the concrete config references (e.g., `password_file:/etc/prometheus/config/password_file.txt`).
-
+### Concrete config
+- `config`: <config source>=<path> (config source: a key in `ROOTS` - see the [modules README](modules/README.md))
+- `--config-files`: The files in this directory are any that the concrete config references (e.g., `password_file:/etc/prometheus/config/password_file.txt`).
 paramtrack copies these into the testbed using module-/testbed-specific logic.
 
-### `--root`
-- The type the workflow will treat as the root of the config types and keys.
-- Most relevant when a module has multiple config sources, or a single source corresponding to multiple types, or when the user-facing config source is transformed into another source before the module loads it
-- E.g. in Prometheus, `/config.Config` holds the documented config keys, but the Unmarshaler graph has a few other roots
-- E.g. in the Caddy ingress controller, the user writes the controller's config into Kubernetes objects, which the controller then converts to Caddy JSON. This populates only the portion of Caddy's keys that the controller supports, and transforms the keys in the Kubernetes objects to Caddy's documented keys.
-  - To avoid adding special support for the Kubernetes objects, the controller uses Caddy's config type as the root (`--root github.com/caddyserver/caddy/v2.Config`)
+### Other module-specific inputs
+The workflow should generalize well to new Go modules.
 
-### `--ignore`
-- A file listing keys the testbed is unlikely to be able to use
-  - E.g. in Prometheus, we choose to ignore many of the service discovery keys - see [modules/prometheus/ignore.txt](modules/prometheus/ignore.txt).
-- Generated for each module on an ad hoc basis
-- Interaction with `argmatch`: The /concreteconfig skill does not typically set these (since they are not "target" - see [TERMINOLOGY](../configkeys/stats/TERMINOLOGY.md)), so `argmatch` will typically not search them.
-  - But, the skill may e.g. if it finds that it must in order for the config to be valid. In this case, `argmatch` still searches for the corresponding value if it is a searchable kind, and the final step before the statistics still outputs those matches.
+To that end, paramtrack keeps all module-specific (including testbed-specific) inputs separate from its module-agnostic functionality, in [modules](modules/README.md) and `testbeds/`.
 
-### `--transformed`
-- A file listing keys whose values are likely to have different contents in memory than in the config file
-  - E.g. Prometheus parses `*.proxy_url` and `*.api_server` URLs into scheme, host, etc, which are stored as separate fields in `config.URL` - see [modules/prometheus/transformed.txt](modules/prometheus/transformed.txt)
-- Generated for each module on an ad hoc basis
-- Interaction with `argmatch`: Still searches for these keys' values, in case we're wrong.
+The module-specific optional arguments (--module-dir, --format) take their defaults from the module's `module.py`.
 
-### `--docs`
-A list of keys generated from the module's documentation using the `/documentedkeys` skill.
-
-### Module-specific inputs
-The workflow should generalize well to new Go modules (including Grafana, the Kubernetes API server, the Prometheus alertmanager).
-
-To that end, paramtrack keeps all module-specific (including testbed-specific) inputs separate from its module-agnostic functionality, in `modules/` and `testbeds/`.
 
 ## Steps and intermediate outputs
-Each step writes one subdirectory of `--out`, named after the step. All programs are built locally. In "Inputs" below, "concrete config" and "documented keys" are the ones paramtrack was run with (or a copy in the concrete config case), and the other filenames refer to outputs of previous steps.
+All programs are built locally. In "Inputs" below, "concrete config" and "documented keys" are the ones paramtrack was run with (or a copy in the concrete config case), and the other filenames refer to outputs of previous steps.
+
+The workflow produces the following layout in <out>:
+
+```
+bin, paramtrack-commands.log
+testbed/
+  3-chains, 5-matches: testbed info (testbed.json, logs)
+<module>/
+  1-unmarshaler-graph: the module's graph
+  3-chains, 5-matches, 6-label-values: the module's outputs from the testbed run (events, matches, stack log)
+  <config source (prefix of --config)>/
+    2-full-keys, 4-configkeys, 7-label-keys, 8-stats: output for the keys reachable from the config source
+```
 
 | Step | Programs | Inputs | Main outputs |
 |---|---|---|---|
@@ -84,7 +71,9 @@ See [WORKFLOW_EXAMPLE.md](docs/WORKFLOW_EXAMPLE.md) for an example of each step'
 
 ### Running parts of the workflow
 Steps can be named by number (`5`), name (`matches`) or both (`5-matches`).
-- If a step's directory already exists, it will be skipped.
+- If a step's directory already exists for that module or (module, config source), it will be skipped.
+  - Specifically, per-module steps are skipped if they exist for that module, while per-(module, config source) steps are skipped if they exist for that (module, config source)
+  - (For the two testbed run steps, they also need to exist under `testbed`)
   - If a step failed or was interrupted, it will not be skipped (since a step writes into `<step>.partial` and renames it when it's done)
 - `--redo <step>` reruns that step and the later ones. Once any step runs, the later ones rerun too, since their inputs changed.
 - `--until <step>` stops after a step, e.g. `--until 3` after testbed run 1 (step 4, which run 1 doesn't need, comes after it, so such runs skip it).
@@ -95,6 +84,7 @@ Steps can be named by number (`5`), name (`matches`) or both (`5-matches`).
   - If Step 2's directory already exists, it checks that it matches `--config` - if not, it exits with an error saying to use `--redo 2`
 
 ## Use with /concreteconfig
+
 To run paramtrack to evaluate a concrete config output by the [`/concreteconfig`](../../../../../../.claude/skills/concreteconfig/SKILL.md) skill:
 
 (below `uv run` is elided. The environment variables are illustrative, not built in to the workflow.)
@@ -129,6 +119,8 @@ paramtrack.py \
   --testbed $TESTBED \
   --config $OUT_SKILL/config.yaml|json
 ```
+This runs the full workflow, which duplicates the testbed run the skill did on the passing config - to reuse that, pass the output directory the skill used for `check_labels.py` instead of a new one.
+
 ## Output
 The final output is `label_keys.csv`. It lists each message's keys, with a confidence for each. Message are identified by a *kind* and *label*, applied in [join.py](../../../../../../../dump_ancestors/argmatch-labels/README.md) using the logic in contexttrack's [message_graph.py](../../../../../../../conftamer/contexttrack/analysis/message_graph.py).
 
@@ -153,19 +145,20 @@ Columns:
 ## Testbeds
 `--testbed` chooses where the module runs (`testbeds.py`):
 - `docker`: Prometheus in one local container, built from `prometheus/prombench-argmatch.Dockerfile`, with the workload of argmatch-labels' `bootstrap-example/bootstrap.sh`: API queries every 5 s from 20 s on, a config reload at 30 s, and a stop at `--wait` seconds. The config's Kubernetes service account files are stand-ins, so it loads, but Kubernetes SD can't connect.
-- `prombench`: prombench's prometheus-meta, on the GCE VM `--vm` (default `paramtrack-e2e`). paramtrack copies `testbeds.py`, `common.py` and the run's inputs to `/tmp/paramtrack-testbed` on the VM, runs the testbed there over ssh, and copies the outputs back. On the VM, it does what the argmatch experiment's `run_on_vm.sh` does ([README](../../../../../../../dump_ancestors/argmatch/experiment/README.md#what-a-run-does)): it builds `prometheus-conftamer:v3.2.1`, loads it into the main node, restarts prometheus-meta, runs the dashboard viewer and the config reloads, and copies `argmatch-out`. It also sets the prometheus-meta config map to the concrete config, and sets `CONFTAMER_EVENTS` on the deployment, before the restart. The VM needs:
+- `prombench-nginxingress-prom`: prombench's prometheus-meta, on the GCE VM `--vm` (default `paramtrack-e2e`). paramtrack copies `testbeds.py`, `common.py` and the run's inputs to `/tmp/paramtrack-testbed` on the VM, runs the testbed there over ssh, and copies the outputs back. On the VM, it does what the argmatch experiment's `run_on_vm.sh` does ([README](../../../../../../../dump_ancestors/argmatch/experiment/README.md#what-a-run-does)): it builds `prometheus-conftamer:v3.2.1`, loads it into the main node, restarts prometheus-meta, runs the dashboard viewer and the config reloads, and copies `argmatch-out`. It also sets the prometheus-meta config map to the concrete config, and sets `CONFTAMER_EVENTS` on the deployment, before the restart. The VM needs:
   - the checkouts that `prometheus-test-infra/prombench/vm_setup.sh` makes. They're built as they are on the VM, so push the changes you want, or copy them there.
   - prombench deployed with `deploy.sh`, which needs `images/conftamer-images.tar` (see `build_prom_argmatch.sh`).
 
-Both testbeds install step 2's `files/` where the config expects them, `/etc/prometheus/config/`: the `prombench` testbed adds each file to the prometheus-meta ConfigMap before restarting it (it's mounted there), and the `docker` testbed mounts the directory there.
+Both testbeds install step 2's `files/` where the config expects them, `/etc/prometheus/config/`: the `prombench-nginxingress-prom` testbed adds each file to the prometheus-meta ConfigMap before restarting it (it's mounted there), and the `docker` testbed mounts the directory there.
 
 Both testbeds copy the stack log and match file into the Prometheus checkout, as `paramtrack-stacklog.txt` and `paramtrack-matches.txt`, because the build reads them.
 
 argmatch's build args are bootstrap.sh's (`ARGMATCH_ARGS` in `testbeds.py`); override them with `--argmatch-arg`.
 
-Each testbed step (`3-chains`, `5-matches`) records its effective settings in `testbed.json`: the testbed, `--wait`, `--vm` (for `prombench`) and argmatch's build args, defaults filled in. Step 2 likewise records the static ones in `2-full-keys/settings.json`: `--module`, `--module-dir`, `--root`, `--format`, `--docs`, `--ignore` and `--transformed`. The concreteconfig skill's `score.py` and `check_labels.py` read these, so it evaluates candidates using the same settings as the baseline.
+Each testbed step (`3-chains`, `5-matches`) records its effective settings in `testbed.json`: the testbed, `--wait`, `--vm` (for the prombench-* testbeds) and argmatch's build args, defaults filled in. Step 2 likewise records the static ones in `2-full-keys/settings.json`: `--module`, `--module-dir`, the module version, `--root`, `--format`, `--docs`, `--ignore` and `--transformed`. The concreteconfig skill's `score.py` and `check_labels.py` read these, so it evaluates candidates using the same settings as the baseline.
 
 ## Adding modules and testbeds
+To add a module, first run the `/documentedkeys` skill to investigate the module's config.
 
 ### Reproducibility
 The end-to-end workflow should be relatively reproducible, with exceptions due to e.g. timing-dependent labels, and the behavior of the agents running the skills. To that end:
@@ -186,7 +179,7 @@ Thus, when adding modules/testbeds, try to make these requirements good proxies 
 ## Command logs
 paramtrack logs the commands it runs, each line with the time, the working directory and the command, shell-quoted:
 - `<out>/paramtrack-commands.log`: paramtrack's own command line, once per invocation.
-- `<step>/commands.log`: every command the step runs (builds, programs, and for the `prombench` testbed the `gcloud compute ssh` calls that copy inputs, start the testbed and copy outputs back). The paths in it are `<step>.partial`, where the step writes until it's done.
-- `<step>/vm-commands.log`, for the `prombench` testbed's steps: the commands the testbed runs on the VM (the build, loading the image, restarting prometheus-meta, the workload, the capture), copied back with its other outputs.
+- `<step>/commands.log`: every command the step runs (builds, programs, and for the prombench-* testbeds the `gcloud compute ssh` calls that copy inputs, start the testbed and copy outputs back). The paths in it are `<step>.partial`, where the step writes until it's done.
+- `<step>/vm-commands.log`, for the prombench-* testbeds' steps: the commands the testbed runs on the VM (the build, loading the image, restarting prometheus-meta, the workload, the capture), copied back with its other outputs.
 
 Commands that only check on progress (polling the VM, prometheus-meta's readiness, the docker container's state) aren't logged.

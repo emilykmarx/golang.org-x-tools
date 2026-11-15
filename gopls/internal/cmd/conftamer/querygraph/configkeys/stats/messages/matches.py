@@ -37,6 +37,7 @@ import sys
 import pandas as pd
 
 import chains  # (next to this file; it imports argmatch-labels' join.py)
+import layout  # (paramtrack's: where a run's step outputs are; chains puts paramtrack on the path)
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import stats  # noqa: E402  (configkeys/stats/stats.py: the concrete config's keys, and the ambiguity rule)
@@ -47,7 +48,7 @@ LEVELS = ["full key", "full key + holder", "full key + path"]
 
 
 def unambiguous_values(run):
-    vals = pd.read_csv(f"{run}/8-stats/values.csv", keep_default_na=False, dtype=str)
+    vals = pd.read_csv(f"{layout.step_dir(run, '8-stats')}/values.csv", keep_default_na=False, dtype=str)
     return set(vals[(vals["keys"] == "1") & (vals.go_literal == "False")].value), set(vals.value)
 
 
@@ -57,14 +58,14 @@ def unambiguous_keys(run):
     values.csv says). Also returns what it read: covered_by (in-scope full key => its concrete keys), config (concrete
     key => its values and full keys, from step 4's configkeys.csv) and section_of (in-scope full key => section, from
     step 8's full_keys.csv)."""
-    settings = json.load(open(f"{run}/2-full-keys/settings.json"))
+    settings = json.load(open(f"{layout.step_dir(run, '2-full-keys')}/settings.json"))
     if hasattr(stats.modules.load(settings["module"]), "extra_graph") and \
-            not os.path.exists(f"{run}/1-unmarshaler-graph/extra.json"):
+            not os.path.exists(f"{layout.step_dir(run, '1-unmarshaler-graph')}/extra.json"):
         sys.exit(f"{run} predates the module's extra graph edges (no 1-unmarshaler-graph/extra.json): its configkeys "
                  f"csv has `*` for the keys custom unmarshalers pick; redo its steps from 1")
-    fkdf = pd.read_csv(f"{run}/8-stats/full_keys.csv", keep_default_na=False, dtype=str)
+    fkdf = pd.read_csv(f"{layout.step_dir(run, '8-stats')}/full_keys.csv", keep_default_na=False, dtype=str)
     section_of = dict(zip(fkdf.key, fkdf.section))
-    _, config = stats.load_configkeys(f"{run}/4-configkeys/configkeys.csv")
+    _, config = stats.load_configkeys(f"{layout.step_dir(run, '4-configkeys')}/configkeys.csv")
     covered_by = collections.defaultdict(set)
     for k, c in config.items():
         for fk in c["full_keys"]:
@@ -79,7 +80,7 @@ def unambiguous_keys(run):
 def needle_full_keys(run):
     """needle => the full keys step 7's evidence rows give it"""
     fks = collections.defaultdict(set)
-    for r in csv.DictReader(open(f"{run}/7-label-keys/label_keys.csv", newline="")):
+    for r in csv.DictReader(open(f"{layout.step_dir(run, '7-label-keys')}/label_keys.csv", newline="")):
         if r["evidence"] == "True" and r["full_key"]:
             fks[r["needle"]].add(r["full_key"])
     return fks
@@ -88,8 +89,8 @@ def needle_full_keys(run):
 def joined_calls(run):
     """(kind, message) => the argmatch calls its events join with, as join.py joins them (its main(), keeping the
     call IDs), and the (kind, label) of each message event"""
-    calls = list(csv.DictReader(open(f"{run}/5-matches/matches.calls.csv", newline="")))
-    events = [json.loads(line) for line in open(f"{run}/5-matches/events.jsonl") if line.strip()]
+    calls = list(csv.DictReader(open(f"{layout.step_dir(run, '5-matches')}/matches.calls.csv", newline="")))
+    events = [json.loads(line) for line in open(f"{layout.step_dir(run, '5-matches')}/events.jsonl") if line.strip()]
     labels = join.message_labels(events)
 
     def key(frames):
@@ -120,7 +121,7 @@ def call_matches(run, wanted_calls, kept, config_values):
     out = collections.defaultdict(set)
     left_out = collections.Counter()
     paths = {}  # interned type paths
-    with open(f"{run}/5-matches/matches.csv", newline="") as f:
+    with open(f"{layout.step_dir(run, '5-matches')}/matches.csv", newline="") as f:
         r = csv.reader(f)
         h = next(r)
         ni, ci, ti = h.index("needle"), h.index("call"), h.index("types")
@@ -149,7 +150,7 @@ def jaccard(a, b):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", required=True, help="paramtrack --out directory (steps 3, 5, 6, 7 and 8)")
+    ap.add_argument("--run", required=True, help="a paramtrack run: a root's directory, <out>/<module>/<root> (paramtrack's layout.py; a run from before 2026-11-15: its --out) (steps 3, 5, 6, 7 and 8)")
     ap.add_argument("--out", help="write the report here (markdown) rather than to stdout")
     a = ap.parse_args()
 
@@ -170,7 +171,7 @@ def main():
 
     # Check against step 6: the (kind, reduced label, needle) of the joined matches
     step6 = set()
-    for r in csv.DictReader(open(f"{a.run}/6-label-values/joined.csv", newline="")):
+    for r in csv.DictReader(open(f"{layout.step_dir(a.run, '6-label-values')}/joined.csv", newline="")):
         if r["message_kind"] in chains.KINDS and r["needle"] in kept:
             step6.add((r["message_kind"], chains.reduce_label(r["message_label"]), r["needle"]))
     here = {(k[0], k[1], n) for k in msgs for c in msg_calls.get(k, ()) for n, _ in cm.get(c, ())}

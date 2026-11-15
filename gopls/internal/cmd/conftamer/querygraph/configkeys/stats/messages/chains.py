@@ -24,12 +24,16 @@ import argparse
 import collections
 import itertools
 import json
+import os
 import sys
 
 import pandas as pd
 
 sys.path.insert(0, "/home/emily/projects/config_tracing/dump_ancestors/argmatch-labels")
 import join  # noqa: E402  (argmatch-labels' join.py: message_labels)
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../paramtrack"))
+import layout  # noqa: E402  (paramtrack's: where a run's step outputs are)
 
 MODULE = "github.com/prometheus/prometheus/"  # (message_chains sets it to the run's module)
 KINDS = ("Request sent", "Response sent")  # the sent messages
@@ -63,8 +67,8 @@ STEP = "5-matches"
 def message_chains(run, step=STEP):
     """(kind, message) => the chains of its events in run's <step>/events.jsonl. Sets MODULE to the run's module."""
     global MODULE
-    MODULE = json.load(open(f"{run}/2-full-keys/settings.json"))["module"] + "/"
-    events = [json.loads(line) for line in open(f"{run}/{step}/events.jsonl") if line.strip()]
+    MODULE = json.load(open(f"{layout.step_dir(run, '2-full-keys')}/settings.json"))["module"] + "/"
+    events = [json.loads(line) for line in open(f"{layout.step_dir(run, step)}/events.jsonl") if line.strip()]
     chains = collections.defaultdict(list)
     for i, label in join.message_labels(events).items():
         if events[i]["kind"] in KINDS:
@@ -89,7 +93,7 @@ def groups_of(funcs):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", required=True, help="paramtrack --out directory (reads <step>/events.jsonl)")
+    ap.add_argument("--run", required=True, help="a paramtrack run: a root's directory, <out>/<module>/<root> (paramtrack's layout.py; a run from before 2026-11-15: its --out) (reads <step>/events.jsonl)")
     ap.add_argument("--step", default=STEP, help="the testbed step whose events to read (default %(default)s; or "
                                                  "3-chains)")
     ap.add_argument("--out", help="write the report here (markdown) rather than to stdout")

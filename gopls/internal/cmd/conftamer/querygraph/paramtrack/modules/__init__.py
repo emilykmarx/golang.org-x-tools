@@ -1,28 +1,6 @@
-"""The modules paramtrack knows: one subdirectory each (e.g. prometheus/), whose README.md is the one place for what's
-specific to that module, and whose module.py holds the settings and hooks the workflow's scripts read:
-
-- GO_MODULE, MODULE_DIR, ROOT, FORMAT, DOCS, IGNORE, TRANSFORMED: paramtrack's defaults for --module, --module-dir,
-  --root, --format, --docs, --ignore and --transformed
-- GOLITS_PACKAGE, GOLITS_TAGS: what stats.py's golits loads (the package compiled into the module's binary, and its
-  build tags)
-- TITLE: the module, for headings
-- CustomKeys(module_dir): the keys custom unmarshalers pick (resolved in the graph by extra_graph's edges), for
-  stats.py's tables of them: .names (graph type => the key it's under), .parents (the keys they're under), .of(fk)
-  (the picked key a full key is under, or None)
-- docs_kind(type): the kind of Go value a documented type means (string, number, bool, map)
-- graph_docs_reason(key, in_graph): why a key is only in the graph (in_graph) or only in the docs
-- UNSET_REASONS: why the concreteconfig skill left target keys unset: (reason, fnmatch patterns)
-- UNTAGGED_KEYS (optional, default False): lift our exception for untagged fields (gopls conftamer -untagged-keys,
-  configkeys --untagged-keys; see ct.UntaggedAreKeys)
-- docs_entry(key, type) (optional): stats.read_docs' hook for the docs list's lines: the (key, type) to use (type
-  "map" for maps), or None for a line that isn't a key
-- META_TYPES (optional, default {}): Go type => reason, for types whose keys the graph finds because of how the
-  module structures its types, but which aren't config (e.g. Kubernetes' metav1.TypeMeta: apiVersion, kind). A full
-  key is a meta key if every Unmarshaler Path to it passes through one (stats.meta_keys); meta keys are out of scope
-  like --ignore's (no target keys, no statistics), except in stats.py's Q4, which counts them separately
-- extra_graph(module_dir, out_path) (optional): write gopls conftamer's -extra file (roots and edges the source code
-  doesn't show: the keys a custom unmarshaler or run-time decoding picks, e.g. Prometheus' SD configs, Caddy's
-  modules); paramtrack's step 1 runs it into its directory
+""" Manages all module-specific info used by the paramtrack programs.
+Each module has a directory under this one, with a module.py holding
+settings (e.g. the path to the module source) and hooks (e.g. info about custom unmarshalers)
 """
 
 import glob

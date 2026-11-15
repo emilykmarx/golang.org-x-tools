@@ -23,6 +23,7 @@ import pandas as pd
 
 # paramtrack's per-module settings and hooks (paramtrack/modules/<module>/module.py)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../paramtrack"))
+import layout  # noqa: E402  (where a paramtrack run's step outputs are)
 import modules  # noqa: E402
 
 matplotlib.use("Agg")
@@ -582,25 +583,29 @@ def side_by_side_html(tables):
 
 
 def fill_from_run(args):
-    """Fills in the path arguments not given from paramtrack run args.run (paramtrack's README lists its steps'
-    outputs): the inputs paramtrack's step 8 passes. Raises FileNotFoundError for a missing one the mode needs."""
+    """Fills in the path arguments not given from paramtrack run args.run, a root's directory (paramtrack's layout.py;
+    its README lists its steps' outputs): the inputs paramtrack's step 8 passes. Raises FileNotFoundError for a missing
+    one the mode needs."""
     run = args.run
+
+    def step(name):
+        return layout.step_dir(run, name)
 
     def need(path):
         if not os.path.exists(path):
             raise FileNotFoundError(f"no {path}")
         return path
 
-    settings = json.load(open(need(f"{run}/2-full-keys/settings.json")))
+    settings = json.load(open(need(f"{step('2-full-keys')}/settings.json")))
     # Since 2026-11-12 the graph resolves the keys custom unmarshalers pick (the module's extra_graph); an older run's
     # configkeys csv has `*` there, which load_configkeys would take for full keys
     if hasattr(modules.load(settings["module"]), "extra_graph") and \
-            not os.path.exists(f"{run}/1-unmarshaler-graph/extra.json"):
-        raise FileNotFoundError(f"no {run}/1-unmarshaler-graph/extra.json: the run predates the module's extra graph "
+            not os.path.exists(f"{step('1-unmarshaler-graph')}/extra.json"):
+        raise FileNotFoundError(f"no {step('1-unmarshaler-graph')}/extra.json: the run predates the module's extra graph "
                                 f"edges; redo its steps from 1 (or point the step dirs at a redone graph)")
-    args.configkeys = args.configkeys or need(f"{run}/4-configkeys/configkeys.csv")
-    args.param_values = args.param_values or need(f"{run}/4-configkeys/param_values.txt")
-    args.graph = args.graph or need(f"{run}/1-unmarshaler-graph/unmarshaler_subgraph.text")
+    args.configkeys = args.configkeys or need(f"{step('4-configkeys')}/configkeys.csv")
+    args.param_values = args.param_values or need(f"{step('4-configkeys')}/param_values.txt")
+    args.graph = args.graph or need(f"{step('1-unmarshaler-graph')}/unmarshaler_subgraph.text")
     args.docs = args.docs or modules.moved(settings["docs"])
     args.module = args.module or settings["module"]
     args.module_dir = args.module_dir or settings["module_dir"]
@@ -608,8 +613,8 @@ def fill_from_run(args):
     args.ignore = args.ignore or modules.moved(settings["ignore"]) or None
     args.transformed = args.transformed or modules.moved(settings.get("transformed")) or None
     if not args.config_only:
-        args.argmatch = args.argmatch or need(f"{run}/5-matches/matches.csv")
-        lk = f"{run}/7-label-keys/label_keys.csv"
+        args.argmatch = args.argmatch or need(f"{step('5-matches')}/matches.csv")
+        lk = f"{step('7-label-keys')}/label_keys.csv"
         args.label_keys = args.label_keys or (lk if os.path.exists(lk) else None)
 
 
@@ -631,7 +636,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     # (No defaults: a missing argument mustn't silently use another run's files or another module's. --run fills in
     # the ones not given from a paramtrack run.)
-    ap.add_argument("--run", help="A paramtrack --out directory: the path arguments not given come from its steps' "
+    ap.add_argument("--run", help="A paramtrack run, a root's directory, <out>/<module>/<root> (paramtrack's layout.py; "
+                                  "a run from before 2026-11-15: its --out): the path arguments not given come from its steps' "
                                   "outputs and its 2-full-keys/settings.json (see fill_from_run)")
     ap.add_argument("--configkeys", help="configkeys csv (with --config)")
     ap.add_argument("--param-values", help="values step (1) searches for (configkeys --txt-dir --strings-only); "
@@ -642,7 +648,7 @@ def main():
                                      "(e.g. prometheus), whose module.py has its settings and hooks")
     ap.add_argument("--module-dir", "--prometheus", help="module checkout the graph was built from")
     ap.add_argument("--root", help="the graph node the full keys start from (configkeys --root; empty: every root). "
-                    "Default: the run's (--run), else the module's ROOT")
+                    "Default: the run's (--run), else the module's root, if it has one (its module.py's ROOTS)")
     ap.add_argument("--argmatch", help="needle_types.csv of an argmatch run (step (1) results), or a csv with a needle "
                                        "column (e.g. paramtrack's 5-matches/matches.csv); required unless "
                                        "--config-only or --full-keys-only")
@@ -679,8 +685,10 @@ def main():
     out = Out(f"{args.out}/{'config_stats.md' if cfg_only else 'stats_tables.md'}")
     out.p("<!-- Generated by querygraph/configkeys/stats/stats.py; see STATISTICS.md there for what these mean. -->")
     mod = modules.load(args.module)
-    if args.root is None:
-        args.root = mod.ROOT
+    if args.root is None:  # (not given, nor from --run): the module's root, if it has one
+        if len(mod.ROOTS) != 1:
+            ap.error(f"--root is required: module {args.module} has several roots ({', '.join(mod.ROOTS)})")
+        args.root = next(iter(mod.ROOTS.values()))["root"]
     out.p(f"# Statistics the concrete config controls ({mod.TITLE})" if cfg_only else
           f"# Statistics tables ({mod.TITLE})")
 
@@ -878,6 +886,12 @@ def main():
 
     # =============================================================================================================
     out.h("Q3. Values vs keys")
+    # Value ambiguity (TERMINOLOGY.md): occ has only this root's concrete keys. A module with several roots loads every
+    # root's config into the same memory, so a value another root's config has is ambiguous too: define that before
+    # running these statistics (and unambiguous_key's callers, which take occ's rule) on such a module
+    if len(mod.ROOTS) > 1:
+        raise NotImplementedError(f"module {args.module} has several roots ({', '.join(mod.ROOTS)}): value ambiguity "
+                                  f"must count the other roots' concrete keys too (stats.py, Q3)")
     occ = collections.defaultdict(set)  # value => concrete keys
     for k, c in config.items():
         for v in c["values"]:

@@ -70,6 +70,7 @@ Where numbers appear under a definition, all must be satisfied.
   - (2) Of a "kind" argmatch searches for
     - i.e. string or struct, satisfying `configkeys --strings-only`
   - (3) Not left out by the module's `--transformed` file (see paramtrack [README](../../paramtrack/README.md))
+  - (Some of the workflow code uses "target" to mean a {module, root} pair)
 - **Concrete**
   - Set in the "concrete config", i.e. a config file runnable in the testbed
 - **Eligible**
@@ -83,7 +84,7 @@ A key has the property if all of its values do (some keys have multiple values, 
 A section has the property if at least one of its values does.
 
 - **Unambiguous**
-  - (1) No other key in the concrete config has the same value
+  - (1) No other key in the module's concrete config(s) has the same value
   - (2) The value is not a string literal in the module code
 
 # Messages
