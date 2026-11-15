@@ -19,6 +19,8 @@ mapstructure, a custom one). If the user-facing config source is transformed int
 Scope the list to what the module can actually be configured with (if a broader documented config is much
 bigger than that, give both, and say how you decided the subset)
 
+(Below "mini-module" refers to part of a module's code, which Caddy's docs call a "module")
+
 ## Then, the documented keys
 Write a Python script (Python preferred; shell only for small helpers; you can't ask questions, so decide and say
 why) that extracts the documented keys from the documentation sources you found. Prefer an existing
@@ -31,7 +33,7 @@ The list should have one key per line, with its type:
 `<key>\t<documented type>`
 
 No comments or blank lines. Every line must be a key that takes a value: don't list objects that only group other
-keys, a module choice with no fields of its own, or the points where you stopped expanding a recursive structure
+keys, a choice of mini-module where the mini-module is not configurable (e.g. `apps.http.servers.*.routes.match.not` in Caddy - the `MatchNot` module is not configurable), or the points where you stopped expanding a recursive structure
 (describe those in the README instead).
 
 Represent each key as a dot-separated path from the config's root, with `*` for placeholders (below), and list
@@ -44,21 +46,28 @@ Details:
 - The dot-separated segments can't contain a `.`, `<`, or `*` unless it's a placeholder
 - Placeholders: If the segment can be any string, chosen by the user, write it as <...> or *
   - e.g. in Prometheus:
-    - `http_headers.<string>.values` - the user picks the header name.
+    - `http_headers.<string>.secrets` - the user picks the header name.
   - e.g. in Caddy:
     - `apps.http.servers.*.routes...` - the user picks the server name
-- Maps whose keys the user picks: if the docs give the fields of the map's values, list them with a placeholder
-  segment (`http_headers.<string>.values`); otherwise list the map itself with the type `map` (exactly that word: the
-  workflow then reads it as `<key>.*`)
+  - Exception: If the docs list a key holding unstructured pairs, list the key with the type `map` (that word exactly)
+    - e.g. in Prometheus:
+      - `global.external_labels` is listed as a key with type `map`, since the docs have
+      ```
+      external_labels:
+        [ <labelname aka string>: <labelvalue aka string> ... ]
+      ```
+      - whereas `http_headers` is not listed as its own key (see above), since the docs dictate the structure of the map entries containing the headers:
+      ```
+      http_headers:
+        [ <string>:
+          [ secrets: [<secret aka string>, ...] ] ]
+      ```
 - If the segment can be one of a set of strings, write all the possibilities
   - e.g. in Caddy:
-    - the segment after `apps.` can be `http`, `tls`, or one of the other "app" modules
-- If the segment selects which other segments are valid in the rest of the key, write all the possibilities
-  - e.g. in Caddy:
-    - if the segment after `apps.` is `http`, the following segment could be `http_port`, `https_port`, or one of the other keys the http module supports
-    - whereas if it is `tls`, the following segment could be `certificates`, `automation`, or one of the other keys the tls module supports
-- If a value in a key-value pair selects which other segments are valid in the rest of the key, insert the value as a `key=value` segment
-  - e.g. in this portion of a valid Caddy JSON config file:
+    - the segment after `apps.` can be `http`, `tls`, or one of the other "app" mini-modules
+- If a JSON *value* (i.e. v in a k:v pair) selects the Go type used to decode the data corresponding to the rest of the full key, insert the value as a `key=value` segment
+  - e.g. Caddy looks up a mini-module by the `handler` value and decodes the rest of the object into a type specific to that mini-module
+  - An example portion of a Caddy config file using reverse_proxy as a handler:
   ```
   "handle": [
     {
@@ -67,19 +76,22 @@ Details:
     }
   ]
   ```
-    - the value selected for the `handler` key determines the options for the rest of the segment - e.g. `upstreams.dial` is valid above since the `reverse_proxy` module supports them, but if the value of `handler` is instead `static_response`, the valid segments include `response_code`
+    - the value selected for the `handler` key determines the type used to decode the handler's data
+      - this also means the value dictates which keys can appear in the rest of the segment - e.g. `upstreams.dial` is valid above since the `reverse_proxy` mini-module supports them, but if the value of `handler` is instead `static_response`, the valid segments include `response_code`
+    - when the `handler` value is "reverse_proxy", Caddy decodes the rest into type `reverse_proxy.Handler`
     - thus, the key should be `...handle.handler=reverse_proxy.upstreams.dial`
     - list the selecting key itself too (`...handle.handler`), with its documented type: it's a key the user sets
-    - this prevents two keys from identifying different information, e.g. if there were another module `reverse_proxy_2` that also supported `upstreams.dial` (but may handle it very differently than `reverse_proxy` does)
+    - the `k=v` segment prevents two keys from identifying different information, e.g. if there were another mini-module `reverse_proxy_2` that also supported `upstreams.dial` (but may handle it very differently than `reverse_proxy` does)
+  - Avoid reading a lot of code to determine this - if you think this may be the case but are not sure (e.g. one key dictates the format of the rest of the segment, but you're unsure if it dictates the types involved), add the `k=v` segment, and say in the README and your report that it may be unnecessary.
 
 
 ### Examples
 See the `documentedkeys` directories for [Prometheus](../../../gopls/internal/cmd/conftamer/querygraph/paramtrack/modules/prometheus/documentedkeys) and the [Caddy ingress controller](../../../gopls/internal/cmd/conftamer/querygraph/paramtrack/modules/caddy/documentedkeys), a Kubernetes controller that generates and uses Caddy's
-JSON config (note that for the workflow's purposes the Caddy controller is one "module", but Caddy uses the term "module" to mean a plugin).
+JSON config (note that for the workflow's purposes the Caddy controller is one "module", but Caddy uses the term "module" to mean a plugin. In this doc we use "mini-module" to refer to these plugins).
 
 The Prometheus list is `prometheus_config_keys.txt`, generated by `list_config_keys.py` using only the configuration doc in the source code.
 
-The Caddy controller list is `caddy_keys_linked.txt` (as described in the README, the agent also produced `caddy_keys_full_jsonpaths.txt` which formats inline modules differently - the workflow chose not to use this format, so you should not either).
+The Caddy controller list is `caddy_keys_linked.txt` (as described in the README, the agent also produced `caddy_keys_full_jsonpaths.txt` which formats inline mini-modules differently - the workflow chose not to use this format, so you should not either).
 
 Produce a list in the same format as these examples where possible. Also read the READMEs in these directories, which explain how the lists were made - follow their conventions.
 

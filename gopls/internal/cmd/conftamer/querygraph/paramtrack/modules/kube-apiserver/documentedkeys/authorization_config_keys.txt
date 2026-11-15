@@ -1,0 +1,11 @@
+authorizers.type	string
+authorizers.name	string
+authorizers.webhook.authorizedTTL	meta/v1.Duration
+authorizers.webhook.unauthorizedTTL	meta/v1.Duration
+authorizers.webhook.timeout	meta/v1.Duration
+authorizers.webhook.subjectAccessReviewVersion	string
+authorizers.webhook.matchConditionSubjectAccessReviewVersion	string
+authorizers.webhook.failurePolicy	string
+authorizers.webhook.connectionInfo.type	string
+authorizers.webhook.connectionInfo.kubeConfigFile	string
+authorizers.webhook.matchConditions.expression	string

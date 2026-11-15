@@ -1,0 +1,13 @@
+rules.level	string:Level
+rules.users	[]string
+rules.userGroups	[]string
+rules.verbs	[]string
+rules.resources.group	string
+rules.resources.resources	[]string
+rules.resources.resourceNames	[]string
+rules.namespaces	[]string
+rules.nonResourceURLs	[]string
+rules.omitStages	[]string:Stage
+rules.omitManagedFields	bool
+omitStages	[]string:Stage
+omitManagedFields	bool

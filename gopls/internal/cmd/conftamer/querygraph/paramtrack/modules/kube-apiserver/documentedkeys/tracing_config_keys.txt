@@ -1,0 +1,2 @@
+endpoint	string
+samplingRatePerMillion	int32

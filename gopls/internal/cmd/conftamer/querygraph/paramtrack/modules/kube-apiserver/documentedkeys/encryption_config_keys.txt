@@ -1,0 +1,12 @@
+resources.resources	[]string
+resources.providers.aesgcm.keys.name	string
+resources.providers.aesgcm.keys.secret	string
+resources.providers.aescbc.keys.name	string
+resources.providers.aescbc.keys.secret	string
+resources.providers.secretbox.keys.name	string
+resources.providers.secretbox.keys.secret	string
+resources.providers.kms.apiVersion	string
+resources.providers.kms.name	string
+resources.providers.kms.cachesize	int32
+resources.providers.kms.endpoint	string
+resources.providers.kms.timeout	meta/v1.Duration

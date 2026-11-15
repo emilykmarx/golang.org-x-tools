@@ -1,0 +1,7 @@
+egressSelections.name	string
+egressSelections.connection.proxyProtocol	string:ProtocolType
+egressSelections.connection.transport.tcp.url	string
+egressSelections.connection.transport.tcp.tlsConfig.caBundle	string
+egressSelections.connection.transport.tcp.tlsConfig.clientKey	string
+egressSelections.connection.transport.tcp.tlsConfig.clientCert	string
+egressSelections.connection.transport.uds.udsName	string
