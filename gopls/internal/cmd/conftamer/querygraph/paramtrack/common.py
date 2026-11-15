@@ -11,6 +11,16 @@ QUERYGRAPH = f"{GOPLS}/internal/cmd/conftamer/querygraph"
 ARGMATCH_LABELS = f"{CT}/dump_ancestors/argmatch-labels"
 
 
+def source_version(path):
+    """The git version of a source checkout: {"describe": its nearest tag and how far past it (git describe --tags
+    --always --dirty, e.g. v3.2.1-18-g52c2a0417-dirty), "commit": its full commit}; None if it isn't a git checkout"""
+    def git(*args):
+        p = subprocess.run(["git", "-C", path, *args], capture_output=True, text=True, timeout=60)
+        return p.stdout.strip() if p.returncode == 0 else None
+    commit = git("rev-parse", "HEAD")
+    return {"describe": git("describe", "--tags", "--always", "--dirty"), "commit": commit} if commit else None
+
+
 def say(msg):
     print(f"{time.strftime('%H:%M:%S')} {msg}", flush=True)
 

@@ -19,7 +19,7 @@ import time
 import urllib.request
 
 import common
-from common import CT, log_command, popen, run, say
+from common import CT, log_command, popen, run, say, source_version
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "testbeds", "prombench"))
@@ -66,6 +66,12 @@ class ArgmatchImage(Testbed):
 
     def build(self, tag, out_dir, stacklog, matchfile):
         upstream.ensure_builder(out_dir)  # the image the Dockerfile builds FROM
+        # What the image is built from: the module checkout on the machine that builds it (the VM's, for the prombench
+        # testbeds, which may differ from the checkout the graph was built from: settings.json's module_source)
+        src = source_version(f"{CT}/{self.SRC}")
+        with open(f"{out_dir}/build_source.json", "w") as f:
+            json.dump({"checkout": f"{CT}/{self.SRC}", **(src or {})}, f, indent=2)
+        say(f"building from {CT}/{self.SRC} at {(src or {}).get('describe')}")
         if stacklog:
             overrides = {"STACKLOG": self.in_build_context(stacklog, "paramtrack-stacklog.txt"),
                          "MATCHFILE": self.in_build_context(matchfile, "paramtrack-matches.txt")}

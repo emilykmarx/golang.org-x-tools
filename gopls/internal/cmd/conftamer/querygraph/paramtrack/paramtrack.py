@@ -17,7 +17,7 @@ import sys
 
 import common
 import modules  # (modules/<module>/module.py: each module's settings and hooks)
-from common import ARGMATCH_LABELS, CT, GOPLS, QUERYGRAPH, log_command, run, say
+from common import ARGMATCH_LABELS, CT, GOPLS, QUERYGRAPH, log_command, run, say, source_version
 from testbeds import TESTBEDS, PrombenchVM, canonical
 
 # stats.py's full key and section rules (STATISTICS.md); step 8 runs it
@@ -115,7 +115,9 @@ class Workflow:
 
     def static_settings(self):
         """The static settings step 2 records in settings.json, defaults filled in"""
-        return {"module": self.a.module, "module_dir": os.path.abspath(self.a.module_dir), "root": self.a.root,
+        # module_source: the module checkout's version, which the graph (step 1) is built from
+        return {"module": self.a.module, "module_dir": os.path.abspath(self.a.module_dir),
+                "module_source": source_version(self.a.module_dir), "root": self.a.root,
                 "format": self.a.format, "docs": os.path.abspath(self.a.docs),
                 "ignore": os.path.abspath(self.a.ignore) if self.a.ignore else "",
                 "transformed": os.path.abspath(self.a.transformed) if self.a.transformed else ""}
@@ -124,7 +126,7 @@ class Workflow:
     # steps 2 and 8 read them as given to each invocation, so that step 8 can be redone with others. Not argmatch's
     # args for run 1, which instruments nothing.
     RESUME_SETTINGS = {
-        "2-full-keys": ("settings.json", ["module", "module_dir", "root", "format", "docs"]),
+        "2-full-keys": ("settings.json", ["module", "module_dir", "module_source", "root", "format", "docs"]),
         "3-chains": ("testbed.json", ["testbed", "wait", "vm"]),
         "5-matches": ("testbed.json", ["testbed", "wait", "vm", "argmatch_args"]),
     }
@@ -146,6 +148,8 @@ class Workflow:
         current = self.static_settings() if name == "settings.json" else self.testbed_settings(self.make_testbed())
         diff = []
         for k in fields:
+            if k == "module_source" and k not in recorded:
+                continue  # (runs before paramtrack recorded it, 2026-11-14)
             r, c = recorded.get(k), current.get(k)
             if isinstance(r, dict) and isinstance(c, dict):  # (argmatch's args: just the ones that differ)
                 diff += [f"{k} {a}: recorded {r.get(a)!r}, now {c.get(a)!r}" for a in sorted(r.keys() | c.keys())
