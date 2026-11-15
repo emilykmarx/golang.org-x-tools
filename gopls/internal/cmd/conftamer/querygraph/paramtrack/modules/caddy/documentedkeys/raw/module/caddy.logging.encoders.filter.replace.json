@@ -1,0 +1,1 @@
+{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2/modules/logging.ReplaceFilter","struct_fields":[{"key":"value","value":{"type":"string"}}],"doc":"ReplaceFilter is a Caddy log field filter that\nreplaces the field with the indicated string.\n"},"repo":"https://github.com/caddyserver/caddy"}]}

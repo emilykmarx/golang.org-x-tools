@@ -583,7 +583,7 @@ def fill_from_run(args):
     args.configkeys = args.configkeys or need(f"{run}/4-configkeys/configkeys.csv")
     args.param_values = args.param_values or need(f"{run}/4-configkeys/param_values.txt")
     args.graph = args.graph or need(f"{run}/1-unmarshaler-graph/unmarshaler_subgraph.text")
-    args.docs = args.docs or settings["docs"]
+    args.docs = args.docs or modules.moved(settings["docs"])
     args.module = args.module or settings["module"]
     args.module_dir = args.module_dir or settings["module_dir"]
     args.root = settings["root"] if args.root is None else args.root

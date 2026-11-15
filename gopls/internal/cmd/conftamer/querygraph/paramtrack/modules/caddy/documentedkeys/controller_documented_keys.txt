@@ -1,0 +1,16 @@
+configmap.acmeCA	string
+configmap.acmeEABKeyId	string
+configmap.acmeEABMacKey	string
+configmap.debug	bool
+configmap.email	string
+configmap.experimentalSmartSort	bool
+configmap.metrics	bool
+configmap.onDemandAsk	string
+configmap.onDemandTLS	bool
+configmap.proxyProtocol	bool
+flag.class-name	string
+flag.class-name-required	bool
+flag.config-map	string
+flag.lease-id	string
+flag.namespace	string
+flag.verbose	bool

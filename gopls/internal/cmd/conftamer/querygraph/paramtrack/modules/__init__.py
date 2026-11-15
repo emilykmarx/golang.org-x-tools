@@ -14,6 +14,8 @@ specific to that module, and whose module.py holds the settings and hooks the wo
 - UNSET_REASONS: why the concreteconfig skill left target keys unset: (reason, fnmatch patterns)
 - UNTAGGED_KEYS (optional, default False): lift our exception for untagged fields (gopls conftamer -untagged-keys,
   configkeys --untagged-keys; see ct.UntaggedAreKeys)
+- docs_entry(key, type) (optional): stats.read_docs' hook for the docs list's lines: the (key, type) to use (type
+  "map" for maps), or None for a line that isn't a key
 - extra_graph(module_dir, out_path) (optional): write gopls conftamer's -extra file (roots and edges the source code
   doesn't show: the keys a custom unmarshaler or run-time decoding picks, e.g. Prometheus' SD configs, Caddy's
   modules); paramtrack's step 1 runs it into its directory
@@ -43,7 +45,9 @@ def load(module):
 
 def moved(path):
     """A settings.json path as of now: runs from before 2026-11-12 recorded paramtrack/ignore/<module>.txt and
-    paramtrack/transformed/<module>.txt, since moved to modules/<module>/ignore.txt and transformed.txt"""
+    paramtrack/transformed/<module>.txt, since moved to modules/<module>/ignore.txt and transformed.txt; runs from
+    before 2026-11-14 recorded documented-key lists outside paramtrack (config_tracing/caddy-config-keys/,
+    prom-test-infra/prombench/), since moved to modules/<module>/documentedkeys/ with the same names"""
     if path and not os.path.exists(path):
         d, f = os.path.split(path)
         kind = os.path.basename(d)
@@ -51,4 +55,7 @@ def moved(path):
             new = f"{HERE}/{f[:-len('.txt')]}/{kind}.txt"
             if os.path.exists(new):
                 return new
+        found = glob.glob(f"{HERE}/*/documentedkeys/{f}")
+        if len(found) == 1:
+            return found[0]
     return path

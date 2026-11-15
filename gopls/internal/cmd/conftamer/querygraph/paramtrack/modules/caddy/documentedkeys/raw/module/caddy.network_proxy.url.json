@@ -1,0 +1,1 @@
+{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2/modules/internal/network.ProxyFromURL","struct_fields":[{"key":"url","value":{"type":"string"}}],"doc":"The \"url\" proxy source uses the defined URL as the proxy\n"},"repo":"https://github.com/caddyserver/caddy"}]}

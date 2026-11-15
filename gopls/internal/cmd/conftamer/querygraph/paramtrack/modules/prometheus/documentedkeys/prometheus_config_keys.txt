@@ -1,0 +1,2671 @@
+global.scrape_interval	<duration>
+global.scrape_timeout	<duration>
+global.scrape_protocols	[<string>, ...]
+global.evaluation_interval	<duration>
+global.rule_query_offset	<duration>
+global.external_labels	map
+global.query_log_file	<string>
+global.scrape_failure_log_file	<string>
+global.body_size_limit	<size>
+global.sample_limit	<int>
+global.label_limit	<int>
+global.label_name_length_limit	<int>
+global.label_value_length_limit	<int>
+global.target_limit	<int>
+global.keep_dropped_targets	<int>
+global.metric_name_validation_scheme	<string>
+runtime.gogc	<int>
+rule_files	<filepath_glob> ...
+scrape_config_files	<filepath_glob> ...
+scrape_configs.job_name	<job_name>
+scrape_configs.scrape_interval	<duration>
+scrape_configs.scrape_timeout	<duration>
+scrape_configs.scrape_protocols	[<string>, ...]
+scrape_configs.fallback_scrape_protocol	<string>
+scrape_configs.always_scrape_classic_histograms	<boolean>
+scrape_configs.metrics_path	<path>
+scrape_configs.honor_labels	<boolean>
+scrape_configs.honor_timestamps	<boolean>
+scrape_configs.track_timestamps_staleness	<boolean>
+scrape_configs.scheme	<scheme>
+scrape_configs.params	map
+scrape_configs.enable_compression	<boolean>
+scrape_configs.scrape_failure_log_file	<string>
+scrape_configs.basic_auth.username	<string>
+scrape_configs.basic_auth.username_file	<string>
+scrape_configs.basic_auth.password	<secret>
+scrape_configs.basic_auth.password_file	<string>
+scrape_configs.authorization.type	<string>
+scrape_configs.authorization.credentials	<secret>
+scrape_configs.authorization.credentials_file	<filename>
+scrape_configs.oauth2.client_id	<string>
+scrape_configs.oauth2.client_secret	<secret>
+scrape_configs.oauth2.client_secret_file	<filename>
+scrape_configs.oauth2.scopes	<string> ...
+scrape_configs.oauth2.token_url	<string>
+scrape_configs.oauth2.endpoint_params	map
+scrape_configs.oauth2.tls_config.ca	<string>
+scrape_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.oauth2.tls_config.cert	<string>
+scrape_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.oauth2.tls_config.key	<secret>
+scrape_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.oauth2.proxy_url	<string>
+scrape_configs.oauth2.no_proxy	<string>
+scrape_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.oauth2.proxy_connect_header	map
+scrape_configs.oauth2.http_headers	map
+scrape_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.follow_redirects	<boolean>
+scrape_configs.enable_http2	<boolean>
+scrape_configs.tls_config.ca	<string>
+scrape_configs.tls_config.ca_file	<filename>
+scrape_configs.tls_config.cert	<string>
+scrape_configs.tls_config.cert_file	<filename>
+scrape_configs.tls_config.key	<secret>
+scrape_configs.tls_config.key_file	<filename>
+scrape_configs.tls_config.server_name	<string>
+scrape_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.tls_config.min_version	<string>
+scrape_configs.tls_config.max_version	<string>
+scrape_configs.proxy_url	<string>
+scrape_configs.no_proxy	<string>
+scrape_configs.proxy_from_environment	<boolean>
+scrape_configs.proxy_connect_header	map
+scrape_configs.http_headers	map
+scrape_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.azure_sd_configs.environment	<string>
+scrape_configs.azure_sd_configs.authentication_method	<string>
+scrape_configs.azure_sd_configs.subscription_id	<string>
+scrape_configs.azure_sd_configs.tenant_id	<string>
+scrape_configs.azure_sd_configs.client_id	<string>
+scrape_configs.azure_sd_configs.client_secret	<secret>
+scrape_configs.azure_sd_configs.resource_group	<string>
+scrape_configs.azure_sd_configs.refresh_interval	<duration>
+scrape_configs.azure_sd_configs.port	<int>
+scrape_configs.azure_sd_configs.basic_auth.username	<string>
+scrape_configs.azure_sd_configs.basic_auth.username_file	<string>
+scrape_configs.azure_sd_configs.basic_auth.password	<secret>
+scrape_configs.azure_sd_configs.basic_auth.password_file	<string>
+scrape_configs.azure_sd_configs.authorization.type	<string>
+scrape_configs.azure_sd_configs.authorization.credentials	<secret>
+scrape_configs.azure_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.azure_sd_configs.oauth2.client_id	<string>
+scrape_configs.azure_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.azure_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.azure_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.azure_sd_configs.oauth2.token_url	<string>
+scrape_configs.azure_sd_configs.oauth2.endpoint_params	map
+scrape_configs.azure_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.azure_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.azure_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.azure_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.azure_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.azure_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.azure_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.azure_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.azure_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.azure_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.azure_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.azure_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.azure_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.azure_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.azure_sd_configs.oauth2.http_headers	map
+scrape_configs.azure_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.azure_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.azure_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.azure_sd_configs.follow_redirects	<boolean>
+scrape_configs.azure_sd_configs.enable_http2	<boolean>
+scrape_configs.azure_sd_configs.tls_config.ca	<string>
+scrape_configs.azure_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.azure_sd_configs.tls_config.cert	<string>
+scrape_configs.azure_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.azure_sd_configs.tls_config.key	<secret>
+scrape_configs.azure_sd_configs.tls_config.key_file	<filename>
+scrape_configs.azure_sd_configs.tls_config.server_name	<string>
+scrape_configs.azure_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.azure_sd_configs.tls_config.min_version	<string>
+scrape_configs.azure_sd_configs.tls_config.max_version	<string>
+scrape_configs.azure_sd_configs.proxy_url	<string>
+scrape_configs.azure_sd_configs.no_proxy	<string>
+scrape_configs.azure_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.azure_sd_configs.proxy_connect_header	map
+scrape_configs.azure_sd_configs.http_headers	map
+scrape_configs.azure_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.azure_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.azure_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.consul_sd_configs.server	<host>
+scrape_configs.consul_sd_configs.path_prefix	<string>
+scrape_configs.consul_sd_configs.token	<secret>
+scrape_configs.consul_sd_configs.datacenter	<string>
+scrape_configs.consul_sd_configs.namespace	<string>
+scrape_configs.consul_sd_configs.partition	<string>
+scrape_configs.consul_sd_configs.scheme	<string>
+scrape_configs.consul_sd_configs.username	<string>
+scrape_configs.consul_sd_configs.password	<secret>
+scrape_configs.consul_sd_configs.services	<string>
+scrape_configs.consul_sd_configs.filter	<string>
+scrape_configs.consul_sd_configs.tags	<string>
+scrape_configs.consul_sd_configs.node_meta	map
+scrape_configs.consul_sd_configs.tag_separator	<string>
+scrape_configs.consul_sd_configs.allow_stale	<boolean>
+scrape_configs.consul_sd_configs.refresh_interval	<duration>
+scrape_configs.consul_sd_configs.basic_auth.username	<string>
+scrape_configs.consul_sd_configs.basic_auth.username_file	<string>
+scrape_configs.consul_sd_configs.basic_auth.password	<secret>
+scrape_configs.consul_sd_configs.basic_auth.password_file	<string>
+scrape_configs.consul_sd_configs.authorization.type	<string>
+scrape_configs.consul_sd_configs.authorization.credentials	<secret>
+scrape_configs.consul_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.consul_sd_configs.oauth2.client_id	<string>
+scrape_configs.consul_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.consul_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.consul_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.consul_sd_configs.oauth2.token_url	<string>
+scrape_configs.consul_sd_configs.oauth2.endpoint_params	map
+scrape_configs.consul_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.consul_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.consul_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.consul_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.consul_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.consul_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.consul_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.consul_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.consul_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.consul_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.consul_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.consul_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.consul_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.consul_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.consul_sd_configs.oauth2.http_headers	map
+scrape_configs.consul_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.consul_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.consul_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.consul_sd_configs.follow_redirects	<boolean>
+scrape_configs.consul_sd_configs.enable_http2	<boolean>
+scrape_configs.consul_sd_configs.tls_config.ca	<string>
+scrape_configs.consul_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.consul_sd_configs.tls_config.cert	<string>
+scrape_configs.consul_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.consul_sd_configs.tls_config.key	<secret>
+scrape_configs.consul_sd_configs.tls_config.key_file	<filename>
+scrape_configs.consul_sd_configs.tls_config.server_name	<string>
+scrape_configs.consul_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.consul_sd_configs.tls_config.min_version	<string>
+scrape_configs.consul_sd_configs.tls_config.max_version	<string>
+scrape_configs.consul_sd_configs.proxy_url	<string>
+scrape_configs.consul_sd_configs.no_proxy	<string>
+scrape_configs.consul_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.consul_sd_configs.proxy_connect_header	map
+scrape_configs.consul_sd_configs.http_headers	map
+scrape_configs.consul_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.consul_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.consul_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.digitalocean_sd_configs.port	<int>
+scrape_configs.digitalocean_sd_configs.refresh_interval	<duration>
+scrape_configs.digitalocean_sd_configs.basic_auth.username	<string>
+scrape_configs.digitalocean_sd_configs.basic_auth.username_file	<string>
+scrape_configs.digitalocean_sd_configs.basic_auth.password	<secret>
+scrape_configs.digitalocean_sd_configs.basic_auth.password_file	<string>
+scrape_configs.digitalocean_sd_configs.authorization.type	<string>
+scrape_configs.digitalocean_sd_configs.authorization.credentials	<secret>
+scrape_configs.digitalocean_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.digitalocean_sd_configs.oauth2.client_id	<string>
+scrape_configs.digitalocean_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.digitalocean_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.digitalocean_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.digitalocean_sd_configs.oauth2.token_url	<string>
+scrape_configs.digitalocean_sd_configs.oauth2.endpoint_params	map
+scrape_configs.digitalocean_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.digitalocean_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.digitalocean_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.digitalocean_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.digitalocean_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.digitalocean_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.digitalocean_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.digitalocean_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.digitalocean_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.digitalocean_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.digitalocean_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.digitalocean_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.digitalocean_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.digitalocean_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.digitalocean_sd_configs.oauth2.http_headers	map
+scrape_configs.digitalocean_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.digitalocean_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.digitalocean_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.digitalocean_sd_configs.follow_redirects	<boolean>
+scrape_configs.digitalocean_sd_configs.enable_http2	<boolean>
+scrape_configs.digitalocean_sd_configs.tls_config.ca	<string>
+scrape_configs.digitalocean_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.digitalocean_sd_configs.tls_config.cert	<string>
+scrape_configs.digitalocean_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.digitalocean_sd_configs.tls_config.key	<secret>
+scrape_configs.digitalocean_sd_configs.tls_config.key_file	<filename>
+scrape_configs.digitalocean_sd_configs.tls_config.server_name	<string>
+scrape_configs.digitalocean_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.digitalocean_sd_configs.tls_config.min_version	<string>
+scrape_configs.digitalocean_sd_configs.tls_config.max_version	<string>
+scrape_configs.digitalocean_sd_configs.proxy_url	<string>
+scrape_configs.digitalocean_sd_configs.no_proxy	<string>
+scrape_configs.digitalocean_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.digitalocean_sd_configs.proxy_connect_header	map
+scrape_configs.digitalocean_sd_configs.http_headers	map
+scrape_configs.digitalocean_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.digitalocean_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.digitalocean_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.docker_sd_configs.host	<string>
+scrape_configs.docker_sd_configs.port	<int>
+scrape_configs.docker_sd_configs.host_networking_host	<string>
+scrape_configs.docker_sd_configs.match_first_network	<boolean>
+scrape_configs.docker_sd_configs.filters.name	<string>
+scrape_configs.docker_sd_configs.filters.values	<string>, [...]
+scrape_configs.docker_sd_configs.refresh_interval	<duration>
+scrape_configs.docker_sd_configs.basic_auth.username	<string>
+scrape_configs.docker_sd_configs.basic_auth.username_file	<string>
+scrape_configs.docker_sd_configs.basic_auth.password	<secret>
+scrape_configs.docker_sd_configs.basic_auth.password_file	<string>
+scrape_configs.docker_sd_configs.authorization.type	<string>
+scrape_configs.docker_sd_configs.authorization.credentials	<secret>
+scrape_configs.docker_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.docker_sd_configs.oauth2.client_id	<string>
+scrape_configs.docker_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.docker_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.docker_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.docker_sd_configs.oauth2.token_url	<string>
+scrape_configs.docker_sd_configs.oauth2.endpoint_params	map
+scrape_configs.docker_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.docker_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.docker_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.docker_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.docker_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.docker_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.docker_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.docker_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.docker_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.docker_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.docker_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.docker_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.docker_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.docker_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.docker_sd_configs.oauth2.http_headers	map
+scrape_configs.docker_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.docker_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.docker_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.docker_sd_configs.follow_redirects	<boolean>
+scrape_configs.docker_sd_configs.enable_http2	<boolean>
+scrape_configs.docker_sd_configs.tls_config.ca	<string>
+scrape_configs.docker_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.docker_sd_configs.tls_config.cert	<string>
+scrape_configs.docker_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.docker_sd_configs.tls_config.key	<secret>
+scrape_configs.docker_sd_configs.tls_config.key_file	<filename>
+scrape_configs.docker_sd_configs.tls_config.server_name	<string>
+scrape_configs.docker_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.docker_sd_configs.tls_config.min_version	<string>
+scrape_configs.docker_sd_configs.tls_config.max_version	<string>
+scrape_configs.docker_sd_configs.proxy_url	<string>
+scrape_configs.docker_sd_configs.no_proxy	<string>
+scrape_configs.docker_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.docker_sd_configs.proxy_connect_header	map
+scrape_configs.docker_sd_configs.http_headers	map
+scrape_configs.docker_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.docker_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.docker_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.dockerswarm_sd_configs.host	<string>
+scrape_configs.dockerswarm_sd_configs.role	<string>
+scrape_configs.dockerswarm_sd_configs.port	<int>
+scrape_configs.dockerswarm_sd_configs.filters.name	<string>
+scrape_configs.dockerswarm_sd_configs.filters.values	<string>, [...]
+scrape_configs.dockerswarm_sd_configs.refresh_interval	<duration>
+scrape_configs.dockerswarm_sd_configs.basic_auth.username	<string>
+scrape_configs.dockerswarm_sd_configs.basic_auth.username_file	<string>
+scrape_configs.dockerswarm_sd_configs.basic_auth.password	<secret>
+scrape_configs.dockerswarm_sd_configs.basic_auth.password_file	<string>
+scrape_configs.dockerswarm_sd_configs.authorization.type	<string>
+scrape_configs.dockerswarm_sd_configs.authorization.credentials	<secret>
+scrape_configs.dockerswarm_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.dockerswarm_sd_configs.oauth2.client_id	<string>
+scrape_configs.dockerswarm_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.dockerswarm_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.dockerswarm_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.dockerswarm_sd_configs.oauth2.token_url	<string>
+scrape_configs.dockerswarm_sd_configs.oauth2.endpoint_params	map
+scrape_configs.dockerswarm_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.dockerswarm_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.dockerswarm_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.dockerswarm_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.dockerswarm_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.dockerswarm_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.dockerswarm_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.dockerswarm_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.dockerswarm_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.dockerswarm_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.dockerswarm_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.dockerswarm_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.dockerswarm_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.dockerswarm_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.dockerswarm_sd_configs.oauth2.http_headers	map
+scrape_configs.dockerswarm_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.dockerswarm_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.dockerswarm_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.dockerswarm_sd_configs.follow_redirects	<boolean>
+scrape_configs.dockerswarm_sd_configs.enable_http2	<boolean>
+scrape_configs.dockerswarm_sd_configs.tls_config.ca	<string>
+scrape_configs.dockerswarm_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.dockerswarm_sd_configs.tls_config.cert	<string>
+scrape_configs.dockerswarm_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.dockerswarm_sd_configs.tls_config.key	<secret>
+scrape_configs.dockerswarm_sd_configs.tls_config.key_file	<filename>
+scrape_configs.dockerswarm_sd_configs.tls_config.server_name	<string>
+scrape_configs.dockerswarm_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.dockerswarm_sd_configs.tls_config.min_version	<string>
+scrape_configs.dockerswarm_sd_configs.tls_config.max_version	<string>
+scrape_configs.dockerswarm_sd_configs.proxy_url	<string>
+scrape_configs.dockerswarm_sd_configs.no_proxy	<string>
+scrape_configs.dockerswarm_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.dockerswarm_sd_configs.proxy_connect_header	map
+scrape_configs.dockerswarm_sd_configs.http_headers	map
+scrape_configs.dockerswarm_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.dockerswarm_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.dockerswarm_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.dns_sd_configs.names	<string>
+scrape_configs.dns_sd_configs.type	<string>
+scrape_configs.dns_sd_configs.port	<int>
+scrape_configs.dns_sd_configs.refresh_interval	<duration>
+scrape_configs.ec2_sd_configs.region	<string>
+scrape_configs.ec2_sd_configs.endpoint	<string>
+scrape_configs.ec2_sd_configs.access_key	<string>
+scrape_configs.ec2_sd_configs.secret_key	<secret>
+scrape_configs.ec2_sd_configs.profile	<string>
+scrape_configs.ec2_sd_configs.role_arn	<string>
+scrape_configs.ec2_sd_configs.refresh_interval	<duration>
+scrape_configs.ec2_sd_configs.port	<int>
+scrape_configs.ec2_sd_configs.filters.name	<string>
+scrape_configs.ec2_sd_configs.filters.values	<string>, [...]
+scrape_configs.ec2_sd_configs.basic_auth.username	<string>
+scrape_configs.ec2_sd_configs.basic_auth.username_file	<string>
+scrape_configs.ec2_sd_configs.basic_auth.password	<secret>
+scrape_configs.ec2_sd_configs.basic_auth.password_file	<string>
+scrape_configs.ec2_sd_configs.authorization.type	<string>
+scrape_configs.ec2_sd_configs.authorization.credentials	<secret>
+scrape_configs.ec2_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.ec2_sd_configs.oauth2.client_id	<string>
+scrape_configs.ec2_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.ec2_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.ec2_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.ec2_sd_configs.oauth2.token_url	<string>
+scrape_configs.ec2_sd_configs.oauth2.endpoint_params	map
+scrape_configs.ec2_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.ec2_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.ec2_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.ec2_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.ec2_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.ec2_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.ec2_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.ec2_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.ec2_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.ec2_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.ec2_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.ec2_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.ec2_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.ec2_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.ec2_sd_configs.oauth2.http_headers	map
+scrape_configs.ec2_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.ec2_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.ec2_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.ec2_sd_configs.follow_redirects	<boolean>
+scrape_configs.ec2_sd_configs.enable_http2	<boolean>
+scrape_configs.ec2_sd_configs.tls_config.ca	<string>
+scrape_configs.ec2_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.ec2_sd_configs.tls_config.cert	<string>
+scrape_configs.ec2_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.ec2_sd_configs.tls_config.key	<secret>
+scrape_configs.ec2_sd_configs.tls_config.key_file	<filename>
+scrape_configs.ec2_sd_configs.tls_config.server_name	<string>
+scrape_configs.ec2_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.ec2_sd_configs.tls_config.min_version	<string>
+scrape_configs.ec2_sd_configs.tls_config.max_version	<string>
+scrape_configs.ec2_sd_configs.proxy_url	<string>
+scrape_configs.ec2_sd_configs.no_proxy	<string>
+scrape_configs.ec2_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.ec2_sd_configs.proxy_connect_header	map
+scrape_configs.ec2_sd_configs.http_headers	map
+scrape_configs.ec2_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.ec2_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.ec2_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.eureka_sd_configs.server	<string>
+scrape_configs.eureka_sd_configs.refresh_interval	<duration>
+scrape_configs.eureka_sd_configs.basic_auth.username	<string>
+scrape_configs.eureka_sd_configs.basic_auth.username_file	<string>
+scrape_configs.eureka_sd_configs.basic_auth.password	<secret>
+scrape_configs.eureka_sd_configs.basic_auth.password_file	<string>
+scrape_configs.eureka_sd_configs.authorization.type	<string>
+scrape_configs.eureka_sd_configs.authorization.credentials	<secret>
+scrape_configs.eureka_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.eureka_sd_configs.oauth2.client_id	<string>
+scrape_configs.eureka_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.eureka_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.eureka_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.eureka_sd_configs.oauth2.token_url	<string>
+scrape_configs.eureka_sd_configs.oauth2.endpoint_params	map
+scrape_configs.eureka_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.eureka_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.eureka_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.eureka_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.eureka_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.eureka_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.eureka_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.eureka_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.eureka_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.eureka_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.eureka_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.eureka_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.eureka_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.eureka_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.eureka_sd_configs.oauth2.http_headers	map
+scrape_configs.eureka_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.eureka_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.eureka_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.eureka_sd_configs.follow_redirects	<boolean>
+scrape_configs.eureka_sd_configs.enable_http2	<boolean>
+scrape_configs.eureka_sd_configs.tls_config.ca	<string>
+scrape_configs.eureka_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.eureka_sd_configs.tls_config.cert	<string>
+scrape_configs.eureka_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.eureka_sd_configs.tls_config.key	<secret>
+scrape_configs.eureka_sd_configs.tls_config.key_file	<filename>
+scrape_configs.eureka_sd_configs.tls_config.server_name	<string>
+scrape_configs.eureka_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.eureka_sd_configs.tls_config.min_version	<string>
+scrape_configs.eureka_sd_configs.tls_config.max_version	<string>
+scrape_configs.eureka_sd_configs.proxy_url	<string>
+scrape_configs.eureka_sd_configs.no_proxy	<string>
+scrape_configs.eureka_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.eureka_sd_configs.proxy_connect_header	map
+scrape_configs.eureka_sd_configs.http_headers	map
+scrape_configs.eureka_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.eureka_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.eureka_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.file_sd_configs.files	<filename_pattern> ...
+scrape_configs.file_sd_configs.refresh_interval	<duration>
+scrape_configs.gce_sd_configs.project	<string>
+scrape_configs.gce_sd_configs.zone	<string>
+scrape_configs.gce_sd_configs.filter	<string>
+scrape_configs.gce_sd_configs.refresh_interval	<duration>
+scrape_configs.gce_sd_configs.port	<int>
+scrape_configs.gce_sd_configs.tag_separator	<string>
+scrape_configs.hetzner_sd_configs.role	<string>
+scrape_configs.hetzner_sd_configs.port	<int>
+scrape_configs.hetzner_sd_configs.refresh_interval	<duration>
+scrape_configs.hetzner_sd_configs.basic_auth.username	<string>
+scrape_configs.hetzner_sd_configs.basic_auth.username_file	<string>
+scrape_configs.hetzner_sd_configs.basic_auth.password	<secret>
+scrape_configs.hetzner_sd_configs.basic_auth.password_file	<string>
+scrape_configs.hetzner_sd_configs.authorization.type	<string>
+scrape_configs.hetzner_sd_configs.authorization.credentials	<secret>
+scrape_configs.hetzner_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.hetzner_sd_configs.oauth2.client_id	<string>
+scrape_configs.hetzner_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.hetzner_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.hetzner_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.hetzner_sd_configs.oauth2.token_url	<string>
+scrape_configs.hetzner_sd_configs.oauth2.endpoint_params	map
+scrape_configs.hetzner_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.hetzner_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.hetzner_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.hetzner_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.hetzner_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.hetzner_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.hetzner_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.hetzner_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.hetzner_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.hetzner_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.hetzner_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.hetzner_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.hetzner_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.hetzner_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.hetzner_sd_configs.oauth2.http_headers	map
+scrape_configs.hetzner_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.hetzner_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.hetzner_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.hetzner_sd_configs.follow_redirects	<boolean>
+scrape_configs.hetzner_sd_configs.enable_http2	<boolean>
+scrape_configs.hetzner_sd_configs.tls_config.ca	<string>
+scrape_configs.hetzner_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.hetzner_sd_configs.tls_config.cert	<string>
+scrape_configs.hetzner_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.hetzner_sd_configs.tls_config.key	<secret>
+scrape_configs.hetzner_sd_configs.tls_config.key_file	<filename>
+scrape_configs.hetzner_sd_configs.tls_config.server_name	<string>
+scrape_configs.hetzner_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.hetzner_sd_configs.tls_config.min_version	<string>
+scrape_configs.hetzner_sd_configs.tls_config.max_version	<string>
+scrape_configs.hetzner_sd_configs.proxy_url	<string>
+scrape_configs.hetzner_sd_configs.no_proxy	<string>
+scrape_configs.hetzner_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.hetzner_sd_configs.proxy_connect_header	map
+scrape_configs.hetzner_sd_configs.http_headers	map
+scrape_configs.hetzner_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.hetzner_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.hetzner_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.http_sd_configs.url	<string>
+scrape_configs.http_sd_configs.refresh_interval	<duration>
+scrape_configs.http_sd_configs.basic_auth.username	<string>
+scrape_configs.http_sd_configs.basic_auth.username_file	<string>
+scrape_configs.http_sd_configs.basic_auth.password	<secret>
+scrape_configs.http_sd_configs.basic_auth.password_file	<string>
+scrape_configs.http_sd_configs.authorization.type	<string>
+scrape_configs.http_sd_configs.authorization.credentials	<secret>
+scrape_configs.http_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.http_sd_configs.oauth2.client_id	<string>
+scrape_configs.http_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.http_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.http_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.http_sd_configs.oauth2.token_url	<string>
+scrape_configs.http_sd_configs.oauth2.endpoint_params	map
+scrape_configs.http_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.http_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.http_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.http_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.http_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.http_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.http_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.http_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.http_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.http_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.http_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.http_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.http_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.http_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.http_sd_configs.oauth2.http_headers	map
+scrape_configs.http_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.http_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.http_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.http_sd_configs.follow_redirects	<boolean>
+scrape_configs.http_sd_configs.enable_http2	<boolean>
+scrape_configs.http_sd_configs.tls_config.ca	<string>
+scrape_configs.http_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.http_sd_configs.tls_config.cert	<string>
+scrape_configs.http_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.http_sd_configs.tls_config.key	<secret>
+scrape_configs.http_sd_configs.tls_config.key_file	<filename>
+scrape_configs.http_sd_configs.tls_config.server_name	<string>
+scrape_configs.http_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.http_sd_configs.tls_config.min_version	<string>
+scrape_configs.http_sd_configs.tls_config.max_version	<string>
+scrape_configs.http_sd_configs.proxy_url	<string>
+scrape_configs.http_sd_configs.no_proxy	<string>
+scrape_configs.http_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.http_sd_configs.proxy_connect_header	map
+scrape_configs.http_sd_configs.http_headers	map
+scrape_configs.http_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.http_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.http_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.ionos_sd_configs.datacenter_id	<string>
+scrape_configs.ionos_sd_configs.port	<int>
+scrape_configs.ionos_sd_configs.refresh_interval	<duration>
+scrape_configs.ionos_sd_configs.basic_auth.username	<string>
+scrape_configs.ionos_sd_configs.basic_auth.username_file	<string>
+scrape_configs.ionos_sd_configs.basic_auth.password	<secret>
+scrape_configs.ionos_sd_configs.basic_auth.password_file	<string>
+scrape_configs.ionos_sd_configs.authorization.type	<string>
+scrape_configs.ionos_sd_configs.authorization.credentials	<secret>
+scrape_configs.ionos_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.ionos_sd_configs.oauth2.client_id	<string>
+scrape_configs.ionos_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.ionos_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.ionos_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.ionos_sd_configs.oauth2.token_url	<string>
+scrape_configs.ionos_sd_configs.oauth2.endpoint_params	map
+scrape_configs.ionos_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.ionos_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.ionos_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.ionos_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.ionos_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.ionos_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.ionos_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.ionos_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.ionos_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.ionos_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.ionos_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.ionos_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.ionos_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.ionos_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.ionos_sd_configs.oauth2.http_headers	map
+scrape_configs.ionos_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.ionos_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.ionos_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.ionos_sd_configs.follow_redirects	<boolean>
+scrape_configs.ionos_sd_configs.enable_http2	<boolean>
+scrape_configs.ionos_sd_configs.tls_config.ca	<string>
+scrape_configs.ionos_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.ionos_sd_configs.tls_config.cert	<string>
+scrape_configs.ionos_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.ionos_sd_configs.tls_config.key	<secret>
+scrape_configs.ionos_sd_configs.tls_config.key_file	<filename>
+scrape_configs.ionos_sd_configs.tls_config.server_name	<string>
+scrape_configs.ionos_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.ionos_sd_configs.tls_config.min_version	<string>
+scrape_configs.ionos_sd_configs.tls_config.max_version	<string>
+scrape_configs.ionos_sd_configs.proxy_url	<string>
+scrape_configs.ionos_sd_configs.no_proxy	<string>
+scrape_configs.ionos_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.ionos_sd_configs.proxy_connect_header	map
+scrape_configs.ionos_sd_configs.http_headers	map
+scrape_configs.ionos_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.ionos_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.ionos_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.kubernetes_sd_configs.api_server	<host>
+scrape_configs.kubernetes_sd_configs.role	<string>
+scrape_configs.kubernetes_sd_configs.kubeconfig_file	<filename>
+scrape_configs.kubernetes_sd_configs.namespaces.own_namespace	<boolean>
+scrape_configs.kubernetes_sd_configs.namespaces.names	<string>
+scrape_configs.kubernetes_sd_configs.selectors.role	<string>
+scrape_configs.kubernetes_sd_configs.selectors.label	<string>
+scrape_configs.kubernetes_sd_configs.selectors.field	<string>
+scrape_configs.kubernetes_sd_configs.attach_metadata.node	<boolean>
+scrape_configs.kubernetes_sd_configs.basic_auth.username	<string>
+scrape_configs.kubernetes_sd_configs.basic_auth.username_file	<string>
+scrape_configs.kubernetes_sd_configs.basic_auth.password	<secret>
+scrape_configs.kubernetes_sd_configs.basic_auth.password_file	<string>
+scrape_configs.kubernetes_sd_configs.authorization.type	<string>
+scrape_configs.kubernetes_sd_configs.authorization.credentials	<secret>
+scrape_configs.kubernetes_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.kubernetes_sd_configs.oauth2.client_id	<string>
+scrape_configs.kubernetes_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.kubernetes_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.kubernetes_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.kubernetes_sd_configs.oauth2.token_url	<string>
+scrape_configs.kubernetes_sd_configs.oauth2.endpoint_params	map
+scrape_configs.kubernetes_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.kubernetes_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.kubernetes_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.kubernetes_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.kubernetes_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.kubernetes_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.kubernetes_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.kubernetes_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.kubernetes_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.kubernetes_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.kubernetes_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.kubernetes_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.kubernetes_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.kubernetes_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.kubernetes_sd_configs.oauth2.http_headers	map
+scrape_configs.kubernetes_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.kubernetes_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.kubernetes_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.kubernetes_sd_configs.follow_redirects	<boolean>
+scrape_configs.kubernetes_sd_configs.enable_http2	<boolean>
+scrape_configs.kubernetes_sd_configs.tls_config.ca	<string>
+scrape_configs.kubernetes_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.kubernetes_sd_configs.tls_config.cert	<string>
+scrape_configs.kubernetes_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.kubernetes_sd_configs.tls_config.key	<secret>
+scrape_configs.kubernetes_sd_configs.tls_config.key_file	<filename>
+scrape_configs.kubernetes_sd_configs.tls_config.server_name	<string>
+scrape_configs.kubernetes_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.kubernetes_sd_configs.tls_config.min_version	<string>
+scrape_configs.kubernetes_sd_configs.tls_config.max_version	<string>
+scrape_configs.kubernetes_sd_configs.proxy_url	<string>
+scrape_configs.kubernetes_sd_configs.no_proxy	<string>
+scrape_configs.kubernetes_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.kubernetes_sd_configs.proxy_connect_header	map
+scrape_configs.kubernetes_sd_configs.http_headers	map
+scrape_configs.kubernetes_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.kubernetes_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.kubernetes_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.kuma_sd_configs.server	<string>
+scrape_configs.kuma_sd_configs.client_id	<string>
+scrape_configs.kuma_sd_configs.refresh_interval	<duration>
+scrape_configs.kuma_sd_configs.fetch_timeout	<duration>
+scrape_configs.kuma_sd_configs.basic_auth.username	<string>
+scrape_configs.kuma_sd_configs.basic_auth.username_file	<string>
+scrape_configs.kuma_sd_configs.basic_auth.password	<secret>
+scrape_configs.kuma_sd_configs.basic_auth.password_file	<string>
+scrape_configs.kuma_sd_configs.authorization.type	<string>
+scrape_configs.kuma_sd_configs.authorization.credentials	<secret>
+scrape_configs.kuma_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.kuma_sd_configs.oauth2.client_id	<string>
+scrape_configs.kuma_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.kuma_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.kuma_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.kuma_sd_configs.oauth2.token_url	<string>
+scrape_configs.kuma_sd_configs.oauth2.endpoint_params	map
+scrape_configs.kuma_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.kuma_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.kuma_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.kuma_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.kuma_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.kuma_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.kuma_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.kuma_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.kuma_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.kuma_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.kuma_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.kuma_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.kuma_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.kuma_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.kuma_sd_configs.oauth2.http_headers	map
+scrape_configs.kuma_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.kuma_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.kuma_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.kuma_sd_configs.follow_redirects	<boolean>
+scrape_configs.kuma_sd_configs.enable_http2	<boolean>
+scrape_configs.kuma_sd_configs.tls_config.ca	<string>
+scrape_configs.kuma_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.kuma_sd_configs.tls_config.cert	<string>
+scrape_configs.kuma_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.kuma_sd_configs.tls_config.key	<secret>
+scrape_configs.kuma_sd_configs.tls_config.key_file	<filename>
+scrape_configs.kuma_sd_configs.tls_config.server_name	<string>
+scrape_configs.kuma_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.kuma_sd_configs.tls_config.min_version	<string>
+scrape_configs.kuma_sd_configs.tls_config.max_version	<string>
+scrape_configs.kuma_sd_configs.proxy_url	<string>
+scrape_configs.kuma_sd_configs.no_proxy	<string>
+scrape_configs.kuma_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.kuma_sd_configs.proxy_connect_header	map
+scrape_configs.kuma_sd_configs.http_headers	map
+scrape_configs.kuma_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.kuma_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.kuma_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.lightsail_sd_configs.region	<string>
+scrape_configs.lightsail_sd_configs.endpoint	<string>
+scrape_configs.lightsail_sd_configs.access_key	<string>
+scrape_configs.lightsail_sd_configs.secret_key	<secret>
+scrape_configs.lightsail_sd_configs.profile	<string>
+scrape_configs.lightsail_sd_configs.role_arn	<string>
+scrape_configs.lightsail_sd_configs.refresh_interval	<duration>
+scrape_configs.lightsail_sd_configs.port	<int>
+scrape_configs.lightsail_sd_configs.basic_auth.username	<string>
+scrape_configs.lightsail_sd_configs.basic_auth.username_file	<string>
+scrape_configs.lightsail_sd_configs.basic_auth.password	<secret>
+scrape_configs.lightsail_sd_configs.basic_auth.password_file	<string>
+scrape_configs.lightsail_sd_configs.authorization.type	<string>
+scrape_configs.lightsail_sd_configs.authorization.credentials	<secret>
+scrape_configs.lightsail_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.lightsail_sd_configs.oauth2.client_id	<string>
+scrape_configs.lightsail_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.lightsail_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.lightsail_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.lightsail_sd_configs.oauth2.token_url	<string>
+scrape_configs.lightsail_sd_configs.oauth2.endpoint_params	map
+scrape_configs.lightsail_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.lightsail_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.lightsail_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.lightsail_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.lightsail_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.lightsail_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.lightsail_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.lightsail_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.lightsail_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.lightsail_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.lightsail_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.lightsail_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.lightsail_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.lightsail_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.lightsail_sd_configs.oauth2.http_headers	map
+scrape_configs.lightsail_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.lightsail_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.lightsail_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.lightsail_sd_configs.follow_redirects	<boolean>
+scrape_configs.lightsail_sd_configs.enable_http2	<boolean>
+scrape_configs.lightsail_sd_configs.tls_config.ca	<string>
+scrape_configs.lightsail_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.lightsail_sd_configs.tls_config.cert	<string>
+scrape_configs.lightsail_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.lightsail_sd_configs.tls_config.key	<secret>
+scrape_configs.lightsail_sd_configs.tls_config.key_file	<filename>
+scrape_configs.lightsail_sd_configs.tls_config.server_name	<string>
+scrape_configs.lightsail_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.lightsail_sd_configs.tls_config.min_version	<string>
+scrape_configs.lightsail_sd_configs.tls_config.max_version	<string>
+scrape_configs.lightsail_sd_configs.proxy_url	<string>
+scrape_configs.lightsail_sd_configs.no_proxy	<string>
+scrape_configs.lightsail_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.lightsail_sd_configs.proxy_connect_header	map
+scrape_configs.lightsail_sd_configs.http_headers	map
+scrape_configs.lightsail_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.lightsail_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.lightsail_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.linode_sd_configs.region	<string>
+scrape_configs.linode_sd_configs.port	<int>
+scrape_configs.linode_sd_configs.tag_separator	<string>
+scrape_configs.linode_sd_configs.refresh_interval	<duration>
+scrape_configs.linode_sd_configs.basic_auth.username	<string>
+scrape_configs.linode_sd_configs.basic_auth.username_file	<string>
+scrape_configs.linode_sd_configs.basic_auth.password	<secret>
+scrape_configs.linode_sd_configs.basic_auth.password_file	<string>
+scrape_configs.linode_sd_configs.authorization.type	<string>
+scrape_configs.linode_sd_configs.authorization.credentials	<secret>
+scrape_configs.linode_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.linode_sd_configs.oauth2.client_id	<string>
+scrape_configs.linode_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.linode_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.linode_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.linode_sd_configs.oauth2.token_url	<string>
+scrape_configs.linode_sd_configs.oauth2.endpoint_params	map
+scrape_configs.linode_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.linode_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.linode_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.linode_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.linode_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.linode_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.linode_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.linode_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.linode_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.linode_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.linode_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.linode_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.linode_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.linode_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.linode_sd_configs.oauth2.http_headers	map
+scrape_configs.linode_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.linode_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.linode_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.linode_sd_configs.follow_redirects	<boolean>
+scrape_configs.linode_sd_configs.enable_http2	<boolean>
+scrape_configs.linode_sd_configs.tls_config.ca	<string>
+scrape_configs.linode_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.linode_sd_configs.tls_config.cert	<string>
+scrape_configs.linode_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.linode_sd_configs.tls_config.key	<secret>
+scrape_configs.linode_sd_configs.tls_config.key_file	<filename>
+scrape_configs.linode_sd_configs.tls_config.server_name	<string>
+scrape_configs.linode_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.linode_sd_configs.tls_config.min_version	<string>
+scrape_configs.linode_sd_configs.tls_config.max_version	<string>
+scrape_configs.linode_sd_configs.proxy_url	<string>
+scrape_configs.linode_sd_configs.no_proxy	<string>
+scrape_configs.linode_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.linode_sd_configs.proxy_connect_header	map
+scrape_configs.linode_sd_configs.http_headers	map
+scrape_configs.linode_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.linode_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.linode_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.marathon_sd_configs.servers	<string>
+scrape_configs.marathon_sd_configs.refresh_interval	<duration>
+scrape_configs.marathon_sd_configs.auth_token	<secret>
+scrape_configs.marathon_sd_configs.auth_token_file	<filename>
+scrape_configs.marathon_sd_configs.basic_auth.username	<string>
+scrape_configs.marathon_sd_configs.basic_auth.username_file	<string>
+scrape_configs.marathon_sd_configs.basic_auth.password	<secret>
+scrape_configs.marathon_sd_configs.basic_auth.password_file	<string>
+scrape_configs.marathon_sd_configs.authorization.type	<string>
+scrape_configs.marathon_sd_configs.authorization.credentials	<secret>
+scrape_configs.marathon_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.marathon_sd_configs.oauth2.client_id	<string>
+scrape_configs.marathon_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.marathon_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.marathon_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.marathon_sd_configs.oauth2.token_url	<string>
+scrape_configs.marathon_sd_configs.oauth2.endpoint_params	map
+scrape_configs.marathon_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.marathon_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.marathon_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.marathon_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.marathon_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.marathon_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.marathon_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.marathon_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.marathon_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.marathon_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.marathon_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.marathon_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.marathon_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.marathon_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.marathon_sd_configs.oauth2.http_headers	map
+scrape_configs.marathon_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.marathon_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.marathon_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.marathon_sd_configs.follow_redirects	<boolean>
+scrape_configs.marathon_sd_configs.enable_http2	<boolean>
+scrape_configs.marathon_sd_configs.tls_config.ca	<string>
+scrape_configs.marathon_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.marathon_sd_configs.tls_config.cert	<string>
+scrape_configs.marathon_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.marathon_sd_configs.tls_config.key	<secret>
+scrape_configs.marathon_sd_configs.tls_config.key_file	<filename>
+scrape_configs.marathon_sd_configs.tls_config.server_name	<string>
+scrape_configs.marathon_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.marathon_sd_configs.tls_config.min_version	<string>
+scrape_configs.marathon_sd_configs.tls_config.max_version	<string>
+scrape_configs.marathon_sd_configs.proxy_url	<string>
+scrape_configs.marathon_sd_configs.no_proxy	<string>
+scrape_configs.marathon_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.marathon_sd_configs.proxy_connect_header	map
+scrape_configs.marathon_sd_configs.http_headers	map
+scrape_configs.marathon_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.marathon_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.marathon_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.nerve_sd_configs.servers	<host>
+scrape_configs.nerve_sd_configs.paths	<string>
+scrape_configs.nerve_sd_configs.timeout	<duration>
+scrape_configs.nomad_sd_configs.allow_stale	<boolean>
+scrape_configs.nomad_sd_configs.namespace	<string>
+scrape_configs.nomad_sd_configs.refresh_interval	<duration>
+scrape_configs.nomad_sd_configs.region	<string>
+scrape_configs.nomad_sd_configs.server	<string>
+scrape_configs.nomad_sd_configs.tag_separator	<string>
+scrape_configs.nomad_sd_configs.basic_auth.username	<string>
+scrape_configs.nomad_sd_configs.basic_auth.username_file	<string>
+scrape_configs.nomad_sd_configs.basic_auth.password	<secret>
+scrape_configs.nomad_sd_configs.basic_auth.password_file	<string>
+scrape_configs.nomad_sd_configs.authorization.type	<string>
+scrape_configs.nomad_sd_configs.authorization.credentials	<secret>
+scrape_configs.nomad_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.nomad_sd_configs.oauth2.client_id	<string>
+scrape_configs.nomad_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.nomad_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.nomad_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.nomad_sd_configs.oauth2.token_url	<string>
+scrape_configs.nomad_sd_configs.oauth2.endpoint_params	map
+scrape_configs.nomad_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.nomad_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.nomad_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.nomad_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.nomad_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.nomad_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.nomad_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.nomad_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.nomad_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.nomad_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.nomad_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.nomad_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.nomad_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.nomad_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.nomad_sd_configs.oauth2.http_headers	map
+scrape_configs.nomad_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.nomad_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.nomad_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.nomad_sd_configs.follow_redirects	<boolean>
+scrape_configs.nomad_sd_configs.enable_http2	<boolean>
+scrape_configs.nomad_sd_configs.tls_config.ca	<string>
+scrape_configs.nomad_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.nomad_sd_configs.tls_config.cert	<string>
+scrape_configs.nomad_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.nomad_sd_configs.tls_config.key	<secret>
+scrape_configs.nomad_sd_configs.tls_config.key_file	<filename>
+scrape_configs.nomad_sd_configs.tls_config.server_name	<string>
+scrape_configs.nomad_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.nomad_sd_configs.tls_config.min_version	<string>
+scrape_configs.nomad_sd_configs.tls_config.max_version	<string>
+scrape_configs.nomad_sd_configs.proxy_url	<string>
+scrape_configs.nomad_sd_configs.no_proxy	<string>
+scrape_configs.nomad_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.nomad_sd_configs.proxy_connect_header	map
+scrape_configs.nomad_sd_configs.http_headers	map
+scrape_configs.nomad_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.nomad_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.nomad_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.openstack_sd_configs.role	<openstack_role>
+scrape_configs.openstack_sd_configs.region	<string>
+scrape_configs.openstack_sd_configs.identity_endpoint	<string>
+scrape_configs.openstack_sd_configs.username	<string>
+scrape_configs.openstack_sd_configs.userid	<string>
+scrape_configs.openstack_sd_configs.password	<secret>
+scrape_configs.openstack_sd_configs.domain_name	<string>
+scrape_configs.openstack_sd_configs.domain_id	<string>
+scrape_configs.openstack_sd_configs.project_name	<string>
+scrape_configs.openstack_sd_configs.project_id	<string>
+scrape_configs.openstack_sd_configs.application_credential_name	<string>
+scrape_configs.openstack_sd_configs.application_credential_id	<string>
+scrape_configs.openstack_sd_configs.application_credential_secret	<secret>
+scrape_configs.openstack_sd_configs.all_tenants	<boolean>
+scrape_configs.openstack_sd_configs.refresh_interval	<duration>
+scrape_configs.openstack_sd_configs.port	<int>
+scrape_configs.openstack_sd_configs.availability	<string>
+scrape_configs.openstack_sd_configs.tls_config.ca	<string>
+scrape_configs.openstack_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.openstack_sd_configs.tls_config.cert	<string>
+scrape_configs.openstack_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.openstack_sd_configs.tls_config.key	<secret>
+scrape_configs.openstack_sd_configs.tls_config.key_file	<filename>
+scrape_configs.openstack_sd_configs.tls_config.server_name	<string>
+scrape_configs.openstack_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.openstack_sd_configs.tls_config.min_version	<string>
+scrape_configs.openstack_sd_configs.tls_config.max_version	<string>
+scrape_configs.ovhcloud_sd_configs.application_key	<string>
+scrape_configs.ovhcloud_sd_configs.application_secret	<secret>
+scrape_configs.ovhcloud_sd_configs.consumer_key	<secret>
+scrape_configs.ovhcloud_sd_configs.service	<string>
+scrape_configs.ovhcloud_sd_configs.endpoint	<string>
+scrape_configs.ovhcloud_sd_configs.refresh_interval	<duration>
+scrape_configs.puppetdb_sd_configs.url	<string>
+scrape_configs.puppetdb_sd_configs.query	<string>
+scrape_configs.puppetdb_sd_configs.include_parameters	<boolean>
+scrape_configs.puppetdb_sd_configs.refresh_interval	<duration>
+scrape_configs.puppetdb_sd_configs.port	<int>
+scrape_configs.puppetdb_sd_configs.basic_auth.username	<string>
+scrape_configs.puppetdb_sd_configs.basic_auth.username_file	<string>
+scrape_configs.puppetdb_sd_configs.basic_auth.password	<secret>
+scrape_configs.puppetdb_sd_configs.basic_auth.password_file	<string>
+scrape_configs.puppetdb_sd_configs.authorization.type	<string>
+scrape_configs.puppetdb_sd_configs.authorization.credentials	<secret>
+scrape_configs.puppetdb_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.puppetdb_sd_configs.oauth2.client_id	<string>
+scrape_configs.puppetdb_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.puppetdb_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.puppetdb_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.puppetdb_sd_configs.oauth2.token_url	<string>
+scrape_configs.puppetdb_sd_configs.oauth2.endpoint_params	map
+scrape_configs.puppetdb_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.puppetdb_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.puppetdb_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.puppetdb_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.puppetdb_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.puppetdb_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.puppetdb_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.puppetdb_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.puppetdb_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.puppetdb_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.puppetdb_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.puppetdb_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.puppetdb_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.puppetdb_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.puppetdb_sd_configs.oauth2.http_headers	map
+scrape_configs.puppetdb_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.puppetdb_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.puppetdb_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.puppetdb_sd_configs.follow_redirects	<boolean>
+scrape_configs.puppetdb_sd_configs.enable_http2	<boolean>
+scrape_configs.puppetdb_sd_configs.tls_config.ca	<string>
+scrape_configs.puppetdb_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.puppetdb_sd_configs.tls_config.cert	<string>
+scrape_configs.puppetdb_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.puppetdb_sd_configs.tls_config.key	<secret>
+scrape_configs.puppetdb_sd_configs.tls_config.key_file	<filename>
+scrape_configs.puppetdb_sd_configs.tls_config.server_name	<string>
+scrape_configs.puppetdb_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.puppetdb_sd_configs.tls_config.min_version	<string>
+scrape_configs.puppetdb_sd_configs.tls_config.max_version	<string>
+scrape_configs.puppetdb_sd_configs.proxy_url	<string>
+scrape_configs.puppetdb_sd_configs.no_proxy	<string>
+scrape_configs.puppetdb_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.puppetdb_sd_configs.proxy_connect_header	map
+scrape_configs.puppetdb_sd_configs.http_headers	map
+scrape_configs.puppetdb_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.puppetdb_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.puppetdb_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.scaleway_sd_configs.access_key	<string>
+scrape_configs.scaleway_sd_configs.secret_key	<secret>
+scrape_configs.scaleway_sd_configs.secret_key_file	<filename>
+scrape_configs.scaleway_sd_configs.project_id	<string>
+scrape_configs.scaleway_sd_configs.role	<string>
+scrape_configs.scaleway_sd_configs.port	<int>
+scrape_configs.scaleway_sd_configs.api_url	<string>
+scrape_configs.scaleway_sd_configs.zone	<string>
+scrape_configs.scaleway_sd_configs.name_filter	<string>
+scrape_configs.scaleway_sd_configs.tags_filter	<string>
+scrape_configs.scaleway_sd_configs.refresh_interval	<duration>
+scrape_configs.scaleway_sd_configs.basic_auth.username	<string>
+scrape_configs.scaleway_sd_configs.basic_auth.username_file	<string>
+scrape_configs.scaleway_sd_configs.basic_auth.password	<secret>
+scrape_configs.scaleway_sd_configs.basic_auth.password_file	<string>
+scrape_configs.scaleway_sd_configs.authorization.type	<string>
+scrape_configs.scaleway_sd_configs.authorization.credentials	<secret>
+scrape_configs.scaleway_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.scaleway_sd_configs.oauth2.client_id	<string>
+scrape_configs.scaleway_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.scaleway_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.scaleway_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.scaleway_sd_configs.oauth2.token_url	<string>
+scrape_configs.scaleway_sd_configs.oauth2.endpoint_params	map
+scrape_configs.scaleway_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.scaleway_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.scaleway_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.scaleway_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.scaleway_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.scaleway_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.scaleway_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.scaleway_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.scaleway_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.scaleway_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.scaleway_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.scaleway_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.scaleway_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.scaleway_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.scaleway_sd_configs.oauth2.http_headers	map
+scrape_configs.scaleway_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.scaleway_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.scaleway_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.scaleway_sd_configs.follow_redirects	<boolean>
+scrape_configs.scaleway_sd_configs.enable_http2	<boolean>
+scrape_configs.scaleway_sd_configs.tls_config.ca	<string>
+scrape_configs.scaleway_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.scaleway_sd_configs.tls_config.cert	<string>
+scrape_configs.scaleway_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.scaleway_sd_configs.tls_config.key	<secret>
+scrape_configs.scaleway_sd_configs.tls_config.key_file	<filename>
+scrape_configs.scaleway_sd_configs.tls_config.server_name	<string>
+scrape_configs.scaleway_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.scaleway_sd_configs.tls_config.min_version	<string>
+scrape_configs.scaleway_sd_configs.tls_config.max_version	<string>
+scrape_configs.scaleway_sd_configs.proxy_url	<string>
+scrape_configs.scaleway_sd_configs.no_proxy	<string>
+scrape_configs.scaleway_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.scaleway_sd_configs.proxy_connect_header	map
+scrape_configs.scaleway_sd_configs.http_headers	map
+scrape_configs.scaleway_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.scaleway_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.scaleway_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.serverset_sd_configs.servers	<host>
+scrape_configs.serverset_sd_configs.paths	<string>
+scrape_configs.serverset_sd_configs.timeout	<duration>
+scrape_configs.triton_sd_configs.account	<string>
+scrape_configs.triton_sd_configs.role	<string>
+scrape_configs.triton_sd_configs.dns_suffix	<string>
+scrape_configs.triton_sd_configs.endpoint	<string>
+scrape_configs.triton_sd_configs.groups	<string> ...
+scrape_configs.triton_sd_configs.port	<int>
+scrape_configs.triton_sd_configs.refresh_interval	<duration>
+scrape_configs.triton_sd_configs.version	<int>
+scrape_configs.triton_sd_configs.tls_config.ca	<string>
+scrape_configs.triton_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.triton_sd_configs.tls_config.cert	<string>
+scrape_configs.triton_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.triton_sd_configs.tls_config.key	<secret>
+scrape_configs.triton_sd_configs.tls_config.key_file	<filename>
+scrape_configs.triton_sd_configs.tls_config.server_name	<string>
+scrape_configs.triton_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.triton_sd_configs.tls_config.min_version	<string>
+scrape_configs.triton_sd_configs.tls_config.max_version	<string>
+scrape_configs.uyuni_sd_configs.server	<string>
+scrape_configs.uyuni_sd_configs.username	<string>
+scrape_configs.uyuni_sd_configs.password	<secret>
+scrape_configs.uyuni_sd_configs.entitlement	<string>
+scrape_configs.uyuni_sd_configs.separator	<string>
+scrape_configs.uyuni_sd_configs.refresh_interval	<duration>
+scrape_configs.uyuni_sd_configs.basic_auth.username	<string>
+scrape_configs.uyuni_sd_configs.basic_auth.username_file	<string>
+scrape_configs.uyuni_sd_configs.basic_auth.password	<secret>
+scrape_configs.uyuni_sd_configs.basic_auth.password_file	<string>
+scrape_configs.uyuni_sd_configs.authorization.type	<string>
+scrape_configs.uyuni_sd_configs.authorization.credentials	<secret>
+scrape_configs.uyuni_sd_configs.authorization.credentials_file	<filename>
+scrape_configs.uyuni_sd_configs.oauth2.client_id	<string>
+scrape_configs.uyuni_sd_configs.oauth2.client_secret	<secret>
+scrape_configs.uyuni_sd_configs.oauth2.client_secret_file	<filename>
+scrape_configs.uyuni_sd_configs.oauth2.scopes	<string> ...
+scrape_configs.uyuni_sd_configs.oauth2.token_url	<string>
+scrape_configs.uyuni_sd_configs.oauth2.endpoint_params	map
+scrape_configs.uyuni_sd_configs.oauth2.tls_config.ca	<string>
+scrape_configs.uyuni_sd_configs.oauth2.tls_config.ca_file	<filename>
+scrape_configs.uyuni_sd_configs.oauth2.tls_config.cert	<string>
+scrape_configs.uyuni_sd_configs.oauth2.tls_config.cert_file	<filename>
+scrape_configs.uyuni_sd_configs.oauth2.tls_config.key	<secret>
+scrape_configs.uyuni_sd_configs.oauth2.tls_config.key_file	<filename>
+scrape_configs.uyuni_sd_configs.oauth2.tls_config.server_name	<string>
+scrape_configs.uyuni_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.uyuni_sd_configs.oauth2.tls_config.min_version	<string>
+scrape_configs.uyuni_sd_configs.oauth2.tls_config.max_version	<string>
+scrape_configs.uyuni_sd_configs.oauth2.proxy_url	<string>
+scrape_configs.uyuni_sd_configs.oauth2.no_proxy	<string>
+scrape_configs.uyuni_sd_configs.oauth2.proxy_from_environment	<boolean>
+scrape_configs.uyuni_sd_configs.oauth2.proxy_connect_header	map
+scrape_configs.uyuni_sd_configs.oauth2.http_headers	map
+scrape_configs.uyuni_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+scrape_configs.uyuni_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.uyuni_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+scrape_configs.uyuni_sd_configs.follow_redirects	<boolean>
+scrape_configs.uyuni_sd_configs.enable_http2	<boolean>
+scrape_configs.uyuni_sd_configs.tls_config.ca	<string>
+scrape_configs.uyuni_sd_configs.tls_config.ca_file	<filename>
+scrape_configs.uyuni_sd_configs.tls_config.cert	<string>
+scrape_configs.uyuni_sd_configs.tls_config.cert_file	<filename>
+scrape_configs.uyuni_sd_configs.tls_config.key	<secret>
+scrape_configs.uyuni_sd_configs.tls_config.key_file	<filename>
+scrape_configs.uyuni_sd_configs.tls_config.server_name	<string>
+scrape_configs.uyuni_sd_configs.tls_config.insecure_skip_verify	<boolean>
+scrape_configs.uyuni_sd_configs.tls_config.min_version	<string>
+scrape_configs.uyuni_sd_configs.tls_config.max_version	<string>
+scrape_configs.uyuni_sd_configs.proxy_url	<string>
+scrape_configs.uyuni_sd_configs.no_proxy	<string>
+scrape_configs.uyuni_sd_configs.proxy_from_environment	<boolean>
+scrape_configs.uyuni_sd_configs.proxy_connect_header	map
+scrape_configs.uyuni_sd_configs.http_headers	map
+scrape_configs.uyuni_sd_configs.http_headers.<string>.values	[<string>, ...]
+scrape_configs.uyuni_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+scrape_configs.uyuni_sd_configs.http_headers.<string>.files	[<string>, ...]
+scrape_configs.static_configs.targets	'<host>'
+scrape_configs.static_configs.labels	map
+scrape_configs.relabel_configs.source_labels	'[' <labelname> [, ...] ']'
+scrape_configs.relabel_configs.separator	<string>
+scrape_configs.relabel_configs.target_label	<labelname>
+scrape_configs.relabel_configs.regex	<regex>
+scrape_configs.relabel_configs.modulus	<int>
+scrape_configs.relabel_configs.replacement	<string>
+scrape_configs.relabel_configs.action	<relabel_action>
+scrape_configs.metric_relabel_configs.source_labels	'[' <labelname> [, ...] ']'
+scrape_configs.metric_relabel_configs.separator	<string>
+scrape_configs.metric_relabel_configs.target_label	<labelname>
+scrape_configs.metric_relabel_configs.regex	<regex>
+scrape_configs.metric_relabel_configs.modulus	<int>
+scrape_configs.metric_relabel_configs.replacement	<string>
+scrape_configs.metric_relabel_configs.action	<relabel_action>
+scrape_configs.body_size_limit	<size>
+scrape_configs.sample_limit	<int>
+scrape_configs.label_limit	<int>
+scrape_configs.label_name_length_limit	<int>
+scrape_configs.label_value_length_limit	<int>
+scrape_configs.target_limit	<int>
+scrape_configs.keep_dropped_targets	<int>
+scrape_configs.metric_name_validation_scheme	<string>
+scrape_configs.native_histogram_bucket_limit	<int>
+scrape_configs.native_histogram_min_bucket_factor	<float>
+alerting.alert_relabel_configs.source_labels	'[' <labelname> [, ...] ']'
+alerting.alert_relabel_configs.separator	<string>
+alerting.alert_relabel_configs.target_label	<labelname>
+alerting.alert_relabel_configs.regex	<regex>
+alerting.alert_relabel_configs.modulus	<int>
+alerting.alert_relabel_configs.replacement	<string>
+alerting.alert_relabel_configs.action	<relabel_action>
+alerting.alertmanagers.timeout	<duration>
+alerting.alertmanagers.api_version	<string>
+alerting.alertmanagers.path_prefix	<path>
+alerting.alertmanagers.scheme	<scheme>
+alerting.alertmanagers.sigv4.region	<string>
+alerting.alertmanagers.sigv4.access_key	<string>
+alerting.alertmanagers.sigv4.secret_key	<secret>
+alerting.alertmanagers.sigv4.profile	<string>
+alerting.alertmanagers.sigv4.role_arn	<string>
+alerting.alertmanagers.basic_auth.username	<string>
+alerting.alertmanagers.basic_auth.username_file	<string>
+alerting.alertmanagers.basic_auth.password	<secret>
+alerting.alertmanagers.basic_auth.password_file	<string>
+alerting.alertmanagers.authorization.type	<string>
+alerting.alertmanagers.authorization.credentials	<secret>
+alerting.alertmanagers.authorization.credentials_file	<filename>
+alerting.alertmanagers.oauth2.client_id	<string>
+alerting.alertmanagers.oauth2.client_secret	<secret>
+alerting.alertmanagers.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.oauth2.scopes	<string> ...
+alerting.alertmanagers.oauth2.token_url	<string>
+alerting.alertmanagers.oauth2.endpoint_params	map
+alerting.alertmanagers.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.oauth2.proxy_url	<string>
+alerting.alertmanagers.oauth2.no_proxy	<string>
+alerting.alertmanagers.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.oauth2.proxy_connect_header	map
+alerting.alertmanagers.oauth2.http_headers	map
+alerting.alertmanagers.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.follow_redirects	<boolean>
+alerting.alertmanagers.enable_http2	<boolean>
+alerting.alertmanagers.tls_config.ca	<string>
+alerting.alertmanagers.tls_config.ca_file	<filename>
+alerting.alertmanagers.tls_config.cert	<string>
+alerting.alertmanagers.tls_config.cert_file	<filename>
+alerting.alertmanagers.tls_config.key	<secret>
+alerting.alertmanagers.tls_config.key_file	<filename>
+alerting.alertmanagers.tls_config.server_name	<string>
+alerting.alertmanagers.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.tls_config.min_version	<string>
+alerting.alertmanagers.tls_config.max_version	<string>
+alerting.alertmanagers.proxy_url	<string>
+alerting.alertmanagers.no_proxy	<string>
+alerting.alertmanagers.proxy_from_environment	<boolean>
+alerting.alertmanagers.proxy_connect_header	map
+alerting.alertmanagers.http_headers	map
+alerting.alertmanagers.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.azure_sd_configs.environment	<string>
+alerting.alertmanagers.azure_sd_configs.authentication_method	<string>
+alerting.alertmanagers.azure_sd_configs.subscription_id	<string>
+alerting.alertmanagers.azure_sd_configs.tenant_id	<string>
+alerting.alertmanagers.azure_sd_configs.client_id	<string>
+alerting.alertmanagers.azure_sd_configs.client_secret	<secret>
+alerting.alertmanagers.azure_sd_configs.resource_group	<string>
+alerting.alertmanagers.azure_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.azure_sd_configs.port	<int>
+alerting.alertmanagers.azure_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.azure_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.azure_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.azure_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.azure_sd_configs.authorization.type	<string>
+alerting.alertmanagers.azure_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.azure_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.azure_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.azure_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.azure_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.azure_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.azure_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.azure_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.azure_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.azure_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.azure_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.azure_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.azure_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.azure_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.azure_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.azure_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.azure_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.azure_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.azure_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.azure_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.azure_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.azure_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.azure_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.azure_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.azure_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.azure_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.azure_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.azure_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.azure_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.azure_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.azure_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.azure_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.azure_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.azure_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.azure_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.azure_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.azure_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.azure_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.azure_sd_configs.proxy_url	<string>
+alerting.alertmanagers.azure_sd_configs.no_proxy	<string>
+alerting.alertmanagers.azure_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.azure_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.azure_sd_configs.http_headers	map
+alerting.alertmanagers.azure_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.azure_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.azure_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.consul_sd_configs.server	<host>
+alerting.alertmanagers.consul_sd_configs.path_prefix	<string>
+alerting.alertmanagers.consul_sd_configs.token	<secret>
+alerting.alertmanagers.consul_sd_configs.datacenter	<string>
+alerting.alertmanagers.consul_sd_configs.namespace	<string>
+alerting.alertmanagers.consul_sd_configs.partition	<string>
+alerting.alertmanagers.consul_sd_configs.scheme	<string>
+alerting.alertmanagers.consul_sd_configs.username	<string>
+alerting.alertmanagers.consul_sd_configs.password	<secret>
+alerting.alertmanagers.consul_sd_configs.services	<string>
+alerting.alertmanagers.consul_sd_configs.filter	<string>
+alerting.alertmanagers.consul_sd_configs.tags	<string>
+alerting.alertmanagers.consul_sd_configs.node_meta	map
+alerting.alertmanagers.consul_sd_configs.tag_separator	<string>
+alerting.alertmanagers.consul_sd_configs.allow_stale	<boolean>
+alerting.alertmanagers.consul_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.consul_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.consul_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.consul_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.consul_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.consul_sd_configs.authorization.type	<string>
+alerting.alertmanagers.consul_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.consul_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.consul_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.consul_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.consul_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.consul_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.consul_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.consul_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.consul_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.consul_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.consul_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.consul_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.consul_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.consul_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.consul_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.consul_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.consul_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.consul_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.consul_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.consul_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.consul_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.consul_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.consul_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.consul_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.consul_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.consul_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.consul_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.consul_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.consul_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.consul_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.consul_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.consul_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.consul_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.consul_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.consul_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.consul_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.consul_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.consul_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.consul_sd_configs.proxy_url	<string>
+alerting.alertmanagers.consul_sd_configs.no_proxy	<string>
+alerting.alertmanagers.consul_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.consul_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.consul_sd_configs.http_headers	map
+alerting.alertmanagers.consul_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.consul_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.consul_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.dns_sd_configs.names	<string>
+alerting.alertmanagers.dns_sd_configs.type	<string>
+alerting.alertmanagers.dns_sd_configs.port	<int>
+alerting.alertmanagers.dns_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.ec2_sd_configs.region	<string>
+alerting.alertmanagers.ec2_sd_configs.endpoint	<string>
+alerting.alertmanagers.ec2_sd_configs.access_key	<string>
+alerting.alertmanagers.ec2_sd_configs.secret_key	<secret>
+alerting.alertmanagers.ec2_sd_configs.profile	<string>
+alerting.alertmanagers.ec2_sd_configs.role_arn	<string>
+alerting.alertmanagers.ec2_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.ec2_sd_configs.port	<int>
+alerting.alertmanagers.ec2_sd_configs.filters.name	<string>
+alerting.alertmanagers.ec2_sd_configs.filters.values	<string>, [...]
+alerting.alertmanagers.ec2_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.ec2_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.ec2_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.ec2_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.ec2_sd_configs.authorization.type	<string>
+alerting.alertmanagers.ec2_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.ec2_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.ec2_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.ec2_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.ec2_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.ec2_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.ec2_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.ec2_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.ec2_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.ec2_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.ec2_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.ec2_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.ec2_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.ec2_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.ec2_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.ec2_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.ec2_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.ec2_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.ec2_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.ec2_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.ec2_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.ec2_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.ec2_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.ec2_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.ec2_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.ec2_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.ec2_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.ec2_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.ec2_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.ec2_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.ec2_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.ec2_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.ec2_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.ec2_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.ec2_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.ec2_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.ec2_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.ec2_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.ec2_sd_configs.proxy_url	<string>
+alerting.alertmanagers.ec2_sd_configs.no_proxy	<string>
+alerting.alertmanagers.ec2_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.ec2_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.ec2_sd_configs.http_headers	map
+alerting.alertmanagers.ec2_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.ec2_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.ec2_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.eureka_sd_configs.server	<string>
+alerting.alertmanagers.eureka_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.eureka_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.eureka_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.eureka_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.eureka_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.eureka_sd_configs.authorization.type	<string>
+alerting.alertmanagers.eureka_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.eureka_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.eureka_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.eureka_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.eureka_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.eureka_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.eureka_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.eureka_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.eureka_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.eureka_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.eureka_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.eureka_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.eureka_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.eureka_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.eureka_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.eureka_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.eureka_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.eureka_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.eureka_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.eureka_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.eureka_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.eureka_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.eureka_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.eureka_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.eureka_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.eureka_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.eureka_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.eureka_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.eureka_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.eureka_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.eureka_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.eureka_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.eureka_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.eureka_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.eureka_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.eureka_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.eureka_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.eureka_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.eureka_sd_configs.proxy_url	<string>
+alerting.alertmanagers.eureka_sd_configs.no_proxy	<string>
+alerting.alertmanagers.eureka_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.eureka_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.eureka_sd_configs.http_headers	map
+alerting.alertmanagers.eureka_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.eureka_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.eureka_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.file_sd_configs.files	<filename_pattern> ...
+alerting.alertmanagers.file_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.digitalocean_sd_configs.port	<int>
+alerting.alertmanagers.digitalocean_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.digitalocean_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.digitalocean_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.digitalocean_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.digitalocean_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.digitalocean_sd_configs.authorization.type	<string>
+alerting.alertmanagers.digitalocean_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.digitalocean_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.digitalocean_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.digitalocean_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.digitalocean_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.digitalocean_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.digitalocean_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.digitalocean_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.digitalocean_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.digitalocean_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.digitalocean_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.digitalocean_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.digitalocean_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.digitalocean_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.digitalocean_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.digitalocean_sd_configs.proxy_url	<string>
+alerting.alertmanagers.digitalocean_sd_configs.no_proxy	<string>
+alerting.alertmanagers.digitalocean_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.digitalocean_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.digitalocean_sd_configs.http_headers	map
+alerting.alertmanagers.digitalocean_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.digitalocean_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.digitalocean_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.docker_sd_configs.host	<string>
+alerting.alertmanagers.docker_sd_configs.port	<int>
+alerting.alertmanagers.docker_sd_configs.host_networking_host	<string>
+alerting.alertmanagers.docker_sd_configs.match_first_network	<boolean>
+alerting.alertmanagers.docker_sd_configs.filters.name	<string>
+alerting.alertmanagers.docker_sd_configs.filters.values	<string>, [...]
+alerting.alertmanagers.docker_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.docker_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.docker_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.docker_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.docker_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.docker_sd_configs.authorization.type	<string>
+alerting.alertmanagers.docker_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.docker_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.docker_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.docker_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.docker_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.docker_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.docker_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.docker_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.docker_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.docker_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.docker_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.docker_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.docker_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.docker_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.docker_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.docker_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.docker_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.docker_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.docker_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.docker_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.docker_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.docker_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.docker_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.docker_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.docker_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.docker_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.docker_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.docker_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.docker_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.docker_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.docker_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.docker_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.docker_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.docker_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.docker_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.docker_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.docker_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.docker_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.docker_sd_configs.proxy_url	<string>
+alerting.alertmanagers.docker_sd_configs.no_proxy	<string>
+alerting.alertmanagers.docker_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.docker_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.docker_sd_configs.http_headers	map
+alerting.alertmanagers.docker_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.docker_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.docker_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.dockerswarm_sd_configs.host	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.role	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.port	<int>
+alerting.alertmanagers.dockerswarm_sd_configs.filters.name	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.filters.values	<string>, [...]
+alerting.alertmanagers.dockerswarm_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.dockerswarm_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.dockerswarm_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.authorization.type	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.dockerswarm_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.dockerswarm_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.dockerswarm_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.dockerswarm_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.dockerswarm_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.dockerswarm_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.dockerswarm_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.dockerswarm_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.dockerswarm_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.dockerswarm_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.proxy_url	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.no_proxy	<string>
+alerting.alertmanagers.dockerswarm_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.dockerswarm_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.dockerswarm_sd_configs.http_headers	map
+alerting.alertmanagers.dockerswarm_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.dockerswarm_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.dockerswarm_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.gce_sd_configs.project	<string>
+alerting.alertmanagers.gce_sd_configs.zone	<string>
+alerting.alertmanagers.gce_sd_configs.filter	<string>
+alerting.alertmanagers.gce_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.gce_sd_configs.port	<int>
+alerting.alertmanagers.gce_sd_configs.tag_separator	<string>
+alerting.alertmanagers.hetzner_sd_configs.role	<string>
+alerting.alertmanagers.hetzner_sd_configs.port	<int>
+alerting.alertmanagers.hetzner_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.hetzner_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.hetzner_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.hetzner_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.hetzner_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.hetzner_sd_configs.authorization.type	<string>
+alerting.alertmanagers.hetzner_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.hetzner_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.hetzner_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.hetzner_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.hetzner_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.hetzner_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.hetzner_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.hetzner_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.hetzner_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.hetzner_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.hetzner_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.hetzner_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.hetzner_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.hetzner_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.hetzner_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.hetzner_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.hetzner_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.hetzner_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.hetzner_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.hetzner_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.hetzner_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.hetzner_sd_configs.proxy_url	<string>
+alerting.alertmanagers.hetzner_sd_configs.no_proxy	<string>
+alerting.alertmanagers.hetzner_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.hetzner_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.hetzner_sd_configs.http_headers	map
+alerting.alertmanagers.hetzner_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.hetzner_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.hetzner_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.http_sd_configs.url	<string>
+alerting.alertmanagers.http_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.http_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.http_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.http_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.http_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.http_sd_configs.authorization.type	<string>
+alerting.alertmanagers.http_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.http_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.http_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.http_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.http_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.http_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.http_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.http_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.http_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.http_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.http_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.http_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.http_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.http_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.http_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.http_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.http_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.http_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.http_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.http_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.http_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.http_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.http_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.http_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.http_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.http_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.http_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.http_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.http_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.http_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.http_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.http_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.http_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.http_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.http_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.http_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.http_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.http_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.http_sd_configs.proxy_url	<string>
+alerting.alertmanagers.http_sd_configs.no_proxy	<string>
+alerting.alertmanagers.http_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.http_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.http_sd_configs.http_headers	map
+alerting.alertmanagers.http_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.http_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.http_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.ionos_sd_configs.datacenter_id	<string>
+alerting.alertmanagers.ionos_sd_configs.port	<int>
+alerting.alertmanagers.ionos_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.ionos_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.ionos_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.ionos_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.ionos_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.ionos_sd_configs.authorization.type	<string>
+alerting.alertmanagers.ionos_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.ionos_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.ionos_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.ionos_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.ionos_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.ionos_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.ionos_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.ionos_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.ionos_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.ionos_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.ionos_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.ionos_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.ionos_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.ionos_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.ionos_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.ionos_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.ionos_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.ionos_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.ionos_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.ionos_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.ionos_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.ionos_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.ionos_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.ionos_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.ionos_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.ionos_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.ionos_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.ionos_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.ionos_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.ionos_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.ionos_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.ionos_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.ionos_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.ionos_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.ionos_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.ionos_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.ionos_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.ionos_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.ionos_sd_configs.proxy_url	<string>
+alerting.alertmanagers.ionos_sd_configs.no_proxy	<string>
+alerting.alertmanagers.ionos_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.ionos_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.ionos_sd_configs.http_headers	map
+alerting.alertmanagers.ionos_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.ionos_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.ionos_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.kubernetes_sd_configs.api_server	<host>
+alerting.alertmanagers.kubernetes_sd_configs.role	<string>
+alerting.alertmanagers.kubernetes_sd_configs.kubeconfig_file	<filename>
+alerting.alertmanagers.kubernetes_sd_configs.namespaces.own_namespace	<boolean>
+alerting.alertmanagers.kubernetes_sd_configs.namespaces.names	<string>
+alerting.alertmanagers.kubernetes_sd_configs.selectors.role	<string>
+alerting.alertmanagers.kubernetes_sd_configs.selectors.label	<string>
+alerting.alertmanagers.kubernetes_sd_configs.selectors.field	<string>
+alerting.alertmanagers.kubernetes_sd_configs.attach_metadata.node	<boolean>
+alerting.alertmanagers.kubernetes_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.kubernetes_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.kubernetes_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.kubernetes_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.kubernetes_sd_configs.authorization.type	<string>
+alerting.alertmanagers.kubernetes_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.kubernetes_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.kubernetes_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.kubernetes_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.kubernetes_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.kubernetes_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.kubernetes_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.kubernetes_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.kubernetes_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.kubernetes_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.kubernetes_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.kubernetes_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.kubernetes_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.kubernetes_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.kubernetes_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.kubernetes_sd_configs.proxy_url	<string>
+alerting.alertmanagers.kubernetes_sd_configs.no_proxy	<string>
+alerting.alertmanagers.kubernetes_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.kubernetes_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.kubernetes_sd_configs.http_headers	map
+alerting.alertmanagers.kubernetes_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.kubernetes_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.kubernetes_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.lightsail_sd_configs.region	<string>
+alerting.alertmanagers.lightsail_sd_configs.endpoint	<string>
+alerting.alertmanagers.lightsail_sd_configs.access_key	<string>
+alerting.alertmanagers.lightsail_sd_configs.secret_key	<secret>
+alerting.alertmanagers.lightsail_sd_configs.profile	<string>
+alerting.alertmanagers.lightsail_sd_configs.role_arn	<string>
+alerting.alertmanagers.lightsail_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.lightsail_sd_configs.port	<int>
+alerting.alertmanagers.lightsail_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.lightsail_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.lightsail_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.lightsail_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.lightsail_sd_configs.authorization.type	<string>
+alerting.alertmanagers.lightsail_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.lightsail_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.lightsail_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.lightsail_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.lightsail_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.lightsail_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.lightsail_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.lightsail_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.lightsail_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.lightsail_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.lightsail_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.lightsail_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.lightsail_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.lightsail_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.lightsail_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.lightsail_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.lightsail_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.lightsail_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.lightsail_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.lightsail_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.lightsail_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.lightsail_sd_configs.proxy_url	<string>
+alerting.alertmanagers.lightsail_sd_configs.no_proxy	<string>
+alerting.alertmanagers.lightsail_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.lightsail_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.lightsail_sd_configs.http_headers	map
+alerting.alertmanagers.lightsail_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.lightsail_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.lightsail_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.linode_sd_configs.region	<string>
+alerting.alertmanagers.linode_sd_configs.port	<int>
+alerting.alertmanagers.linode_sd_configs.tag_separator	<string>
+alerting.alertmanagers.linode_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.linode_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.linode_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.linode_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.linode_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.linode_sd_configs.authorization.type	<string>
+alerting.alertmanagers.linode_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.linode_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.linode_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.linode_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.linode_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.linode_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.linode_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.linode_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.linode_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.linode_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.linode_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.linode_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.linode_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.linode_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.linode_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.linode_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.linode_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.linode_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.linode_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.linode_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.linode_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.linode_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.linode_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.linode_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.linode_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.linode_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.linode_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.linode_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.linode_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.linode_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.linode_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.linode_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.linode_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.linode_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.linode_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.linode_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.linode_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.linode_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.linode_sd_configs.proxy_url	<string>
+alerting.alertmanagers.linode_sd_configs.no_proxy	<string>
+alerting.alertmanagers.linode_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.linode_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.linode_sd_configs.http_headers	map
+alerting.alertmanagers.linode_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.linode_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.linode_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.marathon_sd_configs.servers	<string>
+alerting.alertmanagers.marathon_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.marathon_sd_configs.auth_token	<secret>
+alerting.alertmanagers.marathon_sd_configs.auth_token_file	<filename>
+alerting.alertmanagers.marathon_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.marathon_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.marathon_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.marathon_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.marathon_sd_configs.authorization.type	<string>
+alerting.alertmanagers.marathon_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.marathon_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.marathon_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.marathon_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.marathon_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.marathon_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.marathon_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.marathon_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.marathon_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.marathon_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.marathon_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.marathon_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.marathon_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.marathon_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.marathon_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.marathon_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.marathon_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.marathon_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.marathon_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.marathon_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.marathon_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.marathon_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.marathon_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.marathon_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.marathon_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.marathon_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.marathon_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.marathon_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.marathon_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.marathon_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.marathon_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.marathon_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.marathon_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.marathon_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.marathon_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.marathon_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.marathon_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.marathon_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.marathon_sd_configs.proxy_url	<string>
+alerting.alertmanagers.marathon_sd_configs.no_proxy	<string>
+alerting.alertmanagers.marathon_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.marathon_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.marathon_sd_configs.http_headers	map
+alerting.alertmanagers.marathon_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.marathon_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.marathon_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.nerve_sd_configs.servers	<host>
+alerting.alertmanagers.nerve_sd_configs.paths	<string>
+alerting.alertmanagers.nerve_sd_configs.timeout	<duration>
+alerting.alertmanagers.nomad_sd_configs.allow_stale	<boolean>
+alerting.alertmanagers.nomad_sd_configs.namespace	<string>
+alerting.alertmanagers.nomad_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.nomad_sd_configs.region	<string>
+alerting.alertmanagers.nomad_sd_configs.server	<string>
+alerting.alertmanagers.nomad_sd_configs.tag_separator	<string>
+alerting.alertmanagers.nomad_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.nomad_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.nomad_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.nomad_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.nomad_sd_configs.authorization.type	<string>
+alerting.alertmanagers.nomad_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.nomad_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.nomad_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.nomad_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.nomad_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.nomad_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.nomad_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.nomad_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.nomad_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.nomad_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.nomad_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.nomad_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.nomad_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.nomad_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.nomad_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.nomad_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.nomad_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.nomad_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.nomad_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.nomad_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.nomad_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.nomad_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.nomad_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.nomad_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.nomad_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.nomad_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.nomad_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.nomad_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.nomad_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.nomad_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.nomad_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.nomad_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.nomad_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.nomad_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.nomad_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.nomad_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.nomad_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.nomad_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.nomad_sd_configs.proxy_url	<string>
+alerting.alertmanagers.nomad_sd_configs.no_proxy	<string>
+alerting.alertmanagers.nomad_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.nomad_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.nomad_sd_configs.http_headers	map
+alerting.alertmanagers.nomad_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.nomad_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.nomad_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.openstack_sd_configs.role	<openstack_role>
+alerting.alertmanagers.openstack_sd_configs.region	<string>
+alerting.alertmanagers.openstack_sd_configs.identity_endpoint	<string>
+alerting.alertmanagers.openstack_sd_configs.username	<string>
+alerting.alertmanagers.openstack_sd_configs.userid	<string>
+alerting.alertmanagers.openstack_sd_configs.password	<secret>
+alerting.alertmanagers.openstack_sd_configs.domain_name	<string>
+alerting.alertmanagers.openstack_sd_configs.domain_id	<string>
+alerting.alertmanagers.openstack_sd_configs.project_name	<string>
+alerting.alertmanagers.openstack_sd_configs.project_id	<string>
+alerting.alertmanagers.openstack_sd_configs.application_credential_name	<string>
+alerting.alertmanagers.openstack_sd_configs.application_credential_id	<string>
+alerting.alertmanagers.openstack_sd_configs.application_credential_secret	<secret>
+alerting.alertmanagers.openstack_sd_configs.all_tenants	<boolean>
+alerting.alertmanagers.openstack_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.openstack_sd_configs.port	<int>
+alerting.alertmanagers.openstack_sd_configs.availability	<string>
+alerting.alertmanagers.openstack_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.openstack_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.openstack_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.openstack_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.openstack_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.openstack_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.openstack_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.openstack_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.openstack_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.openstack_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.ovhcloud_sd_configs.application_key	<string>
+alerting.alertmanagers.ovhcloud_sd_configs.application_secret	<secret>
+alerting.alertmanagers.ovhcloud_sd_configs.consumer_key	<secret>
+alerting.alertmanagers.ovhcloud_sd_configs.service	<string>
+alerting.alertmanagers.ovhcloud_sd_configs.endpoint	<string>
+alerting.alertmanagers.ovhcloud_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.puppetdb_sd_configs.url	<string>
+alerting.alertmanagers.puppetdb_sd_configs.query	<string>
+alerting.alertmanagers.puppetdb_sd_configs.include_parameters	<boolean>
+alerting.alertmanagers.puppetdb_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.puppetdb_sd_configs.port	<int>
+alerting.alertmanagers.puppetdb_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.puppetdb_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.puppetdb_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.puppetdb_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.puppetdb_sd_configs.authorization.type	<string>
+alerting.alertmanagers.puppetdb_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.puppetdb_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.puppetdb_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.puppetdb_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.puppetdb_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.puppetdb_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.puppetdb_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.puppetdb_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.puppetdb_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.puppetdb_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.puppetdb_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.puppetdb_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.puppetdb_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.puppetdb_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.puppetdb_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.puppetdb_sd_configs.proxy_url	<string>
+alerting.alertmanagers.puppetdb_sd_configs.no_proxy	<string>
+alerting.alertmanagers.puppetdb_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.puppetdb_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.puppetdb_sd_configs.http_headers	map
+alerting.alertmanagers.puppetdb_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.puppetdb_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.puppetdb_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.scaleway_sd_configs.access_key	<string>
+alerting.alertmanagers.scaleway_sd_configs.secret_key	<secret>
+alerting.alertmanagers.scaleway_sd_configs.secret_key_file	<filename>
+alerting.alertmanagers.scaleway_sd_configs.project_id	<string>
+alerting.alertmanagers.scaleway_sd_configs.role	<string>
+alerting.alertmanagers.scaleway_sd_configs.port	<int>
+alerting.alertmanagers.scaleway_sd_configs.api_url	<string>
+alerting.alertmanagers.scaleway_sd_configs.zone	<string>
+alerting.alertmanagers.scaleway_sd_configs.name_filter	<string>
+alerting.alertmanagers.scaleway_sd_configs.tags_filter	<string>
+alerting.alertmanagers.scaleway_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.scaleway_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.scaleway_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.scaleway_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.scaleway_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.scaleway_sd_configs.authorization.type	<string>
+alerting.alertmanagers.scaleway_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.scaleway_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.scaleway_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.scaleway_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.scaleway_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.scaleway_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.scaleway_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.scaleway_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.scaleway_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.scaleway_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.scaleway_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.scaleway_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.scaleway_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.scaleway_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.scaleway_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.scaleway_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.scaleway_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.scaleway_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.scaleway_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.scaleway_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.scaleway_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.scaleway_sd_configs.proxy_url	<string>
+alerting.alertmanagers.scaleway_sd_configs.no_proxy	<string>
+alerting.alertmanagers.scaleway_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.scaleway_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.scaleway_sd_configs.http_headers	map
+alerting.alertmanagers.scaleway_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.scaleway_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.scaleway_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.serverset_sd_configs.servers	<host>
+alerting.alertmanagers.serverset_sd_configs.paths	<string>
+alerting.alertmanagers.serverset_sd_configs.timeout	<duration>
+alerting.alertmanagers.triton_sd_configs.account	<string>
+alerting.alertmanagers.triton_sd_configs.role	<string>
+alerting.alertmanagers.triton_sd_configs.dns_suffix	<string>
+alerting.alertmanagers.triton_sd_configs.endpoint	<string>
+alerting.alertmanagers.triton_sd_configs.groups	<string> ...
+alerting.alertmanagers.triton_sd_configs.port	<int>
+alerting.alertmanagers.triton_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.triton_sd_configs.version	<int>
+alerting.alertmanagers.triton_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.triton_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.triton_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.triton_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.triton_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.triton_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.triton_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.triton_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.triton_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.triton_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.uyuni_sd_configs.server	<string>
+alerting.alertmanagers.uyuni_sd_configs.username	<string>
+alerting.alertmanagers.uyuni_sd_configs.password	<secret>
+alerting.alertmanagers.uyuni_sd_configs.entitlement	<string>
+alerting.alertmanagers.uyuni_sd_configs.separator	<string>
+alerting.alertmanagers.uyuni_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.uyuni_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.uyuni_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.uyuni_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.uyuni_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.uyuni_sd_configs.authorization.type	<string>
+alerting.alertmanagers.uyuni_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.uyuni_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.uyuni_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.uyuni_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.uyuni_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.uyuni_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.uyuni_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.uyuni_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.uyuni_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.uyuni_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.uyuni_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.uyuni_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.uyuni_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.uyuni_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.uyuni_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.uyuni_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.uyuni_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.uyuni_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.uyuni_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.uyuni_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.uyuni_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.uyuni_sd_configs.proxy_url	<string>
+alerting.alertmanagers.uyuni_sd_configs.no_proxy	<string>
+alerting.alertmanagers.uyuni_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.uyuni_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.uyuni_sd_configs.http_headers	map
+alerting.alertmanagers.uyuni_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.uyuni_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.uyuni_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.vultr_sd_configs.port	<int>
+alerting.alertmanagers.vultr_sd_configs.refresh_interval	<duration>
+alerting.alertmanagers.vultr_sd_configs.basic_auth.username	<string>
+alerting.alertmanagers.vultr_sd_configs.basic_auth.username_file	<string>
+alerting.alertmanagers.vultr_sd_configs.basic_auth.password	<secret>
+alerting.alertmanagers.vultr_sd_configs.basic_auth.password_file	<string>
+alerting.alertmanagers.vultr_sd_configs.authorization.type	<string>
+alerting.alertmanagers.vultr_sd_configs.authorization.credentials	<secret>
+alerting.alertmanagers.vultr_sd_configs.authorization.credentials_file	<filename>
+alerting.alertmanagers.vultr_sd_configs.oauth2.client_id	<string>
+alerting.alertmanagers.vultr_sd_configs.oauth2.client_secret	<secret>
+alerting.alertmanagers.vultr_sd_configs.oauth2.client_secret_file	<filename>
+alerting.alertmanagers.vultr_sd_configs.oauth2.scopes	<string> ...
+alerting.alertmanagers.vultr_sd_configs.oauth2.token_url	<string>
+alerting.alertmanagers.vultr_sd_configs.oauth2.endpoint_params	map
+alerting.alertmanagers.vultr_sd_configs.oauth2.tls_config.ca	<string>
+alerting.alertmanagers.vultr_sd_configs.oauth2.tls_config.ca_file	<filename>
+alerting.alertmanagers.vultr_sd_configs.oauth2.tls_config.cert	<string>
+alerting.alertmanagers.vultr_sd_configs.oauth2.tls_config.cert_file	<filename>
+alerting.alertmanagers.vultr_sd_configs.oauth2.tls_config.key	<secret>
+alerting.alertmanagers.vultr_sd_configs.oauth2.tls_config.key_file	<filename>
+alerting.alertmanagers.vultr_sd_configs.oauth2.tls_config.server_name	<string>
+alerting.alertmanagers.vultr_sd_configs.oauth2.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.vultr_sd_configs.oauth2.tls_config.min_version	<string>
+alerting.alertmanagers.vultr_sd_configs.oauth2.tls_config.max_version	<string>
+alerting.alertmanagers.vultr_sd_configs.oauth2.proxy_url	<string>
+alerting.alertmanagers.vultr_sd_configs.oauth2.no_proxy	<string>
+alerting.alertmanagers.vultr_sd_configs.oauth2.proxy_from_environment	<boolean>
+alerting.alertmanagers.vultr_sd_configs.oauth2.proxy_connect_header	map
+alerting.alertmanagers.vultr_sd_configs.oauth2.http_headers	map
+alerting.alertmanagers.vultr_sd_configs.oauth2.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.vultr_sd_configs.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.vultr_sd_configs.oauth2.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.vultr_sd_configs.follow_redirects	<boolean>
+alerting.alertmanagers.vultr_sd_configs.enable_http2	<boolean>
+alerting.alertmanagers.vultr_sd_configs.tls_config.ca	<string>
+alerting.alertmanagers.vultr_sd_configs.tls_config.ca_file	<filename>
+alerting.alertmanagers.vultr_sd_configs.tls_config.cert	<string>
+alerting.alertmanagers.vultr_sd_configs.tls_config.cert_file	<filename>
+alerting.alertmanagers.vultr_sd_configs.tls_config.key	<secret>
+alerting.alertmanagers.vultr_sd_configs.tls_config.key_file	<filename>
+alerting.alertmanagers.vultr_sd_configs.tls_config.server_name	<string>
+alerting.alertmanagers.vultr_sd_configs.tls_config.insecure_skip_verify	<boolean>
+alerting.alertmanagers.vultr_sd_configs.tls_config.min_version	<string>
+alerting.alertmanagers.vultr_sd_configs.tls_config.max_version	<string>
+alerting.alertmanagers.vultr_sd_configs.proxy_url	<string>
+alerting.alertmanagers.vultr_sd_configs.no_proxy	<string>
+alerting.alertmanagers.vultr_sd_configs.proxy_from_environment	<boolean>
+alerting.alertmanagers.vultr_sd_configs.proxy_connect_header	map
+alerting.alertmanagers.vultr_sd_configs.http_headers	map
+alerting.alertmanagers.vultr_sd_configs.http_headers.<string>.values	[<string>, ...]
+alerting.alertmanagers.vultr_sd_configs.http_headers.<string>.secrets	[<secret>, ...]
+alerting.alertmanagers.vultr_sd_configs.http_headers.<string>.files	[<string>, ...]
+alerting.alertmanagers.static_configs.targets	'<host>'
+alerting.alertmanagers.static_configs.labels	map
+alerting.alertmanagers.relabel_configs.source_labels	'[' <labelname> [, ...] ']'
+alerting.alertmanagers.relabel_configs.separator	<string>
+alerting.alertmanagers.relabel_configs.target_label	<labelname>
+alerting.alertmanagers.relabel_configs.regex	<regex>
+alerting.alertmanagers.relabel_configs.modulus	<int>
+alerting.alertmanagers.relabel_configs.replacement	<string>
+alerting.alertmanagers.relabel_configs.action	<relabel_action>
+alerting.alertmanagers.alert_relabel_configs.source_labels	'[' <labelname> [, ...] ']'
+alerting.alertmanagers.alert_relabel_configs.separator	<string>
+alerting.alertmanagers.alert_relabel_configs.target_label	<labelname>
+alerting.alertmanagers.alert_relabel_configs.regex	<regex>
+alerting.alertmanagers.alert_relabel_configs.modulus	<int>
+alerting.alertmanagers.alert_relabel_configs.replacement	<string>
+alerting.alertmanagers.alert_relabel_configs.action	<relabel_action>
+remote_write.url	<string>
+remote_write.protobuf_message	<prometheus.WriteRequest | io.prometheus.write.v2.Request>
+remote_write.remote_timeout	<duration>
+remote_write.headers	map
+remote_write.write_relabel_configs.source_labels	'[' <labelname> [, ...] ']'
+remote_write.write_relabel_configs.separator	<string>
+remote_write.write_relabel_configs.target_label	<labelname>
+remote_write.write_relabel_configs.regex	<regex>
+remote_write.write_relabel_configs.modulus	<int>
+remote_write.write_relabel_configs.replacement	<string>
+remote_write.write_relabel_configs.action	<relabel_action>
+remote_write.name	<string>
+remote_write.send_exemplars	<boolean>
+remote_write.send_native_histograms	<boolean>
+remote_write.round_robin_dns	<boolean>
+remote_write.sigv4.region	<string>
+remote_write.sigv4.access_key	<string>
+remote_write.sigv4.secret_key	<secret>
+remote_write.sigv4.profile	<string>
+remote_write.sigv4.role_arn	<string>
+remote_write.azuread.cloud	<string>
+remote_write.azuread.managed_identity.client_id	<string>
+remote_write.azuread.oauth.client_id	<string>
+remote_write.azuread.oauth.client_secret	<string>
+remote_write.azuread.oauth.tenant_id	<string>
+remote_write.azuread.sdk.tenant_id	<string>
+remote_write.google_iam.credentials_file	<file_name>
+remote_write.queue_config.capacity	<int>
+remote_write.queue_config.max_shards	<int>
+remote_write.queue_config.min_shards	<int>
+remote_write.queue_config.max_samples_per_send	<int>
+remote_write.queue_config.batch_send_deadline	<duration>
+remote_write.queue_config.min_backoff	<duration>
+remote_write.queue_config.max_backoff	<duration>
+remote_write.queue_config.retry_on_http_429	<boolean>
+remote_write.queue_config.sample_age_limit	<duration>
+remote_write.metadata_config.send	<boolean>
+remote_write.metadata_config.send_interval	<duration>
+remote_write.metadata_config.max_samples_per_send	<int>
+remote_write.basic_auth.username	<string>
+remote_write.basic_auth.username_file	<string>
+remote_write.basic_auth.password	<secret>
+remote_write.basic_auth.password_file	<string>
+remote_write.authorization.type	<string>
+remote_write.authorization.credentials	<secret>
+remote_write.authorization.credentials_file	<filename>
+remote_write.oauth2.client_id	<string>
+remote_write.oauth2.client_secret	<secret>
+remote_write.oauth2.client_secret_file	<filename>
+remote_write.oauth2.scopes	<string> ...
+remote_write.oauth2.token_url	<string>
+remote_write.oauth2.endpoint_params	map
+remote_write.oauth2.tls_config.ca	<string>
+remote_write.oauth2.tls_config.ca_file	<filename>
+remote_write.oauth2.tls_config.cert	<string>
+remote_write.oauth2.tls_config.cert_file	<filename>
+remote_write.oauth2.tls_config.key	<secret>
+remote_write.oauth2.tls_config.key_file	<filename>
+remote_write.oauth2.tls_config.server_name	<string>
+remote_write.oauth2.tls_config.insecure_skip_verify	<boolean>
+remote_write.oauth2.tls_config.min_version	<string>
+remote_write.oauth2.tls_config.max_version	<string>
+remote_write.oauth2.proxy_url	<string>
+remote_write.oauth2.no_proxy	<string>
+remote_write.oauth2.proxy_from_environment	<boolean>
+remote_write.oauth2.proxy_connect_header	map
+remote_write.oauth2.http_headers	map
+remote_write.oauth2.http_headers.<string>.values	[<string>, ...]
+remote_write.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+remote_write.oauth2.http_headers.<string>.files	[<string>, ...]
+remote_write.follow_redirects	<boolean>
+remote_write.enable_http2	<boolean>
+remote_write.tls_config.ca	<string>
+remote_write.tls_config.ca_file	<filename>
+remote_write.tls_config.cert	<string>
+remote_write.tls_config.cert_file	<filename>
+remote_write.tls_config.key	<secret>
+remote_write.tls_config.key_file	<filename>
+remote_write.tls_config.server_name	<string>
+remote_write.tls_config.insecure_skip_verify	<boolean>
+remote_write.tls_config.min_version	<string>
+remote_write.tls_config.max_version	<string>
+remote_write.proxy_url	<string>
+remote_write.no_proxy	<string>
+remote_write.proxy_from_environment	<boolean>
+remote_write.proxy_connect_header	map
+remote_write.http_headers	map
+remote_write.http_headers.<string>.values	[<string>, ...]
+remote_write.http_headers.<string>.secrets	[<secret>, ...]
+remote_write.http_headers.<string>.files	[<string>, ...]
+otlp.promote_resource_attributes	[<string>, ...]
+otlp.translation_strategy	<string>
+otlp.keep_identifying_resource_attributes	<boolean>
+remote_read.url	<string>
+remote_read.name	<string>
+remote_read.required_matchers	map
+remote_read.remote_timeout	<duration>
+remote_read.headers	map
+remote_read.read_recent	<boolean>
+remote_read.filter_external_labels	<boolean>
+remote_read.basic_auth.username	<string>
+remote_read.basic_auth.username_file	<string>
+remote_read.basic_auth.password	<secret>
+remote_read.basic_auth.password_file	<string>
+remote_read.authorization.type	<string>
+remote_read.authorization.credentials	<secret>
+remote_read.authorization.credentials_file	<filename>
+remote_read.oauth2.client_id	<string>
+remote_read.oauth2.client_secret	<secret>
+remote_read.oauth2.client_secret_file	<filename>
+remote_read.oauth2.scopes	<string> ...
+remote_read.oauth2.token_url	<string>
+remote_read.oauth2.endpoint_params	map
+remote_read.oauth2.tls_config.ca	<string>
+remote_read.oauth2.tls_config.ca_file	<filename>
+remote_read.oauth2.tls_config.cert	<string>
+remote_read.oauth2.tls_config.cert_file	<filename>
+remote_read.oauth2.tls_config.key	<secret>
+remote_read.oauth2.tls_config.key_file	<filename>
+remote_read.oauth2.tls_config.server_name	<string>
+remote_read.oauth2.tls_config.insecure_skip_verify	<boolean>
+remote_read.oauth2.tls_config.min_version	<string>
+remote_read.oauth2.tls_config.max_version	<string>
+remote_read.oauth2.proxy_url	<string>
+remote_read.oauth2.no_proxy	<string>
+remote_read.oauth2.proxy_from_environment	<boolean>
+remote_read.oauth2.proxy_connect_header	map
+remote_read.oauth2.http_headers	map
+remote_read.oauth2.http_headers.<string>.values	[<string>, ...]
+remote_read.oauth2.http_headers.<string>.secrets	[<secret>, ...]
+remote_read.oauth2.http_headers.<string>.files	[<string>, ...]
+remote_read.follow_redirects	<boolean>
+remote_read.enable_http2	<boolean>
+remote_read.tls_config.ca	<string>
+remote_read.tls_config.ca_file	<filename>
+remote_read.tls_config.cert	<string>
+remote_read.tls_config.cert_file	<filename>
+remote_read.tls_config.key	<secret>
+remote_read.tls_config.key_file	<filename>
+remote_read.tls_config.server_name	<string>
+remote_read.tls_config.insecure_skip_verify	<boolean>
+remote_read.tls_config.min_version	<string>
+remote_read.tls_config.max_version	<string>
+remote_read.proxy_url	<string>
+remote_read.no_proxy	<string>
+remote_read.proxy_from_environment	<boolean>
+remote_read.proxy_connect_header	map
+remote_read.http_headers	map
+remote_read.http_headers.<string>.values	[<string>, ...]
+remote_read.http_headers.<string>.secrets	[<secret>, ...]
+remote_read.http_headers.<string>.files	[<string>, ...]
+storage.tsdb.out_of_order_time_window	<duration>
+storage.exemplars.max_exemplars	<int>
+tracing.client_type	<string>
+tracing.endpoint	<string>
+tracing.sampling_fraction	<float>
+tracing.insecure	<boolean>
+tracing.headers	map
+tracing.compression	<string>
+tracing.timeout	<duration>
+tracing.tls_config.ca	<string>
+tracing.tls_config.ca_file	<filename>
+tracing.tls_config.cert	<string>
+tracing.tls_config.cert_file	<filename>
+tracing.tls_config.key	<secret>
+tracing.tls_config.key_file	<filename>
+tracing.tls_config.server_name	<string>
+tracing.tls_config.insecure_skip_verify	<boolean>
+tracing.tls_config.min_version	<string>
+tracing.tls_config.max_version	<string>

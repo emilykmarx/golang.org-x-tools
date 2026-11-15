@@ -1,0 +1,1 @@
+{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2/modules/caddytls.Tailscale","doc":"Tailscale is a module that can get certificates from the local Tailscale process.\n"},"repo":"https://github.com/caddyserver/caddy"}]}

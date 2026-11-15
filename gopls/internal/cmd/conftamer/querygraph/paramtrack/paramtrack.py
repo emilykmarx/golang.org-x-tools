@@ -141,6 +141,8 @@ class Workflow:
         recorded = json.load(open(path))
         if "testbed" in recorded:
             recorded["testbed"] = canonical(recorded["testbed"])  # (runs before the testbeds were renamed)
+        if "docs" in recorded:
+            recorded["docs"] = modules.moved(recorded["docs"])  # (runs before the docs lists moved)
         current = self.static_settings() if name == "settings.json" else self.testbed_settings(self.make_testbed())
         diff = []
         for k in fields:

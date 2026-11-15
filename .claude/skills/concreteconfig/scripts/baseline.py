@@ -56,7 +56,7 @@ def static_args(s):
     """paramtrack arguments for the static settings s. A baseline from before paramtrack recorded the transformed-keys
     file gets paramtrack's default."""
     args = ["--module", s["module"], "--module-dir", s["module_dir"], "--root", s["root"], "--format", s["format"],
-            "--docs", s["docs"], "--ignore", modules.moved(s["ignore"])]
+            "--docs", modules.moved(s["docs"]), "--ignore", modules.moved(s["ignore"])]
     return args + (["--transformed", modules.moved(s["transformed"])] if "transformed" in s else [])
 
 

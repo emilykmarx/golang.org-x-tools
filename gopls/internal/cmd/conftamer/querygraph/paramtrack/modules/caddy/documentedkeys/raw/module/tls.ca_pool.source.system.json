@@ -1,0 +1,1 @@
+{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2/modules/caddytls.SystemCAPool","doc":"SystemCAPool obtains the trusted root certificates from the system's\ncertificate pool using x509.SystemCertPool()\n"},"repo":"https://github.com/caddyserver/caddy"}]}

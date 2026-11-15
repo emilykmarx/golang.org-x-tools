@@ -17,7 +17,7 @@ first.
 
 ## Developer knowledge
 - Caddy's JSON docs, as served by caddyserver.com's docs API: cached in
-  `/home/emily/projects/config_tracing/caddy-config-keys/raw/` (`config_root.json`, `module/<id>.json`: each
+  `documentedkeys/raw/` next to this file (`config_root.json`, `module/<id>.json`: each
   module's fields, types and descriptions). Its README says how they were fetched.
 - The Caddy source (module cache, above): each module's struct and its doc comments are the reference
   (`modules/caddyhttp/...`, `modules/caddytls/...`, `modules/logging/...`, `caddyconfig/...`). `Provision` and
@@ -27,7 +27,7 @@ first.
 - The controller's own modules: `pkg/storage` (`storage.module=secret_store`: fields `namespace`, `leaseId`; no json
   tags, so encoding/json matches them case-insensitively) and `pkg/proxy` (`proxy_protocol` listener wrapper), in the
   checkout. What the controller itself generates is the shipped config (TESTBED.md).
-- `/home/emily/projects/config_tracing/caddy-config-keys/caddy_keys_linked.txt`: the documented keys of the modules
+- `documentedkeys/caddy_keys_linked.txt` next to this file: the documented keys of the modules
   linked into the controller (paramtrack's `--docs` for this module).
 
 ## Checking a config

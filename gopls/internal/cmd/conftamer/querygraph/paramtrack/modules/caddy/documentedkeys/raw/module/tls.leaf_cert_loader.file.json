@@ -1,0 +1,1 @@
+{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2/modules/caddytls.LeafFileLoader","struct_fields":[{"key":"files","value":{"type":"array","elems":{"type":"string"}}}],"doc":"LeafFileLoader loads leaf certificates from disk.\n"},"repo":"https://github.com/caddyserver/caddy"}]}

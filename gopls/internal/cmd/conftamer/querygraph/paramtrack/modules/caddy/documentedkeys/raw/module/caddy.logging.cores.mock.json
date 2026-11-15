@@ -1,0 +1,1 @@
+{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2/modules/logging.MockCore","doc":"MockCore is a no-op module, purely for testing\n"},"repo":"https://github.com/caddyserver/caddy"}]}

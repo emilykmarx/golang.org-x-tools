@@ -16,7 +16,7 @@ MODULE_DIR = f"{CT}/caddyserver-ingress"
 # The Caddy JSON the controller generates, as caddy.Load decodes it (a dependency's type: an -extra root)
 ROOT = "github.com/caddyserver/caddy/v2.Config"
 FORMAT = "json"
-DOCS = f"{CT}/caddy-config-keys/caddy_keys_linked.txt"
+DOCS = f"{HERE}/documentedkeys/caddy_keys_linked.txt"
 IGNORE = ""
 TRANSFORMED = ""
 BINARY_PACKAGE = "./cmd/caddy"  # the controller's main package

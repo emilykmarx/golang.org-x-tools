@@ -1,0 +1,1 @@
+{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2/modules/internal/network.ProxyFromNone","doc":"The \"none\" proxy source module disables the use of network proxy.\n"},"repo":"https://github.com/caddyserver/caddy"}]}

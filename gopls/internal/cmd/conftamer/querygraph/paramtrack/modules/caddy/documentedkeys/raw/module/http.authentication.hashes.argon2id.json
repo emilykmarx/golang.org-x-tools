@@ -1,0 +1,1 @@
+{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2/modules/caddyhttp/caddyauth.Argon2idHash","doc":"Argon2idHash implements the Argon2id password hashing.\n"},"repo":"https://github.com/caddyserver/caddy"}]}

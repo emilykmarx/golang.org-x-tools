@@ -1,0 +1,1 @@
+{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2/modules/logging.DeleteFilter","doc":"DeleteFilter is a Caddy log field filter that\ndeletes the field.\n"},"repo":"https://github.com/caddyserver/caddy"}]}

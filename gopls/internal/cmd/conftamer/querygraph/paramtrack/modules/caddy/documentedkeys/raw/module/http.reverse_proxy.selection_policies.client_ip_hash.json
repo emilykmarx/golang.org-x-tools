@@ -1,0 +1,1 @@
+{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2/modules/caddyhttp/reverseproxy.ClientIPHashSelection","doc":"ClientIPHashSelection is a policy that selects a host\nbased on hashing the client IP of the request, as determined\nby the HTTP app's trusted proxies settings.\n"},"repo":"https://github.com/caddyserver/caddy"}]}

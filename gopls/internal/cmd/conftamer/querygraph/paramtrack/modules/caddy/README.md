@@ -15,7 +15,7 @@ Everything paramtrack's workflow needs that is specific to Caddy's ingress contr
 - **Untagged fields are keys** (`UNTAGGED_KEYS`), as encoding/json keys them: `secret_store`'s fields have no json tags.
 
 ## Documented keys
-`DOCS` is `caddy_keys_linked.txt`, in `config_tracing/caddy-config-keys/`, from a background agent run (2026-11-06) whose brief later became the documentedkeys skill. Its README there gives the sources (caddyserver.com's JSON docs API, cached in `raw/`) and how to rerun `list_caddy_keys.py`. That directory isn't in any repository yet, so neither the script nor the list is committed.
+`DOCS` is `caddy_keys_linked.txt` in [documentedkeys/](documentedkeys/), from a background agent run (2026-11-06) whose brief later became the documentedkeys skill. Its README there gives the sources (caddyserver.com's JSON docs API, cached in `raw/`) and how to rerun `list_caddy_keys.py`.
 
 ## Changes to shared programs made for Caddy
 - JSON configs (encoding/json) in `gopls conftamer` and configkeys (commit 1f33eee58).
