@@ -37,14 +37,21 @@ Each dropped key counts once, under the combination of reasons that apply to it.
 </table>
 
 
+# Evidence mappings
+For these, we ignore ambiguous keys.
+
+(Eventually, for ambiguities due to duplicates we could divide the confidence of evidence mapping by # of dups. But for string literals, which are most of the ambiguity currently, it's unclear how much to lower confidence)
+
+
 
 # TODO
 - Clarify in skill prompt how to parse/prioritize output of score.py
   - But allow run to add comments like in the most recent run (summarizes why keys were unset)
-- Ignore ambiguous values in evidence mappings for now
-  - Dups: eventually - divide confidence of evidence mapping by # of dups
-  - String lit, unclear how much to lower confidence => ignore these (i.e. don't search, or ignore their mappings)
 - From STATISTICS_OLD_PRUNED.md: pngs, graphs, documented keys
+  - Documented keys may be important to show
+    - Documentation is incomplete - we find valid but undocumented keys
+    - Limitations of graph approach - the "meta" keys in k8s
+- Update pointers to STATISTICS.md in docs, docstrings, help text, stats.py output, skill prompt
 
 
 # Mechanics

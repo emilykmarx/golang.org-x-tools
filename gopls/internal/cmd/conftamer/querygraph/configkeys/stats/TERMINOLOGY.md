@@ -25,6 +25,11 @@ Terms used in `paramtrack`'s data and docs.
 ## Selector key
 - A full key whose value picks a Caddy module.
   - e.g. in the `k=v` example above, `apps.http.servers.*.routes.handle.handler` is its own full key, since the user sets it to a primitive value (in this case, the module's name), such as `reverse_proxy`
+- TODO depending on how we end up using it - may expand to include Prometheus k8s
+
+## Meta key
+- A key the graph would produce that doesn't represent a config parameter
+  - Present when a type containing config also contains non-config types, e.g. types embedded for API compatibility (e.g. k8s `ObjectMeta`)
 
 # Section
 - The full keys of one Unmarshaler at one place in the config file

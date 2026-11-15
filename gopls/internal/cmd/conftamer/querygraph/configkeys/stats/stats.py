@@ -126,10 +126,23 @@ def read_patterns(path):
     return [line.strip() for line in open(path) if line.strip() and not line.lstrip().startswith("#")]
 
 
-def apply_ignore(full, config, patterns):
-    """Remove the full keys matching patterns from full, and from each concrete key's full keys; drop the concrete
-    keys left with none. Returns the numbers of full keys and concrete keys removed."""
-    ignored = {fk for fk in full if matches_any(fk, patterns)}
+def meta_keys(full, mod):
+    """The meta keys: full key => the meta type (module.py's META_TYPES) that every one of its Unmarshaler Paths passes
+    through. The graph finds them because of how the module structures its types, but they aren't config (e.g. a
+    Kubernetes object's apiVersion, kind and metadata.*); every statistic but Q4 leaves them out, as it does --ignore's"""
+    types = getattr(mod, "META_TYPES", {})
+    meta = {}
+    for fk, info in full.items():
+        hits = [next((t for t in path_nodes(p) if t in types), None) for p in info["paths"]]
+        if hits and all(hits):
+            meta[fk] = hits[0]
+    return meta
+
+
+def apply_ignore(full, config, patterns, keys=()):
+    """Remove the full keys matching patterns, or in keys, from full, and from each concrete key's full keys; drop the
+    concrete keys left with none. Returns the numbers of full keys and concrete keys removed."""
+    ignored = {fk for fk in full if matches_any(fk, patterns) or fk in keys}
     for fk in ignored:
         del full[fk]
     dropped = 0
@@ -445,14 +458,19 @@ def conf_bin(c):
     return CONF_BINS[-1] if c >= 1 else CONF_BINS[min(int(c * 10), 9)]
 
 
-def confidence(path, out, chart, ignore):
+def confidence(path, out, chart, ignore, meta=()):
     """The confidence of paramtrack's message => full key mappings (its label_keys.csv; paramtrack's README): one
     mapping per (message kind, message label, full key, section); evidence mappings have confidence 1, inferred ones
     the share of their section's keys that are evidence for the message, out of all its keys and out of its eligible
-    ones. Leaves out the mappings to full keys matching the ignore patterns (--ignore). Writes the distribution of
+    ones. Leaves out the mappings to full keys matching the ignore patterns (--ignore), and to meta keys (meta_keys).
+    Writes the distribution of
     both for the inferred mappings, and a grouped bar chart of it."""
     lk = pd.read_csv(path, keep_default_na=False, dtype=str)
     lk = lk[lk.full_key != ""]
+    is_meta = lk.full_key.isin(set(meta))
+    if meta:
+        out.p(f"- Left out (meta keys): {is_meta.sum()} rows, for {lk[is_meta].full_key.nunique()} meta keys")
+    lk = lk[~is_meta]
     ignored = lk.full_key.map(lambda fk: matches_any(fk, ignore))
     if ignore:
         out.p(f"- Left out (--ignore): {ignored.sum()} rows, for {lk[ignored].full_key.nunique()} ignored full keys")
@@ -671,9 +689,11 @@ def main():
     full_all = dict(full)  # before --ignore: for the whole-graph visualization
     ignore = read_patterns(args.ignore)
     transformed = read_patterns(args.transformed)
+    meta = meta_keys(full, mod)  # (before --ignore: a meta key --ignore also matches counts as meta)
+    n_meta, n_meta_dropped = apply_ignore(full, config, [], meta)
     n_ignored, n_dropped = apply_ignore(full, config, ignore)
     docs_all = read_docs(args.docs, mod)
-    docs = {k: t for k, t in docs_all.items() if not matches_any(k, ignore)}
+    docs = {k: t for k, t in docs_all.items() if not matches_any(k, ignore) and k not in meta}
 
     # Per full key: section, top-level section, coverage by the config
     covered_by = collections.defaultdict(set)  # full key => concrete keys
@@ -715,6 +735,9 @@ def main():
     out.p(f"- Full keys (the graph's extra edges resolve the keys custom unmarshalers pick): {len(full)}")
     if custom.names:  # (modules whose CustomKeys has no SD-like tables, e.g. Caddy, leave them out)
         out.p(f"- SD config types found (Name()): {len(set(custom.names.values()))}")
+    if meta:
+        out.p(f"- Meta keys (module.py's META_TYPES; not config, see Q4): {n_meta} full keys; {n_meta_dropped} "
+              f"concrete keys left with no full key dropped")
     if args.ignore:
         out.p(f"- Ignored (--ignore {args.ignore}): {n_ignored} full keys; {n_dropped} concrete keys left with no "
               f"full key dropped")
@@ -1025,6 +1048,16 @@ def main():
     both = graph_keys & set(docs)
     out.p(f"- Graph full keys that are documented: {pct(len(both), len(graph_keys))}")
     out.p(f"- Documented keys in the graph: {pct(len(both), len(docs))}")
+    if meta:  # (left out of the counts above and below)
+        types = getattr(mod, "META_TYPES", {})
+        md = pd.DataFrame([{"key": k, "type": t, "reason": types[t], "documented": k in docs_all}
+                           for k, t in sorted(meta.items())])
+        md.to_csv(f"{args.out}/meta_keys.csv", index=False)
+        out.p(f"- Meta keys, left out of the counts above and below: {len(meta)} graph full keys "
+              f"({md.documented.sum()} of them documented). The graph finds them because of how the module "
+              f"structures its types, but they aren't config (module.py's META_TYPES). By type:")
+        out.table(md.groupby(["type", "reason"]).agg(keys=("key", "size"), documented=("documented", "sum"))
+                  .reset_index())
 
     def group(k):
         """Group a key by what it is, for keys in only one of the two"""
@@ -1076,7 +1109,7 @@ def main():
 
     if args.label_keys:
         out.h("Confidence of message => full key mappings (paramtrack's label_keys.csv)")
-        confidence(args.label_keys, out, f"{args.out}/confidence_distribution.png", ignore)
+        confidence(args.label_keys, out, f"{args.out}/confidence_distribution.png", ignore, meta)
     write_visuals(fkdf, full_key_rows(full_all, docs_all), config, covered_by, searched, matched, custom, args, out)
 
     out.write()

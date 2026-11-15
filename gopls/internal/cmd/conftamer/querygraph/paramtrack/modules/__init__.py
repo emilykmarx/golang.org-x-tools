@@ -16,6 +16,10 @@ specific to that module, and whose module.py holds the settings and hooks the wo
   configkeys --untagged-keys; see ct.UntaggedAreKeys)
 - docs_entry(key, type) (optional): stats.read_docs' hook for the docs list's lines: the (key, type) to use (type
   "map" for maps), or None for a line that isn't a key
+- META_TYPES (optional, default {}): Go type => reason, for types whose keys the graph finds because of how the
+  module structures its types, but which aren't config (e.g. Kubernetes' metav1.TypeMeta: apiVersion, kind). A full
+  key is a meta key if every Unmarshaler Path to it passes through one (stats.meta_keys); meta keys are out of scope
+  like --ignore's (no target keys, no statistics), except in stats.py's Q4, which counts them separately
 - extra_graph(module_dir, out_path) (optional): write gopls conftamer's -extra file (roots and edges the source code
   doesn't show: the keys a custom unmarshaler or run-time decoding picks, e.g. Prometheus' SD configs, Caddy's
   modules); paramtrack's step 1 runs it into its directory

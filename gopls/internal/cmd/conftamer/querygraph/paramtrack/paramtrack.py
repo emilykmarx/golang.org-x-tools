@@ -244,6 +244,7 @@ class Workflow:
         # Full keys that could have been evidence: set by the concrete config, with a value step 5 searched for (in
         # scope or not: the confidences below leave out those --ignore does)
         ignore = stats.read_patterns(self.a.ignore)
+        meta = stats.meta_keys(full, self.mod)  # (out of scope, like --ignore's)
         searched = set(open(self.file("4-configkeys", "param_values.txt")).read().splitlines())
         eligible = {fk for c in config.values() if any(v.replace("\n", "\\n") in searched for v in c["values"])
                     for fk in c["full_keys"]}
@@ -267,7 +268,7 @@ class Workflow:
                                             1, 1])
 
         # Inferred rows: every other full key in a section with evidence for the message, with the share of the
-        # section's in-scope keys (not left out by --ignore) that are evidence for it, out of all of them and out of
+        # section's in-scope keys (not left out by --ignore, nor meta keys) that are evidence for it, out of all of them and out of
         # those that could have been (eligible; blank if there are none)
         evidence = collections.defaultdict(set)  # (kind, label, section) => its full keys that are evidence
         for r in rows:
@@ -275,7 +276,7 @@ class Workflow:
                 evidence[(r[0], r[1], r[5])].add(r[4])
         for (kind, label, sec), ev in sorted(evidence.items()):
             keys = section_keys[sec]
-            in_scope = {k for k in keys if not stats.matches_any(k, ignore)}
+            in_scope = {k for k in keys if not stats.matches_any(k, ignore) and k not in meta}
             conf_all = round(len(ev & in_scope) / len(in_scope), 3) if in_scope else ""
             conf_eligible = (round(len(ev & in_scope) / len(in_scope & eligible), 3) if in_scope & eligible
                              else "")
