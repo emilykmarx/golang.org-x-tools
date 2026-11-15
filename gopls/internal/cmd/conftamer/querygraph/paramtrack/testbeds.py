@@ -334,7 +334,8 @@ class PrombenchCaddy(CaddyIngressImage):
     isn't the concrete config at the capture. The workload is Prombench's, through the ingress: the dashboard viewer
     reaches Grafana through the controller's service, the loadgen querier queries the benchmark Prometheus instances
     through it, and `RELOAD_AFTER` seconds after the config is loaded, it's loaded again (forced: Caddy skips an
-    unchanged config). Stops after `wait` seconds from the restart."""
+    unchanged config). Stops `wait` seconds after the concrete config is loaded (not after the restart, as Prombench
+    does: under argmatch, loading a large config can take minutes, which would otherwise shorten the workload)."""
 
     CTX = upstream.CTX
     VARIANT = "caddy"
@@ -444,10 +445,10 @@ class PrombenchCaddy(CaddyIngressImage):
                        stdout=open(f"{out_dir}/port-forward.log", "w"), stderr=subprocess.STDOUT)
             time.sleep(2)
             viewer = popen([sys.executable, f"{self.EXPERIMENT}/view_dashboards.py", "--url",
-                            "http://localhost:3000/grafana", "--duration", str(int(self.wait - loaded))],
+                            "http://localhost:3000/grafana", "--duration", str(self.wait)],
                            stdout=open(f"{out_dir}/viewer.log", "w"), stderr=subprocess.STDOUT)
             helpers += [pf, viewer]
-            while (t := time.time() - start) < self.wait:
+            while (t := time.time() - start) < loaded + self.wait:
                 if reloaded is None and t >= loaded + self.RELOAD_AFTER:
                     # Check early that contexttrack is recording
                     events = f"{self.OUTDIR}/events.jsonl"
@@ -458,7 +459,7 @@ class PrombenchCaddy(CaddyIngressImage):
                     reloaded = t
                     say("config reloaded" if ok else f"config reload failed; see {out_dir}/reload.log")
                 time.sleep(5)
-            say(f"capturing after {time.time() - start:.0f}s")
+            say(f"capturing after {time.time() - start:.0f}s ({time.time() - start - loaded:.0f}s after the load)")
             for f in OUTPUTS:
                 if os.path.exists(f"{self.OUTDIR}/{f}"):
                     run(["sudo", "cp", f"{self.OUTDIR}/{f}", f"{out_dir}/{f}"], timeout=120)
@@ -558,9 +559,10 @@ class PrombenchVM(Testbed):
             if ARGMATCH_ARGS.get(k) != v:
                 args += ["--argmatch-arg", f"{k}={v}"]
         # Start the run detached on the VM, so that it survives ssh dropping; it writes out/testbed.log and, when it
-        # exits, out/exit. Builds (up to 40 min each: the builder image if missing, then Prometheus's) + deploying
-        # (if there's no cluster, about 20 min) or loading + up to 10 min to be ready + the wait + the capture.
-        limit = 2400 + 2400 + 3600 + 600 + self.wait + 900
+        # exits, out/exit. Builds (up to 40 min each: the builder image if missing, then the module's) + deploying
+        # (if there's no cluster, about 5 min) or loading + up to 10 min to be ready + up to 20 min to load the config
+        # (PrombenchCaddy) + the wait + the capture.
+        limit = 2400 + 2400 + 3600 + 600 + 1200 + self.wait + 900
         inner = f"timeout {limit} {shlex.join(args)} > out/testbed.log 2>&1; echo $? > out/exit"
         # (If ssh drops after starting it, the retry mustn't start it again)
         self.ssh(f"cd {self.REMOTE} && {{ [ -e out/testbed.log ] || (setsid nohup bash -c {shlex.quote(inner)} "
