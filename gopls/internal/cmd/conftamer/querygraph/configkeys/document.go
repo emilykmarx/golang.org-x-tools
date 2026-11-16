@@ -172,7 +172,7 @@ func walkJSON(raw []byte, path []string, inline_keys map[string][]string, out *[
 
 // Write param_values.txt (each distinct value once, in order of first appearance) and
 // param_keys.txt ("<value>:<key>[,<key>...]", each distinct key of the value) to dir.
-// Newlines in values are written as a literal \n.
+// Newlines in values are written as a literal \n, which argmatch's -matchfile reads back as a newline.
 func writeTxt(dir string, occs []occurrence) {
 	values := []string{}
 	keys := map[string][]string{}

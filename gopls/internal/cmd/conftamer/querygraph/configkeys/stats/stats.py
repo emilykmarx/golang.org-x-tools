@@ -140,6 +140,30 @@ def meta_keys(full, mod):
     return meta
 
 
+def other_roots_values(args, mod):
+    """Value (escaped as param_values.txt has it) => the concrete keys ("<root>:<key>") that have it in the run's other
+    roots of the module: their step 4 configkeys csvs, without their meta keys and --ignore's (each root's ignore
+    file), as this root's. Empty for a module with one root. A run's roots are its root's siblings,
+    <out>/<module>/<root> (paramtrack's layout.py)."""
+    if len(mod.ROOTS) == 1:
+        return {}
+    if not args.run:
+        sys.exit(f"module {args.module} has several roots: value ambiguity counts the other roots' concrete keys, "
+                 f"which stats.py finds from --run")
+    here = os.path.basename(os.path.normpath(args.run))
+    out = collections.defaultdict(set)
+    for name, r in mod.ROOTS.items():
+        path = layout.step_dir(os.path.join(os.path.dirname(os.path.normpath(args.run)), name), "4-configkeys")
+        if name == here or not os.path.exists(f"{path}/configkeys.csv"):
+            continue
+        full, config = load_configkeys(f"{path}/configkeys.csv")
+        apply_ignore(full, config, read_patterns(r.get("ignore")), meta_keys(full, mod))
+        for k, c in config.items():
+            for v in c["values"]:
+                out[v.replace("\n", "\\n")].add(f"{name}:{k}")
+    return out
+
+
 def apply_ignore(full, config, patterns, keys=()):
     """Remove the full keys matching patterns, or in keys, from full, and from each concrete key's full keys; drop the
     concrete keys left with none. Returns the numbers of full keys and concrete keys removed."""
@@ -468,6 +492,9 @@ def confidence(path, out, chart, ignore, meta=()):
     both for the inferred mappings, and a grouped bar chart of it."""
     lk = pd.read_csv(path, keep_default_na=False, dtype=str)
     lk = lk[lk.full_key != ""]
+    if lk.empty:  # (and the empty boolean masks below would select columns, not rows)
+        out.p("- No mappings: no message has evidence or inferred keys")
+        return
     is_meta = lk.full_key.isin(set(meta))
     if meta:
         out.p(f"- Left out (meta keys): {is_meta.sum()} rows, for {lk[is_meta].full_key.nunique()} meta keys")
@@ -886,16 +913,18 @@ def main():
 
     # =============================================================================================================
     out.h("Q3. Values vs keys")
-    # Value ambiguity (TERMINOLOGY.md): occ has only this root's concrete keys. A module with several roots loads every
-    # root's config into the same memory, so a value another root's config has is ambiguous too: define that before
-    # running these statistics (and unambiguous_key's callers, which take occ's rule) on such a module
-    if len(mod.ROOTS) > 1:
-        raise NotImplementedError(f"module {args.module} has several roots ({', '.join(mod.ROOTS)}): value ambiguity "
-                                  f"must count the other roots' concrete keys too (stats.py, Q3)")
+    # Value ambiguity (TERMINOLOGY.md: no other key in the module's concrete config(s) has the value): occ has this
+    # root's concrete keys, other_occ the run's other roots' (a module with several roots loads every root's config
+    # into the same memory), both in scope (not meta keys, nor --ignore's)
     occ = collections.defaultdict(set)  # value => concrete keys
     for k, c in config.items():
         for v in c["values"]:
             occ[v.replace("\n", "\\n")].add(k)
+    other_occ = other_roots_values(args, mod)  # value => "<root>:<concrete key>"s
+
+    def n_keys(v):
+        """The concrete keys v stands for, in all the run's roots"""
+        return len(occ[v]) + len(other_occ.get(v, ()))
 
     lits = go_string_literals(args.module_dir, mod)
     matched = set() if cfg_only else read_needles(args.argmatch)
@@ -905,22 +934,24 @@ def main():
         us = set().union(*(config[k]["unmarshalers"] for k in ks))
         secs_ = {section(full[fk], p) for fk in fks for p in full[fk]["paths"]}
         last = {segs(k)[-1] for k in ks}
-        if len(ks) == 1:
+        if n_keys(v) == 1:
             sim = "one key"
+        elif v in other_occ:
+            sim = "keys in other roots"
         elif len(us) == 1:
             sim = "same Unmarshaler type"
         elif len(last) == 1:
             sim = "same field name, different types"
         else:
             sim = "different fields and types"
-        others = [o for o in occ if o != v]
-        return {"value": v, "keys": len(ks), "full_keys": len(fks), "sections": len(secs_), "unmarshalers": len(us),
+        others = [o for o in [*occ, *other_occ] if o != v]
+        return {"value": v, "keys": n_keys(v), "full_keys": len(fks), "sections": len(secs_), "unmarshalers": len(us),
                 "top_sections": len({segs(k)[0] for k in ks}), "similarity": sim, "searched": v in searched,
                 "matched_by_argmatch": v in matched, "go_literal": v in lits, "length": len(v),
                 "substring_of_other_value": any(v in o for o in others),
                 # Every full key of the value is stored transformed: argmatch can't find it as written
                 "transformed_only": bool(fks) and all(matches_any(fk, transformed) for fk in fks),
-                "key_list": "; ".join(sorted(ks))}
+                "key_list": "; ".join(sorted(ks)), "other_roots_keys": "; ".join(sorted(other_occ.get(v, ())))}
 
     vals = pd.DataFrame([describe(v, ks) for v, ks in occ.items()])
     if cfg_only:
@@ -1017,7 +1048,7 @@ def main():
     out.h("Keys and sections by property")
     # Nested: each column also has the previous columns' properties (TERMINOLOGY.md)
     def unambiguous(fk):
-        return unambiguous_key(key_values(fk, covered_by, config), lambda v: len(occ[v]) == 1 and v not in lits)
+        return unambiguous_key(key_values(fk, covered_by, config), lambda v: n_keys(v) == 1 and v not in lits)
 
     all_rows = full_key_rows(full_all, docs_all)
     in_scope = set(keys.key)
@@ -1042,7 +1073,7 @@ def main():
                               ("stored transformed", lambda k: by_key.transformed[k])]),
         (props[2], props[3], [(r, lambda k, ps=ps: matches_any(k, ps)) for r, ps in mod.UNSET_REASONS]),
         (props[3], props[4], [("no values", lambda k: not values_of(k)),
-                              ("a value shared with another concrete key", lambda k: any(len(occ[v]) > 1
+                              ("a value shared with another concrete key", lambda k: any(n_keys(v) > 1
                                                                                          for v in values_of(k))),
                               ("a value that's a string literal in the code", lambda k: any(v in lits
                                                                                             for v in values_of(k)))]),

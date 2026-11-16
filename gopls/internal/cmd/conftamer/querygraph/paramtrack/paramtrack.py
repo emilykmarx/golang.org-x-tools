@@ -227,6 +227,33 @@ class Workflow:
         if t.root:
             cmd += ["--root", t.root]
         run(cmd, log=f"{d}/configkeys.log", timeout=600)
+        self.drop_out_of_scope_values(t, d)
+
+    @staticmethod
+    def drop_out_of_scope_values(t, d):
+        """Leaves out of param_values.txt and param_keys.txt (what run 2 searches for) the values whose concrete keys
+        are all out of scope: each of their full keys a meta key (module.py's META_TYPES: not config) or one --ignore
+        matches. Their param_keys.txt lines go to param_keys_out_of_scope.txt."""
+        full, config = stats.load_configkeys(f"{d}/configkeys.csv")
+        meta, ignore = stats.meta_keys(full, t.m.mod), stats.read_patterns(t.ignore)
+        out = {k for k, c in config.items()
+               if c["full_keys"] and all(fk in meta or stats.matches_any(fk, ignore) for fk in c["full_keys"])}
+        keep, drop = [], []
+        for line in open(f"{d}/param_keys.txt").read().splitlines():
+            value, _, keys = line.rpartition(":")
+            (drop if all(k in out for k in keys.split(",")) else keep).append((value, line))
+        with open(f"{d}/param_keys.txt", "w") as f:
+            f.writelines(line + "\n" for _, line in keep)
+        with open(f"{d}/param_keys_out_of_scope.txt", "w") as f:
+            f.writelines(line + "\n" for _, line in drop)
+        # (Only the values found out of scope: a line whose key has a ':' doesn't split right, configkeys warns)
+        dropped = {v for v, _ in drop}
+        values = open(f"{d}/param_values.txt").read().splitlines()
+        with open(f"{d}/param_values.txt", "w") as f:
+            f.writelines(v + "\n" for v in values if v not in dropped)
+        if drop:
+            say(f"{t.m.name}/{t.name}: not searching {len(drop)} values of out-of-scope keys (meta keys, --ignore); "
+                f"see {d}/param_keys_out_of_scope.txt")
 
     # ---------------------------------------------------------------------------------------------------------------
     # Dynamic phase
