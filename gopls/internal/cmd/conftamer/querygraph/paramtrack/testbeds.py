@@ -26,6 +26,8 @@ from common import CT, log_command, popen, run, say, source_version
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "testbeds", "prombench"))
 import upstream  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "testbeds", "prombench", "kube-apiserver"))
+import fixtures  # noqa: E402  (kube-apiserver's: the servers its configs point at)
 
 # The testbed's name, as testbed.json records it
 NAME = "prombench-caddyICingress"
@@ -162,6 +164,11 @@ class Component:
         events = f"{self.host_out}/events.jsonl"
         if not os.path.exists(events) or os.path.getsize(events) == 0:
             raise RuntimeError(f"{self.NAME}: no events in {events} (is CONFTAMER_EVENTS set?)")
+
+    def workload(self, out_dir, duration):
+        """Starts the module's own workload, if it has one (instrumented only), for duration seconds; returns its
+        process (stopped at the capture), or None"""
+        return None
 
     def reload(self):
         """Starts reloading the config (instrumented only), so the code that runs on a config change runs"""
@@ -418,7 +425,9 @@ class KubeAPIServer(Component):
     host's upstream.ARGMATCH_OUT/<NAME>/...). Stock: kind's manifest (saved before the first change: ORIGINAL).
     Stopping it stops the cluster's API, so it stops last and starts first (COMPONENTS' order), and start() waits until
     it serves. The reload: the config files it reloads on a change (RELOADED) rewritten with a comment appended (the
-    same config)."""
+    same config). Instrumented, it has fixtures (testbeds/prombench/kube-apiserver/fixtures.py: an OIDC issuer, an
+    authorization webhook, an audit webhook backend, an OTLP collector, a KMS plugin), installed before it restarts and
+    reached by name (hostAliases), and a workload of its own: requests with the issuer's tokens (fixtures.workload)."""
 
     NAME = "kube-apiserver"
     DOCKERFILE = f"{HERE}/modules/kube-apiserver/argmatch.Dockerfile"
@@ -438,7 +447,10 @@ class KubeAPIServer(Component):
     # Flags a root's config needs to take effect: the audit policy applies only with an audit backend; the
     # encryption config is reloaded (polled every minute) only when asked
     EXTRA_FLAGS = {"audit_policy": ["--audit-log-path=/argmatch-out/kube-apiserver/audit.log",
-                                    "--audit-log-maxsize=200", "--audit-log-maxbackup=1"],
+                                    "--audit-log-maxsize=200", "--audit-log-maxbackup=1",
+                                    # the fixtures' audit webhook backend (its kubeconfig: configure)
+                                    "--audit-webhook-config-file=/argmatch-out/kube-apiserver/config/audit-webhook.kubeconfig",
+                                    "--audit-webhook-batch-max-wait=5s"],
                    "encryption": ["--encryption-provider-config-automatic-reload=true"]}
     RELOADED = ("authentication", "authorization", "encryption")
     SERVE_WITHIN = 900  # seconds for the API server to serve after start (instrumented, it starts slowly)
@@ -472,9 +484,13 @@ class KubeAPIServer(Component):
             cmd += self.EXTRA_FLAGS.get(root, [])
         c["command"] = cmd
         c["env"] = [{"name": "CONFTAMER_EVENTS", "value": f"{self.pod_out}/events.jsonl"}]
-        c.setdefault("volumeMounts", []).append({"name": "argmatch-out", "mountPath": "/argmatch-out"})
-        pod["spec"].setdefault("volumes", []).append(
-            {"name": "argmatch-out", "hostPath": {"path": "/argmatch-out", "type": "Directory"}})
+        c.setdefault("volumeMounts", []).extend([{"name": "argmatch-out", "mountPath": "/argmatch-out"},
+                                                 {"name": "paramtrack-kms", "mountPath": fixtures.KMS_DIR}])
+        pod["spec"].setdefault("volumes", []).extend([
+            {"name": "argmatch-out", "hostPath": {"path": "/argmatch-out", "type": "Directory"}},
+            {"name": "paramtrack-kms", "hostPath": {"path": fixtures.KMS_DIR, "type": "DirectoryOrCreate"}}])
+        # The fixtures' names (the kubelet adds them to a host-network pod's hosts file too)
+        pod["spec"]["hostAliases"] = [{"ip": "127.0.0.1", "hostnames": fixtures.HOSTS}]
         # Under argmatch it starts and answers slowly: let the kubelet wait (up to 20 minutes to start) rather than
         # restart it
         for probe, failures in (("startupProbe", 120), ("livenessProbe", 30), ("readinessProbe", 30)):
@@ -492,6 +508,8 @@ class KubeAPIServer(Component):
                               f"{{ [ -e {self.ORIGINAL} ] || cp {self.MANIFEST} {self.ORIGINAL}; }}")
         self.original = self.node("cat", self.ORIGINAL)
         current = self.node("cat", self.MANIFEST, check=False)
+        if self.instrumented:  # (while the API server is up: the fixtures' RBAC binding)
+            fixtures.install(self.NODE, run, say, upstream.load, self.SRC, self.CTX)
         self.restart = self.instrumented or current != self.original
         if not self.restart:
             return
@@ -512,6 +530,8 @@ class KubeAPIServer(Component):
             os.makedirs(f"{self.host_out}/config")
             for root, path in self.configs.items():
                 shutil.copy(path, self.config_path(root, self.host_out))
+            with open(f"{self.host_out}/config/audit-webhook.kubeconfig", "w") as f:
+                f.write(fixtures.kubeconfig(fixtures.AUDIT_URL, ca=False))
             for root, d in self.files_of.items():
                 if d:
                     shutil.copytree(d, f"{self.host_out}/files/{root}")
@@ -532,6 +552,10 @@ class KubeAPIServer(Component):
 
     def ready(self):
         return True  # (start waited until it serves)
+
+    def workload(self, out_dir, duration):
+        return popen([sys.executable, f"{HERE}/testbeds/prombench/kube-apiserver/fixtures.py", "workload", self.CTX,
+                      str(duration), f"{self.out}/jwt-workload.log"])
 
     def reload(self):
         roots = [r for r in self.RELOADED if r in self.configs]
@@ -626,6 +650,7 @@ class Prombench:
                             "http://localhost:3000/grafana", "--duration", str(self.wait)],
                            stdout=open(f"{out_dir}/viewer.log", "w"), stderr=subprocess.STDOUT)
             helpers += [pf, viewer]
+            helpers += [p for c in instrumented if (p := c.workload(out_dir, self.wait))]
             reloaded = False
             while (t := time.time() - loaded) < self.wait:
                 if not reloaded and t >= self.RELOAD_AFTER:
@@ -664,6 +689,8 @@ class PrombenchVM:
     REMOTE = "/tmp/paramtrack-testbed"
     # Files under HERE that the testbed reads, besides its code and patches
     FILES = ["modules/caddy/argmatch.Dockerfile", "modules/kube-apiserver/argmatch.Dockerfile",
+             *(f"testbeds/prombench/kube-apiserver/{f}" for f in ("fixtures.py", "ca.crt", "server.crt", "server.key",
+                                                                   "jwt.key")),
              "testbeds/prombench/prometheus/shipped-config.yaml"]
 
     POLL = 30  # seconds between checks on the run
