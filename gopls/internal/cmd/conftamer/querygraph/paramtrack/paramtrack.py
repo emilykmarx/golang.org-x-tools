@@ -250,15 +250,11 @@ class Workflow:
                 "vm": tb.vm}
 
     def testbed_config(self, m):
-        """The module's concrete config (step 2's copy) and its files for the testbed runs. The testbed takes one per
-        module; with several targets, theirs must be the same (several roots over one file), until it takes several"""
-        t0 = m.targets[0]
-        for t in m.targets[1:]:
-            if not self.same_config(self.config_copy(t0), self.step_files(t0), self.config_copy(t),
-                                    self.step_files(t)):
-                sys.exit(f"module {m.name}'s targets {t0.name} and {t.name} have different concrete configs, but "
-                         f"the testbed takes one per module")
-        return {"config": self.config_copy(t0), "files": self.step_files(t0), "argmatch_args": testbeds.argmatch_args(m.mod)}
+        """The module's concrete configs (step 2's copies; one per target, by config root) and their files for the
+        testbed runs"""
+        return {"configs": {t.name: self.config_copy(t) for t in m.targets},
+                "files": {t.name: self.step_files(t) for t in m.targets if self.step_files(t)},
+                "argmatch_args": testbeds.argmatch_args(m.mod)}
 
     @staticmethod
     def matchfile(m, d):

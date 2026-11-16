@@ -1,10 +1,10 @@
 """paramtrack's testbed for its dynamic phase: prombench, with Caddy's ingress controller in place of ingress-nginx, in
-a kind cluster on a GCE VM. Each module in prombench (COMPONENTS: Prometheus as prometheus-meta, Caddy's ingress
-controller) runs either instrumented, if the run gives it a concrete config (built with argmatch and contexttrack, run
-with the concrete config, its events and argmatch's matches collected), or stock (upstream's image, the shipped
-config). See README.md.
+a kind cluster on a GCE VM. Each module in prombench (COMPONENTS: the cluster's API server, Prometheus as
+prometheus-meta, Caddy's ingress controller) runs either instrumented, if the run gives it concrete configs (built with
+argmatch and contexttrack, run with a concrete config per config root, its events and argmatch's matches collected), or
+stock (upstream's image, the shipped config). See README.md.
 
-Also run on the VM by PrombenchVM: testbeds.py --out DIR [--config MODULE=FILE [--files MODULE=DIR]
+Also run on the VM by PrombenchVM: testbeds.py --out DIR [--config MODULE:ROOT=FILE ... [--files MODULE:ROOT=DIR]
 [--stacklog MODULE=FILE --matchfile MODULE=FILE] ...]
 """
 
@@ -52,20 +52,27 @@ EXPERIMENT = f"{CT}/dump_ancestors/argmatch/experiment"
 
 
 class Component:
-    """A module in prombench (its paramtrack module name: NAME), as one deployment. Instrumented if given a config:
-    built from DOCKERFILE under argmatch and contexttrack (the checkout $CT/SRC is the build context's), run as TAG
-    with CONFTAMER_EVENTS and argmatch's output in /argmatch-out/<NAME>/ (the host's upstream.ARGMATCH_OUT/<NAME>), and
-    with the config. Otherwise stock: STOCK_IMAGE, with the shipped config. Its files go to <out_dir>/<NAME>/."""
+    """A module in prombench (its paramtrack module name: NAME), as one deployment. Instrumented if given configs (one
+    per config root of its module.py's ROOTS the run covers): built from DOCKERFILE under argmatch and contexttrack (the
+    checkout SRC, relative to $CT or absolute, is in the build context), run as TAG with CONFTAMER_EVENTS and
+    argmatch's output in /argmatch-out/<NAME>/ (the host's upstream.ARGMATCH_OUT/<NAME>), and with the configs.
+    Otherwise stock: STOCK_IMAGE, with the shipped config. Its files go to <out_dir>/<NAME>/."""
 
     NAME = DOCKERFILE = SRC = TAG = STOCK_IMAGE = NS = DEPLOY = CONTAINER = LABEL = None
     BUILD_ARGS = {}
+    BUILD_CONTEXTS = {}  # docker build's named contexts besides $CT: name => directory
     CTX = upstream.CTX
 
-    def __init__(self, out_dir, config=None, files=None, stacklog=None, matchfile=None, argmatch_args=None):
+    def __init__(self, out_dir, configs=None, files=None, stacklog=None, matchfile=None, argmatch_args=None):
+        """configs: root => concrete config; files: root => the directory of files its config refers to"""
         self.argmatch_args = {**ARGMATCH_ARGS, **(argmatch_args or {})}
         self.out = f"{out_dir}/{self.NAME}"
-        self.config, self.files, self.stacklog, self.matchfile = config, files, stacklog, matchfile
-        self.instrumented = config is not None
+        self.configs, self.files_of = configs or {}, files or {}
+        self.stacklog, self.matchfile = stacklog, matchfile
+        self.instrumented = configs is not None
+        # A module with one root (Prometheus, Caddy): its config and files
+        self.config = next(iter(self.configs.values())) if len(self.configs) == 1 else None
+        self.files = next(iter(self.files_of.values()), None) if len(self.configs) == 1 else None
         self.host_out = f"{upstream.ARGMATCH_OUT}/{self.NAME}"  # mounted at /argmatch-out in the container
         self.pod_out = f"/argmatch-out/{self.NAME}"
         os.makedirs(self.out, exist_ok=True)
@@ -88,10 +95,11 @@ class Component:
         upstream.ensure_builder(self.out)  # the image the Dockerfiles build FROM
         # What the image is built from: the module checkout on the machine that builds it (the VM's, which may differ
         # from the checkout the graph was built from: settings.json's module_source)
-        src = source_version(f"{CT}/{self.SRC}")
+        checkout = os.path.join(CT, self.SRC)
+        src = source_version(checkout)
         with open(f"{self.out}/build_source.json", "w") as f:
-            json.dump({"checkout": f"{CT}/{self.SRC}", **(src or {})}, f, indent=2)
-        say(f"{self.NAME}: building from {CT}/{self.SRC} at {(src or {}).get('describe')}")
+            json.dump({"checkout": checkout, **(src or {})}, f, indent=2)
+        say(f"{self.NAME}: building from {checkout} at {(src or {}).get('describe')}")
         if self.stacklog:
             overrides = {"STACKLOG": self.in_build_context(self.stacklog, "paramtrack-stacklog.txt"),
                          "MATCHFILE": self.in_build_context(self.matchfile, "paramtrack-matches.txt")}
@@ -102,6 +110,8 @@ class Component:
         cmd = ["docker", "build", "--progress=plain", "-f", self.DOCKERFILE]
         for k, v in sorted(self.BUILD_ARGS.items()):
             cmd += ["--build-arg", f"{k}={v}"]
+        for k, v in sorted(self.BUILD_CONTEXTS.items()):
+            cmd += ["--build-context", f"{k}={v}"]
         for k, v in sorted(a.items()):
             cmd += ["--build-arg", f"ARGMATCH_{k}={v}"]
         say(f"building {self.TAG} (about 5 minutes if what argmatch instruments changed)")
@@ -110,7 +120,7 @@ class Component:
     def in_build_context(self, path, name):
         """Copies a file into the module's checkout, which the Dockerfile copies to /src; returns its path there.
         (The build reads the stack log and match file at build time.)"""
-        shutil.copy(path, f"{CT}/{self.SRC}/{name}")
+        shutil.copy(path, os.path.join(CT, self.SRC, name))
         return f"/src/{name}"
 
     # -- restart
@@ -400,8 +410,152 @@ class CaddyController(Component):
                                f"{self.out}/running-config.json): did the controller replace it?")
 
 
-# The modules prombench runs, by paramtrack module name (modules/<name>/)
-COMPONENTS = {c.NAME: c for c in (PrometheusMeta, CaddyController)}
+class KubeAPIServer(Component):
+    """The Kubernetes API server, built from modules/kube-apiserver/argmatch.Dockerfile: the cluster's own, kind's static
+    pod on the control-plane node (NODE), whose version upstream.NODE_IMAGE pins to the checkout's. Instrumented: kind's
+    manifest with TAG's image, CONFTAMER_EVENTS, /argmatch-out mounted, patient probes, and each root's config passed
+    by its flag (FLAGS); the configs are in /argmatch-out/<NAME>/config/ and their files in .../files/<root>/ (the
+    host's upstream.ARGMATCH_OUT/<NAME>/...). Stock: kind's manifest (saved before the first change: ORIGINAL).
+    Stopping it stops the cluster's API, so it stops last and starts first (COMPONENTS' order), and start() waits until
+    it serves. The reload: the config files it reloads on a change (RELOADED) rewritten with a comment appended (the
+    same config)."""
+
+    NAME = "kube-apiserver"
+    DOCKERFILE = f"{HERE}/modules/kube-apiserver/argmatch.Dockerfile"
+    SRC = "/home/emily/go/src/k8s.io/kubernetes"  # module.py's MODULE_DIR (outside $CT)
+    BUILD_CONTEXTS = {"kubernetes": SRC}
+    TAG = "kube-apiserver-conftamer:v1.31.1"
+    NODE = f"{upstream.CLUSTER}-control-plane"
+    NS, DEPLOY, CONTAINER = "kube-system", f"pod/kube-apiserver-{NODE}", "kube-apiserver"
+    MANIFEST = "/etc/kubernetes/manifests/kube-apiserver.yaml"  # in NODE
+    ORIGINAL = "/etc/kubernetes/paramtrack-original/kube-apiserver.yaml"  # (outside the kubelet's manifests directory)
+    # Each root's flag (modules/kube-apiserver/documentedkeys/README.md, "The six files in scope")
+    FLAGS = {"authentication": "--authentication-config", "authorization": "--authorization-config",
+             "encryption": "--encryption-provider-config", "audit_policy": "--audit-policy-file",
+             "egress_selector": "--egress-selector-config-file", "tracing": "--tracing-config-file"}
+    # Flags of kind's that a root's config replaces (the API server refuses both)
+    REPLACED = {"authorization": ("--authorization-mode",)}
+    # Flags a root's config needs to take effect: the audit policy applies only with an audit backend; the
+    # encryption config is reloaded (polled every minute) only when asked
+    EXTRA_FLAGS = {"audit_policy": ["--audit-log-path=/argmatch-out/kube-apiserver/audit.log",
+                                    "--audit-log-maxsize=200", "--audit-log-maxbackup=1"],
+                   "encryption": ["--encryption-provider-config-automatic-reload=true"]}
+    RELOADED = ("authentication", "authorization", "encryption")
+    SERVE_WITHIN = 900  # seconds for the API server to serve after start (instrumented, it starts slowly)
+
+    def node(self, *cmd, input=None, timeout=120, check=True):
+        full = ["docker", "exec", *(["-i"] if input is not None else []), self.NODE, *cmd]
+        log_command(full)
+        p = subprocess.run(full, input=input, capture_output=True, text=True, timeout=timeout)
+        if check and p.returncode != 0:
+            raise RuntimeError(f"exit {p.returncode}: {' '.join(full)}: {p.stderr.strip()[-1000:]}")
+        return p.stdout
+
+    def config_path(self, root, base):
+        return f"{base}/config/{root}{os.path.splitext(self.configs[root])[1]}"
+
+    def manifest(self, original):
+        """The static pod manifest to run: kind's (stock), or kind's with the instrumented image and configs"""
+        if not self.instrumented:
+            return original
+        import yaml
+        unknown = set(self.configs) - set(self.FLAGS)
+        if unknown:
+            raise RuntimeError(f"{self.NAME}: no flag for roots {', '.join(sorted(unknown))} (FLAGS)")
+        pod = yaml.safe_load(original)
+        c = pod["spec"]["containers"][0]
+        c["image"], c["imagePullPolicy"] = self.TAG, "Never"
+        drop = tuple(f"{f}=" for r in self.configs for f in self.REPLACED.get(r, ()))
+        cmd = [a for a in c["command"] if not a.startswith(drop)]
+        for root in sorted(self.configs):
+            cmd.append(f"{self.FLAGS[root]}={self.config_path(root, self.pod_out)}")
+            cmd += self.EXTRA_FLAGS.get(root, [])
+        c["command"] = cmd
+        c["env"] = [{"name": "CONFTAMER_EVENTS", "value": f"{self.pod_out}/events.jsonl"}]
+        c.setdefault("volumeMounts", []).append({"name": "argmatch-out", "mountPath": "/argmatch-out"})
+        pod["spec"].setdefault("volumes", []).append(
+            {"name": "argmatch-out", "hostPath": {"path": "/argmatch-out", "type": "Directory"}})
+        # Under argmatch it starts and answers slowly: let the kubelet wait (up to 20 minutes to start) rather than
+        # restart it
+        for probe, failures in (("startupProbe", 120), ("livenessProbe", 30), ("readinessProbe", 30)):
+            if probe in c:
+                c[probe].update(failureThreshold=failures, timeoutSeconds=60)
+        return yaml.safe_dump(pod, sort_keys=False)
+
+    def serving(self):
+        return subprocess.run(["kubectl", "--context", self.CTX, "get", "--raw", "/readyz"], capture_output=True,
+                              timeout=90).returncode == 0
+
+    def stop(self):
+        """Saves kind's manifest (first time), then removes the running one, unless it's already the one to run"""
+        self.node("sh", "-c", f"mkdir -p {os.path.dirname(self.ORIGINAL)} && "
+                              f"{{ [ -e {self.ORIGINAL} ] || cp {self.MANIFEST} {self.ORIGINAL}; }}")
+        self.original = self.node("cat", self.ORIGINAL)
+        current = self.node("cat", self.MANIFEST, check=False)
+        self.restart = self.instrumented or current != self.original
+        if not self.restart:
+            return
+        self.node("rm", "-f", self.MANIFEST)
+        start = time.time()
+        while self.node("crictl", "ps", "-q", "--name", "^kube-apiserver$").strip():
+            if time.time() - start > 300:
+                raise RuntimeError(f"{self.NAME}: still running 300s after its manifest was removed")
+            time.sleep(5)
+        say(f"{self.NAME}: stopped")
+
+    def configure(self):
+        if self.instrumented:
+            run(["sudo", "mkdir", "-p", self.host_out], timeout=60)
+            run(["sudo", "chmod", "777", self.host_out], timeout=60)
+            run(["sudo", "rm", "-rf", f"{self.host_out}/config", f"{self.host_out}/files", f"{self.host_out}/audit.log"]
+                + [f"{self.host_out}/{f}" for f in OUTPUTS], timeout=60)
+            os.makedirs(f"{self.host_out}/config")
+            for root, path in self.configs.items():
+                shutil.copy(path, self.config_path(root, self.host_out))
+            for root, d in self.files_of.items():
+                if d:
+                    shutil.copytree(d, f"{self.host_out}/files/{root}")
+        self.new_manifest = self.manifest(self.original)
+
+    def start(self):
+        if not self.restart:
+            return
+        self.node("sh", "-c", f"cat > {self.MANIFEST}", input=self.new_manifest)
+        start = time.time()
+        while not self.serving():
+            if time.time() - start > self.SERVE_WITHIN:
+                tail = self.node("sh", "-c", "crictl logs --tail 40 $(crictl ps -a -q --name '^kube-apiserver$' | "
+                                 "head -1) 2>&1", check=False)
+                raise RuntimeError(f"{self.NAME}: not serving {self.SERVE_WITHIN}s after start; its log ends:\n{tail}")
+            time.sleep(5)
+        say(f"{self.NAME}: serving after {time.time() - start:.0f}s")
+
+    def ready(self):
+        return True  # (start waited until it serves)
+
+    def reload(self):
+        roots = [r for r in self.RELOADED if r in self.configs]
+        for root in roots:
+            with open(self.config_path(root, self.host_out), "a") as f:
+                f.write("\n# paramtrack: reload\n")  # (YAML comment; the files are YAML or JSON)
+        if roots:
+            say(f"{self.NAME}: config files rewritten for a reload: {', '.join(roots)}")
+
+    def capture(self):
+        super().capture()
+        if os.path.exists(f"{self.host_out}/audit.log"):
+            run(["sudo", "cp", f"{self.host_out}/audit.log", f"{self.out}/audit.log"], timeout=300)
+            run(["sudo", "chown", f"{os.getuid()}:{os.getgid()}", f"{self.out}/audit.log"], timeout=60)
+
+    def check_capture(self):
+        image = self.k("get", self.DEPLOY, "-o", "jsonpath={.spec.containers[0].image}").strip()
+        if image != self.TAG:
+            raise RuntimeError(f"{self.NAME}: running {image} at the capture, not {self.TAG}")
+
+
+# The modules prombench runs, by paramtrack module name (modules/<name>/), in the order they start (and stop in reverse):
+# the API server first, as the others' restarts go through it
+COMPONENTS = {c.NAME: c for c in (KubeAPIServer, PrometheusMeta, CaddyController)}
 
 
 class Prombench:
@@ -422,8 +576,9 @@ class Prombench:
         self.wait = wait
 
     def run(self, out_dir, modules):
-        """modules: module name => {config, files, stacklog, matchfile, argmatch_args} for each instrumented module
-        (the others run stock). With a stacklog, argmatch instruments its functions and searches for the strings in
+        """modules: module name => {configs, files, stacklog, matchfile, argmatch_args} for each instrumented module
+        (the others run stock); configs: config root => concrete config; files: config root => its files' directory.
+        With a stacklog, argmatch instruments its functions and searches for the strings in
         matchfile; without, it instruments nothing (contexttrack still records events). argmatch_args: the module's
         argmatch build args that differ from ARGMATCH_ARGS."""
         unknown = set(modules) - set(COMPONENTS)
@@ -441,7 +596,7 @@ class Prombench:
             upstream.deploy("caddy", f"{out_dir}/deploy")
         for c in instrumented:
             upstream.load(c.TAG)
-        for c in comps:
+        for c in reversed(comps):
             c.stop()
         for c in comps:
             c.configure()
@@ -508,7 +663,8 @@ class PrombenchVM:
     PROJECT = "conftamer"
     REMOTE = "/tmp/paramtrack-testbed"
     # Files under HERE that the testbed reads, besides its code and patches
-    FILES = ["modules/caddy/argmatch.Dockerfile", "testbeds/prombench/prometheus/shipped-config.yaml"]
+    FILES = ["modules/caddy/argmatch.Dockerfile", "modules/kube-apiserver/argmatch.Dockerfile",
+             "testbeds/prombench/prometheus/shipped-config.yaml"]
 
     POLL = 30  # seconds between checks on the run
     GIVE_UP = 1200  # seconds of failed ssh calls before giving up
@@ -564,16 +720,18 @@ class PrombenchVM:
             for k, v in (m.get("argmatch_args") or {}).items():
                 if ARGMATCH_ARGS.get(k) != v:
                     args += ["--argmatch-arg", f"{name}:{k}={v}"]
-            config = f"inputs/{name}/config{os.path.splitext(m['config'])[1]}"
-            inputs[config] = m["config"]
-            args += ["--config", f"{name}={config}"]
+            for root, path in sorted(m["configs"].items()):
+                config = f"inputs/{name}/{root}/config{os.path.splitext(path)[1]}"
+                inputs[config] = path
+                args += ["--config", f"{name}:{root}={config}"]
             if m.get("stacklog"):
                 inputs |= {f"inputs/{name}/stacklog.txt": m["stacklog"], f"inputs/{name}/matches.txt": m["matchfile"]}
                 args += ["--stacklog", f"{name}=inputs/{name}/stacklog.txt",
                          "--matchfile", f"{name}=inputs/{name}/matches.txt"]
-            if m.get("files"):
-                dirs[f"inputs/{name}/files"] = m["files"]
-                args += ["--files", f"{name}=inputs/{name}/files"]
+            for root, path in sorted((m.get("files") or {}).items()):
+                if path:
+                    dirs[f"inputs/{name}/{root}/files"] = path
+                    args += ["--files", f"{name}:{root}=inputs/{name}/{root}/files"]
         with tempfile.TemporaryDirectory() as tmp:
             for name, path in inputs.items():
                 os.makedirs(os.path.dirname(f"{tmp}/{name}"), exist_ok=True)
@@ -654,7 +812,9 @@ def main():
     """Runs Prombench here; used by PrombenchVM on the VM"""
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
-    for flag in ("--config", "--files", "--stacklog", "--matchfile"):
+    for flag in ("--config", "--files"):
+        ap.add_argument(flag, action="append", default=[], metavar="MODULE:ROOT=PATH")
+    for flag in ("--stacklog", "--matchfile"):
         ap.add_argument(flag, action="append", default=[], metavar="MODULE=PATH")
     ap.add_argument("--wait", type=int, default=240)
     ap.add_argument("--argmatch-arg", action="append", default=[], metavar="MODULE:KEY=VALUE")
@@ -664,8 +824,12 @@ def main():
     common.COMMANDS_LOG = os.path.abspath(f"{a.out}/vm-commands.log")
     log_command(sys.argv)
     modules = {}
-    for key, values in (("config", a.config), ("files", a.files), ("stacklog", a.stacklog),
-                        ("matchfile", a.matchfile)):
+    for key, values in (("configs", a.config), ("files", a.files)):
+        for v in values:
+            spec, _, path = v.partition("=")
+            name, _, root = spec.partition(":")
+            modules.setdefault(name, {}).setdefault(key, {})[root] = os.path.abspath(path)
+    for key, values in (("stacklog", a.stacklog), ("matchfile", a.matchfile)):
         for v in values:
             name, _, path = v.partition("=")
             modules.setdefault(name, {})[key] = os.path.abspath(path)
@@ -673,7 +837,7 @@ def main():
         name, _, kv = v.partition(":")
         k, _, val = kv.partition("=")
         modules.setdefault(name, {}).setdefault("argmatch_args", {})[k] = val
-    if any("config" not in m for m in modules.values()):
+    if any("configs" not in m for m in modules.values()):
         sys.exit("every module named needs a --config")
     Prombench(wait=a.wait).run(os.path.abspath(a.out), modules)
 

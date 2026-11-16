@@ -70,6 +70,10 @@ git clone https://github.com/emilykmarx/go-conftamer-ancestry.git
 git clone https://github.com/emilykmarx/caddyserver-ingress.git
 git clone https://github.com/emilykmarx/conftamer
 pushd conftamer; git checkout argmatch; popd
+# The Kubernetes API server (modules/kube-apiserver/module.py's MODULE_DIR, outside this directory): v1.31.1, as
+# upstream.py's NODE_IMAGE (blobs fetched on demand: the history is large)
+git clone --filter=blob:none --single-branch --branch conftamer-ancestry https://github.com/emilykmarx/kubernetes.git \
+    /home/emily/go/src/k8s.io/kubernetes
 
 # kind: kube-proxy and promtail need more inotify instances than the default 128 (upstream.py also sets it, but
 # only until the next reboot)

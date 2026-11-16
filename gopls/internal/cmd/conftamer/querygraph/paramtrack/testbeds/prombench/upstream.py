@@ -67,6 +67,9 @@ VARS = {
     "OAUTH_TOKEN": base64.b64encode(b"dummy").decode(),
     "WH_SECRET": "",
     "ARGMATCH_OUT": ARGMATCH_OUT,
+    # Every node's image (patch 0008): kube-apiserver's checkout's version (modules/kube-apiserver/module.py), which
+    # the instrumented API server is built from
+    "NODE_IMAGE": "kindest/node:v1.31.1@sha256:cd224d8da58d50907d1dd41d476587643dad2ffd9f6a4d96caf530fb3b9a5956",
 }
 
 BUILDER_TAG = "prometheus-builder:conftamer"
@@ -136,13 +139,15 @@ def cluster_exists():
 
 def cluster_variant():
     """The deployed cluster's variant (by its ingress controller's namespace), None if there's no cluster, or
-    "unknown" (e.g. a cluster of the removed nginx variant)"""
+    "unknown" (e.g. a cluster of the removed nginx variant); "<variant> on <image>" if its nodes don't run
+    NODE_IMAGE"""
     if not cluster_exists():
         return None
+    image = run(["docker", "inspect", "-f", "{{.Config.Image}}", f"{CLUSTER}-control-plane"], timeout=60).strip()
     for v in VARIANTS.values():
         if subprocess.run(["kubectl", "--context", CTX, "get", "namespace", v.ingress_namespace],
                           capture_output=True, timeout=60).returncode == 0:
-            return v.name
+            return v.name if image == VARS["NODE_IMAGE"] else f"{v.name} on {image}"
     return "unknown"
 
 
