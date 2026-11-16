@@ -10,8 +10,9 @@ fields are one message. A message's events are those whose label reduces to it.
 An event's chain is its stack (the goroutine that sent it, innermost first), then the frames in its ancestry (the
 stacks that created that goroutine, and so on, up to main), as join.py parses them: the code path from the send to the
 root.
-Similarity is measured on the module's own functions (MODULE: the run's Go module, from its 2-full-keys/settings.json,
-e.g. github.com/prometheus/prometheus/...), since
+Similarity is measured on the module's own functions (MODULE_FUNCTIONS: the function-name prefixes of the run's module,
+its module.py's CHAIN_FUNCTIONS, by default its Go module, from its 2-full-keys/settings.json, e.g.
+github.com/prometheus/prometheus/...), since
 nearly every request shares the net/http frames:
 - per message: its events, its distinct chains (full, and module functions only), and its origin(s): the outermost
   module function of each chain (e.g. notifier.(*Manager).Run);
@@ -34,16 +35,19 @@ import join  # noqa: E402  (argmatch-labels' join.py: message_labels)
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../paramtrack"))
 import layout  # noqa: E402  (paramtrack's: where a run's step outputs are)
+import modules  # noqa: E402  (paramtrack's modules: CHAIN_FUNCTIONS)
 
-MODULE = "github.com/prometheus/prometheus/"  # (message_chains sets it to the run's module)
+MODULE = "github.com/prometheus/prometheus/"  # (message_chains sets it to the run's Go module; short strips it)
+MODULE_FUNCTIONS = (MODULE,)  # (message_chains sets it to the run's module's CHAIN_FUNCTIONS)
 KINDS = ("Request sent", "Response sent")  # the sent messages
 
 
 def reduce_label(label):
     """A message label reduced to its path or route pattern: no braces, field names, api_id, method, paths or code
-    (e.g. `{api_id: k8s.io, method: GET, path: /api/v1/pods}` => `/api/v1/pods`)"""
+    (e.g. `{api_id: k8s.io, method: GET, path: /api/v1/pods}` => `/api/v1/pods`). Received responses name their path
+    `req.URL.Path` (e.g. `{req.Method: GET, req.URL.Path: /version, resp.StatusCode: 200}` => `/version`)."""
     fields = dict(f.split(": ", 1) for f in label.strip("{}").split(", "))
-    return fields.get("path") or fields.get("pattern")
+    return fields.get("path") or fields.get("pattern") or fields.get("req.URL.Path")
 
 
 def chain(ev):
@@ -64,21 +68,43 @@ def short(fn):
 STEP = "5-matches"
 
 
-def message_chains(run, step=STEP):
-    """(kind, message) => the chains of its events in run's <step>/events.jsonl. Sets MODULE to the run's module."""
-    global MODULE
+def message_chains(run, step=STEP, kinds=KINDS):
+    """(kind, message) => the chains of its events in run's <step>/events.jsonl, for messages of the given kinds (the
+    sent ones by default). Sets MODULE and MODULE_FUNCTIONS to the run's module's."""
+    global MODULE, MODULE_FUNCTIONS
     MODULE = json.load(open(f"{layout.step_dir(run, '2-full-keys')}/settings.json"))["module"] + "/"
+    MODULE_FUNCTIONS = tuple(getattr(modules.load(MODULE.rstrip("/")), "CHAIN_FUNCTIONS", (MODULE,)))
     events = [json.loads(line) for line in open(f"{layout.step_dir(run, step)}/events.jsonl") if line.strip()]
     chains = collections.defaultdict(list)
     for i, label in join.message_labels(events).items():
-        if events[i]["kind"] in KINDS:
+        if events[i]["kind"] in kinds:
             chains[(events[i]["kind"], reduce_label(label))].append(chain(events[i]))
     return chains
 
 
+def message_context_ids(run, step=STEP, kinds=KINDS):
+    """(kind, message) => the context IDs of its events in run's <step>/events.jsonl (contexttrack's context_id: the
+    request's context, e.g. id:10), for messages of the given kinds, labelled and reduced as message_chains does"""
+    return {k: {cid for cid, _ in es} for k, es in message_exchanges(run, step, kinds).items()}
+
+
+def message_exchanges(run, step=STEP, kinds=KINDS):
+    """(kind, message) => its events' (context ID, (req.Method, req.URL.Path)), as message_context_ids. A request and
+    its response have the same all three (req.URL.Host is only in the request)"""
+    events = [json.loads(line) for line in open(f"{layout.step_dir(run, step)}/events.jsonl") if line.strip()]
+    out = collections.defaultdict(set)
+    for i, label in join.message_labels(events).items():
+        if events[i]["kind"] in kinds:
+            cid = (events[i].get("context") or {}).get("context_id")
+            if cid:
+                m = events[i].get("message") or {}
+                out[(events[i]["kind"], reduce_label(label))].add((cid, (m.get("req.Method"), m.get("req.URL.Path"))))
+    return out
+
+
 def module_functions(cs):
     """The module functions on chains cs, and their origins (each chain's outermost module function)"""
-    mod = [tuple(f for f in c if f.startswith(MODULE)) for c in cs]
+    mod = [tuple(f for f in c if f.startswith(MODULE_FUNCTIONS)) for c in cs]
     return set().union(*map(set, mod)) if mod else set(), sorted({short(c[-1]) for c in mod if c})
 
 
@@ -108,7 +134,7 @@ def main():
         cs = chains.get((kind, m), [])
         funcs[(kind, m)], origins = module_functions(cs)
         rows.append({"kind": kind, "message": m, "events": len(cs), "distinct chains": len(set(cs)),
-                     "distinct module chains": len({tuple(f for f in c if f.startswith(MODULE)) for c in cs}),
+                     "distinct module chains": len({tuple(f for f in c if f.startswith(MODULE_FUNCTIONS)) for c in cs}),
                      "origins": "; ".join(origins) or "-"})
     df = pd.DataFrame(rows)
     missing = df[df.events == 0]

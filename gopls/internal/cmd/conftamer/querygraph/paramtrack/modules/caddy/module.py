@@ -28,6 +28,9 @@ UNTAGGED_KEYS = True
 # took over 15 minutes to load the concrete config and wrote 22 GB of matches (2026-11-15); the full run of
 # 2026-11-13 passed these on the command line
 ARGMATCH_ARGS = {"MAXTIME": "2s", "MAXMEM": "1GB"}
+# On message chains, Caddy's functions are the module's too: the controller's binary runs Caddy, whose code handles
+# the messages (routes, handlers, storage); with only the controller's, most chains look alike
+CHAIN_FUNCTIONS = (f"{GO_MODULE}/", "github.com/caddyserver/caddy/v2")
 
 
 def extra_graph(module_dir, out_path, timeout=900):
