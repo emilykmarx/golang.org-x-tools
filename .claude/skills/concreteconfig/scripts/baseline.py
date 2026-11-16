@@ -1,7 +1,8 @@
 """The baseline run's files and settings (SKILL.md, "Inputs"), for the scripts that rerun paramtrack's steps on a
 candidate and must match it: score.py and check_labels.py. paramtrack records its settings, defaults filled in, in
 2-full-keys/settings.json (module, module dir, root, format, docs, ignore file, transformed-keys file) and
-3-chains/testbed.json (testbed, --wait, --vm, argmatch's build args)."""
+<out>/testbed/3-chains/testbed.json (testbed, its instrumented modules, --wait, --vm, argmatch's build args, which
+the skill's runs, up to testbed run 1, don't need)."""
 
 import glob
 import json
@@ -14,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "../../../../gopls/internal/cmd/conftamer/querygraph/paramtrack"))
 import layout  # noqa: E402  (where a run's step outputs are)
 import modules  # noqa: E402
+import testbeds  # noqa: E402  (testbed.json's settings of earlier testbeds: recorded)
 
 
 class MissingInput(Exception):
@@ -78,9 +80,11 @@ def root(s):
         if os.path.abspath(s[k]) != os.path.abspath(v) if k == "module_dir" else s[k] != v:
             raise MissingInput(f"the baseline's {k} ({s[k]!r}) differs from module {s['module']}'s module.py ({v!r}), "
                                f"which paramtrack now uses; redo the baseline")
-    name = s.get("target") or next((n for n, r in mod.ROOTS.items() if r["root"] == s["root"]), None)
+    # (config_source: earlier "target", 2026-11-15; runs before 2026-11-15 recorded neither, just the root type)
+    recorded = s.get("config_source") or s.get("target")
+    name = recorded or next((n for n, r in mod.ROOTS.items() if r["root"] == s["root"]), None)
     if name not in mod.ROOTS:
-        raise MissingInput(f"the baseline's root {s.get('target') or s['root']} isn't in module {s['module']}'s ROOTS "
+        raise MissingInput(f"the baseline's root {recorded or s['root']} isn't in module {s['module']}'s ROOTS "
                            f"({', '.join(mod.ROOTS)}); redo the baseline")
     r = mod.ROOTS[name]
     for k in ("root", "docs", "ignore", "transformed"):
@@ -97,10 +101,18 @@ def static_args(s):
 
 def testbed_args(baseline):
     """paramtrack arguments for the baseline's testbed settings (3-chains/testbed.json)"""
-    tb = _load(f"{layout.testbed_dir(run_dir(baseline), '3-chains')}/testbed.json", "the testbed settings")
-    args = ["--testbed", tb["testbed"], "--wait", str(tb["wait"])]
+    path = f"{layout.testbed_dir(run_dir(baseline), '3-chains')}/testbed.json"
+    tb = testbeds.recorded(_load(path, "the testbed settings"))
+    if tb["testbed"] != testbeds.NAME:
+        raise MissingInput(f"the baseline ran on testbed {tb['testbed']} ({path}), which paramtrack no longer has "
+                           f"(it has {testbeds.NAME}); redo the baseline")
+    mod = modules.load(settings(baseline)["module"])
+    name = os.path.basename(os.path.dirname(mod.__file__))
+    if tb["modules"] != [name]:
+        raise MissingInput(f"the baseline instrumented modules {tb['modules']} ({path}), but the skill's runs "
+                           f"instrument {name} alone; redo the baseline with --module {name} alone")
+    # (Not argmatch's args: the skill's runs stop after testbed run 1, which instruments nothing)
+    args = ["--wait", str(tb["wait"])]
     if "vm" in tb:
         args += ["--vm", tb["vm"]]
-    for k, v in tb["argmatch_args"].items():
-        args += ["--argmatch-arg", f"{k}={v}"]
     return args

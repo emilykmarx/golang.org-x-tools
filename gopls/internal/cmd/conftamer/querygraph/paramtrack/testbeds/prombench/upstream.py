@@ -3,12 +3,12 @@ that tree, builds the prometheus-builder image paramtrack's images build on, and
 this machine. Ported from the deploy.sh and build_prom_argmatch.sh of the fork (github.com/emilykmarx/
 prometheus-test-infra, branch argmatch-prom). Each patch's message gives its reason.
 
-Two variants (VARIANTS), by ingress controller: `nginx` (upstream's; patches/) and `caddy` (Caddy's ingress
-controller, the module paramtrack studies there: patches/ but 0003, which only sets prometheus-meta's image, then
-patches-caddy/).
+One variant (VARIANTS), by ingress controller: `caddy` (Caddy's ingress controller in place of upstream's
+ingress-nginx: patches/, then patches-caddy/). (The `nginx` variant, upstream's ingress controller, was removed
+2026-11-15.) The deployments run upstream's images; ../../testbeds.py sets an instrumented module's image per run.
 
 Used by ../../testbeds.py; also runnable alone, on the machine that runs the cluster:
-    python3 upstream.py deploy --variant nginx|caddy --image TAG   # deletes the cluster first if there is one
+    python3 upstream.py deploy --variant caddy   # deletes the cluster first if there is one
 """
 
 import argparse
@@ -34,20 +34,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 class Variant:
     def __init__(self, name, patches, domain, ingress_namespace):
         self.name = name
-        self.tree = f"{CT}/paramtrack-prombench" + ("" if name == "nginx" else f"-{name}")  # remade by prepare()
+        self.tree = f"{CT}/paramtrack-prombench-{name}"  # remade by prepare()
         self.patches = patches  # paths, applied in order
         self.domain = domain  # DOMAIN_NAME: the ingress controller's service
         self.ingress_namespace = ingress_namespace  # tells a deployed cluster's variant
 
 
-def _patches(d, skip=()):
-    return [f"{HERE}/{d}/{p}" for p in sorted(os.listdir(f"{HERE}/{d}")) if not p.startswith(skip)]
+def _patches(d):
+    return [f"{HERE}/{d}/{p}" for p in sorted(os.listdir(f"{HERE}/{d}"))]
 
 
 VARIANTS = {
-    "nginx": Variant("nginx", _patches("patches"), "ingress-nginx-controller.ingress-nginx.svc.cluster.local",
-                     "ingress-nginx"),
-    "caddy": Variant("caddy", _patches("patches", skip=("0003-",)) + _patches("patches-caddy"),
+    "caddy": Variant("caddy", _patches("patches") + _patches("patches-caddy"),
                      "caddy-caddy-ingress-controller.caddy-system.svc.cluster.local", "caddy-system"),
 }
 
@@ -101,11 +99,10 @@ def image_exists(tag):
 
 
 def ensure_builder(log_dir):
-    """Builds BUILDER_TAG (upstream's prometheus-builder with patched Go, patch 0007, in both variants) if it isn't
-    there"""
+    """Builds BUILDER_TAG (upstream's prometheus-builder with patched Go, patch 0007) if it isn't there"""
     if image_exists(BUILDER_TAG):
         return
-    v = VARIANTS["nginx"]
+    v = VARIANTS["caddy"]
     if not os.path.isdir(v.tree):
         prepare(v)
     say(f"building {BUILDER_TAG} (several minutes)")
@@ -138,7 +135,8 @@ def cluster_exists():
 
 
 def cluster_variant():
-    """The deployed cluster's variant (by its ingress controller's namespace), or None if there's no cluster"""
+    """The deployed cluster's variant (by its ingress controller's namespace), None if there's no cluster, or
+    "unknown" (e.g. a cluster of the removed nginx variant)"""
     if not cluster_exists():
         return None
     for v in VARIANTS.values():
@@ -160,10 +158,9 @@ def infra(v, *args, log, timeout):
     return run(infra_cmd(v, *args), cwd=f"{v.tree}/prombench", log=log, timeout=timeout)
 
 
-def deploy(variant, image, log_dir):
-    """Deploys the variant of prombench from scratch (deleting the cluster first if there is one), with `image` (a
-    local image: the module's, prometheus-meta's or Caddy's ingress controller's) loaded into the main node before
-    the manifests that run it are applied. About 5 minutes."""
+def deploy(variant, log_dir):
+    """Deploys the variant of prombench from scratch (deleting the cluster first if there is one), with upstream's
+    images. About 5 minutes."""
     v = VARIANTS[variant]
     os.makedirs(log_dir, exist_ok=True)
     with open("/proc/sys/fs/inotify/max_user_instances") as f:
@@ -183,7 +180,6 @@ def deploy(variant, image, log_dir):
     infra(v, "cluster", "create", "-f", "manifests/cluster_kind.yaml", log=f"{log_dir}/cluster-create.log",
           timeout=1200)
     kubectl("taint", "nodes", f"{CLUSTER}-control-plane", "node-role.kubernetes.io/control-plane-")
-    load(image)
 
     # cluster-infra (including the ingress controller) in the background, and the benchmark's waves 1-6, which don't
     # depend on it, meanwhile
@@ -194,8 +190,8 @@ def deploy(variant, image, log_dir):
         bench = f"{v.tree}/prombench/manifests/prombench/benchmark"
         early = [a for f in sorted(os.listdir(bench)) if f[0] in "123456" for a in ("-f", f"{bench}/{f}")]
         infra(v, "resource", "apply", *early, log=f"{log_dir}/benchmark-1-6.log", timeout=2400)
-        # Ingress creation is rejected by the ingress-nginx admission webhook (failurePolicy: Fail) until the
-        # controller is ready, so the ingress routes wait for cluster-infra (with nginx; no harm with caddy)
+        # The ingress routes wait for cluster-infra, which has the ingress controller (upstream's ingress-nginx
+        # rejected Ingresses until it was ready; Caddy's controller doesn't need the wait, but it does no harm)
         code = bg.wait(timeout=2400)
     except BaseException:
         bg.kill()
@@ -211,16 +207,14 @@ def deploy(variant, image, log_dir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("action", choices=["deploy", "prepare"])
-    ap.add_argument("--variant", choices=sorted(VARIANTS), default="nginx")
-    ap.add_argument("--image", default="prometheus-conftamer:v3.2.1",
-                    help="local image the module's deployment runs (prometheus-meta's, or Caddy's ingress controller's)")
+    ap.add_argument("--variant", choices=sorted(VARIANTS), default="caddy")
     ap.add_argument("--logs", default="/tmp/paramtrack-prombench-deploy-logs")
     a = ap.parse_args()
     if a.action == "prepare":
         prepare(VARIANTS[a.variant])
     else:
         start = time.time()
-        deploy(a.variant, a.image, a.logs)
+        deploy(a.variant, a.logs)
         say(f"took {time.time() - start:.0f}s")
 
 

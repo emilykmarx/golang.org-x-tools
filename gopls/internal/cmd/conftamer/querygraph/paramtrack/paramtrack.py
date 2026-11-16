@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Runs the end-to-end param tracking workflow and joins its outputs into Message label => Full keys. See README.md.
 
-Run with: uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out DIR --config CONFIG --module MODULE
-[flags]
+Run with: uv run --with pandas --with matplotlib --with tabulate python paramtrack.py --out DIR --module MODULE
+--config [MODULE:]ROOT=CONFIG [flags]
 Exits 1 if the testbed failed, or some other error occurred.
 """
 
@@ -18,8 +18,9 @@ import sys
 import common
 import layout  # (where a run's step outputs are)
 import modules  # (modules/<module>/module.py: each module's settings and hooks)
-from common import ARGMATCH_LABELS, CT, GOPLS, QUERYGRAPH, log_command, run, say, source_version
-from testbeds import OUTPUTS, TESTBEDS, PrombenchVM, canonical
+from common import ARGMATCH_LABELS, GOPLS, QUERYGRAPH, log_command, run, say, source_version
+import testbeds
+from testbeds import OUTPUTS, PrombenchVM
 
 # stats.py's full key and section rules (STATISTICS.md); step 8 runs it
 STATS = f"{QUERYGRAPH}/configkeys/stats"
@@ -29,13 +30,30 @@ import stats  # noqa: E402
 csv.field_size_limit(1 << 30)
 
 
+class Module:
+    """One of the run's modules (--module), with the settings of its module.py (modules/<name>/module.py: mod). Its
+    directory, <out>/<name>, has the steps run per module (PER_MODULE, and its outputs of the testbed steps); its
+    targets' are under it (layout.py)"""
+
+    def __init__(self, mod, out):
+        self.mod = mod
+        self.go = mod.GO_MODULE  # its Go module path
+        self.src, self.format = mod.MODULE_DIR, mod.FORMAT  # its checkout, its config format
+        self.name = os.path.basename(os.path.dirname(mod.__file__))  # its modules/ directory name
+        self.dir = f"{out}/{self.name}"
+        self.targets = []
+
+    def file(self, step, name):
+        return f"{self.dir}/{step}/{name}"
+
+
 class Target:
-    """One root of the module's config (module.py's ROOTS) that the run maps messages to, with its own concrete config
+    """One root of a module's config (module.py's ROOTS) that the run maps messages to, with its own concrete config
     (and files), docs, ignore and transformed files (README.md, "Several roots"). Its directory, <out>/<module>/<root>,
     has the steps run per target (PER_TARGET); the module's steps are in its parent (layout.py)"""
 
-    def __init__(self, name, dir, root, docs, ignore, transformed, config, config_files):
-        self.name, self.dir, self.root, self.docs = name, dir, root, docs
+    def __init__(self, m, name, root, docs, ignore, transformed, config, config_files):
+        self.m, self.name, self.dir, self.root, self.docs = m, name, f"{m.dir}/{name}", root, docs
         self.ignore, self.transformed, self.config, self.config_files_arg = ignore, transformed, config, config_files
 
     def file(self, step, name):
@@ -43,44 +61,40 @@ class Target:
 
 
 class Workflow:
-    def __init__(self, args, mod, targets):
+    def __init__(self, args, mods):
         self.a = args
         self.out = os.path.abspath(args.out)
-        self.mod = mod  # the module's settings and hooks (modules/<module>/module.py)
-        self.targets = targets
-
-    def dir(self, step):
-        """The directory of a step not run per target: the module's, <out>/<module>/<step> (layout.py). The testbed
-        steps write the testbed run's own files to <out>/testbed/<step> (units)"""
-        return f"{self.out}/{self.a.module_name}/{step}"
+        self.mods = mods  # the run's modules (Module)
 
     # ---------------------------------------------------------------------------------------------------------------
     # Static phase
 
-    def unmarshaler_graph(self, d):
+    def unmarshaler_graph(self, m, d):
         gopls = f"{self.out}/bin/gopls"
         run(["go", "build", "-o", gopls, "."], cwd=GOPLS, log=f"{d}/build.log", timeout=600)
-        cmd = [gopls, "conftamer", f"-m={self.a.module}", f"-format={self.a.format}", f"-out={d}"]
-        if hasattr(self.mod, "extra_graph"):
+        cmd = [gopls, "conftamer", f"-m={m.go}", f"-format={m.format}", f"-out={d}"]
+        if hasattr(m.mod, "extra_graph"):
             # Roots and edges the source doesn't show (e.g. Caddy's modules), from the module's hook
-            self.mod.extra_graph(self.a.module_dir, f"{d}/extra.json")
+            m.mod.extra_graph(m.src, f"{d}/extra.json")
             cmd.append(f"-extra={d}/extra.json")
-        cmd += self.untagged_keys("-")
-        run(cmd, cwd=self.a.module_dir, log=f"{d}/conftamer.log", timeout=900)
+        cmd += self.untagged_keys(m, "-")
+        run(cmd, cwd=m.src, log=f"{d}/conftamer.log", timeout=900)
         if not os.path.exists(f"{d}/unmarshaler_subgraph.text"):
             raise RuntimeError(f"gopls conftamer wrote no {d}/unmarshaler_subgraph.text; see {d}/conftamer.log")
 
-    def config_name(self):
-        """Step 2's copy of the concrete config, named for its format (config.yaml, config.json)"""
-        return f"config.{self.a.format}"
+    @staticmethod
+    def config_name(t):
+        """Step 2's copy of the target's concrete config, named for its format (config.yaml, config.json)"""
+        return f"config.{t.m.format}"
 
     def config_copy(self, t):
-        return t.file("2-full-keys", self.config_name())
+        return t.file("2-full-keys", self.config_name(t))
 
-    def untagged_keys(self, dashes):
+    @staticmethod
+    def untagged_keys(m, dashes):
         """The flag lifting our untagged-field exception, if the module sets UNTAGGED_KEYS (gopls conftamer's
         -untagged-keys, configkeys' --untagged-keys: the graph and configkeys must agree)"""
-        return [f"{dashes}untagged-keys"] if getattr(self.mod, "UNTAGGED_KEYS", False) else []
+        return [f"{dashes}untagged-keys"] if getattr(m.mod, "UNTAGGED_KEYS", False) else []
 
     def configkeys_bin(self):
         bin = f"{self.out}/bin/configkeys"
@@ -117,31 +131,32 @@ class Workflow:
         # score.py and check_labels.py match the baseline run's)
         with open(f"{d}/settings.json", "w") as f:
             json.dump(self.static_settings(t), f, indent=2)
-        graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
-        cmd = [self.configkeys_bin(), "--unmarshaler-subgraph", graph, "--module-prefix", self.a.module, "--format",
-               self.a.format, "--output", f"{d}/configkeys_graph.csv"] + self.untagged_keys("--")
+        m = t.m
+        graph = m.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
+        cmd = [self.configkeys_bin(), "--unmarshaler-subgraph", graph, "--module-prefix", m.go, "--format",
+               m.format, "--output", f"{d}/configkeys_graph.csv"] + self.untagged_keys(m, "--")
         if t.root:
             cmd += ["--root", t.root]
         run(cmd, log=f"{d}/configkeys.log", timeout=600)
         run([sys.executable, f"{STATS}/stats.py", "--full-keys-only", "--configkeys", f"{d}/configkeys_graph.csv",
-             "--graph", graph, "--docs", t.docs, "--module", self.a.module, "--module-dir", self.a.module_dir,
+             "--graph", graph, "--docs", t.docs, "--module", m.go, "--module-dir", m.src,
              "--root", t.root or "", "--out", d] + self.ignore(t),
             log=f"{d}/stats.log", timeout=600)
         # The concrete config is an input, generated beforehand by the /concreteconfig skill (README.md, "Use with
         # /concreteconfig")
-        shutil.copy(t.config, f"{d}/{self.config_name()}")
+        shutil.copy(t.config, f"{d}/{self.config_name(t)}")
         if self.config_files(t):
             shutil.copytree(self.config_files(t), f"{d}/files")
 
     def static_settings(self, t):
         """The static settings step 2 records in the target's settings.json, defaults filled in"""
         # module_source: the module checkout's version, which the graph (step 1) is built from
-        s = {"module": self.a.module, "module_dir": os.path.abspath(self.a.module_dir),
-             "module_source": source_version(self.a.module_dir), "root": t.root,
-             "format": self.a.format, "docs": os.path.abspath(t.docs),
+        s = {"module": t.m.go, "module_dir": os.path.abspath(t.m.src),
+             "module_source": source_version(t.m.src), "root": t.root,
+             "format": t.m.format, "docs": os.path.abspath(t.docs),
              "ignore": os.path.abspath(t.ignore) if t.ignore else "",
              "transformed": os.path.abspath(t.transformed) if t.transformed else ""}
-        s["target"] = t.name
+        s["config_source"] = t.name
         return s
 
     # The recorded settings a resumed run must match (check_settings), per step. Not --ignore and --transformed:
@@ -149,8 +164,8 @@ class Workflow:
     # args for run 1, which instruments nothing.
     RESUME_SETTINGS = {
         "2-full-keys": ("settings.json", ["module", "module_dir", "module_source", "root", "format", "docs"]),
-        "3-chains": ("testbed.json", ["testbed", "wait", "vm"]),
-        "5-matches": ("testbed.json", ["testbed", "wait", "vm", "argmatch_args"]),
+        "3-chains": ("testbed.json", ["testbed", "modules", "wait", "vm"]),
+        "5-matches": ("testbed.json", ["testbed", "modules", "wait", "vm", "argmatch_args"]),
     }
 
     def check_settings(self, step, d, t=None):
@@ -163,9 +178,7 @@ class Workflow:
         if not os.path.exists(path):
             say(f"{step}: no {name} (a run from before paramtrack recorded it); can't check its settings")
             return
-        recorded = json.load(open(path))
-        if "testbed" in recorded:
-            recorded["testbed"] = canonical(recorded["testbed"])  # (runs before the testbeds were renamed)
+        recorded = testbeds.recorded(json.load(open(path)))  # (runs from before the testbed was renamed)
         if "docs" in recorded:
             recorded["docs"] = modules.moved(recorded["docs"])  # (runs before the docs lists moved)
         current = self.static_settings(t) if name == "settings.json" else self.testbed_settings(self.make_testbed())
@@ -174,9 +187,14 @@ class Workflow:
             if k == "module_source" and k not in recorded:
                 continue  # (runs before paramtrack recorded it, 2026-11-14)
             r, c = recorded.get(k), current.get(k)
-            if isinstance(r, dict) and isinstance(c, dict):  # (argmatch's args: just the ones that differ)
-                diff += [f"{k} {a}: recorded {r.get(a)!r}, now {c.get(a)!r}" for a in sorted(r.keys() | c.keys())
-                         if r.get(a) != c.get(a)]
+            if isinstance(r, dict) and isinstance(c, dict):  # (argmatch's args, each module's: just those that differ)
+                for a in sorted(r.keys() | c.keys()):
+                    ra, ca = r.get(a), c.get(a)
+                    if isinstance(ra, dict) and isinstance(ca, dict):
+                        diff += [f"{k} {a} {x}: recorded {ra.get(x)!r}, now {ca.get(x)!r}"
+                                 for x in sorted(ra.keys() | ca.keys()) if ra.get(x) != ca.get(x)]
+                    elif ra != ca:
+                        diff.append(f"{k} {a}: recorded {ra!r}, now {ca!r}")
             elif r != c:
                 diff.append(f"{k}: recorded {r!r}, now {c!r}")
         if diff:
@@ -196,15 +214,16 @@ class Workflow:
     def check_config_copy(self, t, d):
         """When resuming: stop if the target's --config or its files differ from step 2's copies, which the later
         steps read"""
-        if not self.same_config(t.config, self.config_files(t), f"{d}/{self.config_name()}", f"{d}/files"):
+        if not self.same_config(t.config, self.config_files(t), f"{d}/{self.config_name(t)}", f"{d}/files"):
             sys.exit(f"--config or its files differ from step 2's copies in {d}; to use them, rerun from step 2 "
                      f"(--redo 2)")
 
     def configkeys(self, t, d):
-        graph = self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
+        m = t.m
+        graph = m.file("1-unmarshaler-graph", "unmarshaler_subgraph.text")
         cmd = [self.configkeys_bin(), "--config", self.config_copy(t), "--txt-dir", d,
-               "--strings-only", "--unmarshaler-subgraph", graph, "--module-prefix", self.a.module,
-               "--format", self.a.format, "--output", f"{d}/configkeys.csv"] + self.untagged_keys("--")
+               "--strings-only", "--unmarshaler-subgraph", graph, "--module-prefix", m.go,
+               "--format", m.format, "--output", f"{d}/configkeys.csv"] + self.untagged_keys(m, "--")
         if t.root:
             cmd += ["--root", t.root]
         run(cmd, log=f"{d}/configkeys.log", timeout=600)
@@ -221,73 +240,75 @@ class Workflow:
         return tb
 
     def make_testbed(self):
-        overrides = dict(kv.split("=", 1) for kv in self.a.argmatch_arg)
-        return TESTBEDS[self.a.testbed](wait=self.a.wait, argmatch_args=overrides, vm=self.a.vm)
+        return PrombenchVM(wait=self.a.wait, vm=self.a.vm)
 
     def testbed_settings(self, tb):
-        """The testbed's effective settings, as recorded in testbed.json"""
-        settings = {"testbed": self.a.testbed, "wait": tb.wait, "argmatch_args": tb.argmatch_args}
-        if isinstance(tb, PrombenchVM):
-            settings["vm"] = tb.vm
-        return settings
+        """The testbed's effective settings, as recorded in testbed.json: modules are the instrumented ones (the
+        run's; the testbed's others run stock), argmatch_args each one's"""
+        return {"testbed": testbeds.NAME, "modules": sorted(m.name for m in self.mods), "wait": tb.wait,
+                "argmatch_args": {m.name: testbeds.argmatch_args(m.mod) for m in sorted(self.mods, key=lambda m: m.name)},
+                "vm": tb.vm}
 
-    def testbed_config(self):
-        """The concrete config (step 2's copy) and its files for the testbed runs. The testbeds take one config; with
-        several targets, theirs must be the same (several roots over one file), until a testbed takes several"""
-        t0 = self.targets[0]
-        for t in self.targets[1:]:
+    def testbed_config(self, m):
+        """The module's concrete config (step 2's copy) and its files for the testbed runs. The testbed takes one per
+        module; with several targets, theirs must be the same (several roots over one file), until it takes several"""
+        t0 = m.targets[0]
+        for t in m.targets[1:]:
             if not self.same_config(self.config_copy(t0), self.step_files(t0), self.config_copy(t),
                                     self.step_files(t)):
-                sys.exit(f"targets {t0.name} and {t.name} have different concrete configs, but testbed "
-                         f"{self.a.testbed} takes one")
-        return self.config_copy(t0), self.step_files(t0)
+                sys.exit(f"module {m.name}'s targets {t0.name} and {t.name} have different concrete configs, but "
+                         f"the testbed takes one per module")
+        return {"config": self.config_copy(t0), "files": self.step_files(t0), "argmatch_args": testbeds.argmatch_args(m.mod)}
 
-    def matchfile(self, d):
-        """The values run 2 searches for: step 4's param_values.txt, all the targets' (in d, with several)"""
-        if len(self.targets) == 1:
-            return self.targets[0].file("4-configkeys", "param_values.txt")
+    @staticmethod
+    def matchfile(m, d):
+        """The values run 2 searches for in the module: step 4's param_values.txt, all its targets' (in d, with
+        several)"""
+        if len(m.targets) == 1:
+            return m.targets[0].file("4-configkeys", "param_values.txt")
         values = []
-        for t in self.targets:
+        for t in m.targets:
             values += open(t.file("4-configkeys", "param_values.txt")).read().splitlines()
         path = f"{d}/param_values.txt"
         with open(path, "w") as f:
             f.writelines(v + "\n" for v in dict.fromkeys(values))
         return path
 
-    # A testbed run's outputs that are the module's (the rest, e.g. testbed.json and the logs, are the testbed run's).
-    # NOT DECIDED YET: some files that stay in <out>/testbed/<step> are the module's too (its pod/container log, its
-    # image build log, Caddy's generated/running/load configs); with several modules in one testbed run (the combined
-    # testbed), they need a per-module name or place
+    # A testbed run's outputs that paramtrack moves to the module's directory, <out>/<module>/<step>. The module's
+    # other files (its pod log, image build log, Caddy's generated/running/load configs) stay with the testbed run's,
+    # in <out>/testbed/<step>/<module>/.
     MODULE_OUTPUTS = OUTPUTS + ("build_source.json",)
 
-    def module_outputs(self, tb, d):
+    def module_outputs(self, tb, m, d):
         """Move the module's outputs of a testbed run from the testbed run's directory tb to the module's, d"""
         for f in self.MODULE_OUTPUTS:
-            if os.path.exists(f"{tb}/{f}"):
-                shutil.move(f"{tb}/{f}", f"{d}/{f}")
+            if os.path.exists(f"{tb}/{m.name}/{f}"):
+                shutil.move(f"{tb}/{m.name}/{f}", f"{d}/{f}")
 
-    def chains(self, tb, d):
+    def chains(self, tb, *ds):
         """Run 1: contexttrack records message chains; argmatch instruments nothing. The testbed run's files go to tb,
-        the module's (events, and the stack log of their chains) to d"""
-        config, files = self.testbed_config()
-        self.testbed(tb).run(tb, config, files=files)
-        self.module_outputs(tb, d)
-        run([sys.executable, f"{ARGMATCH_LABELS}/events_to_stacklog.py", f"{d}/events.jsonl"],
-            log=f"{d}/stacklog.txt", timeout=300)
+        each module's (events, and the stack log of their chains) to its directory in ds"""
+        self.testbed(tb).run(tb, {m.name: self.testbed_config(m) for m in self.mods})
+        for m, d in zip(self.mods, ds):
+            self.module_outputs(tb, m, d)
+            run([sys.executable, f"{ARGMATCH_LABELS}/events_to_stacklog.py", f"{d}/events.jsonl"],
+                log=f"{d}/stacklog.txt", timeout=300)
 
-    def matches(self, tb, d):
+    def matches(self, tb, *ds):
         """Run 2: argmatch instruments the functions in run 1's chains and searches for the values; contexttrack
-        records the messages to label. The testbed run's files go to tb, the module's (matches, events) to d"""
-        config, files = self.testbed_config()
-        self.testbed(tb).run(tb, config, files=files, stacklog=self.file("3-chains", "stacklog.txt"),
-                            matchfile=self.matchfile(d))
-        self.module_outputs(tb, d)
-        if os.path.getsize(f"{d}/matches.calls.csv") == 0:
-            raise RuntimeError(f"argmatch found no matches; see {tb}")
+        records the messages to label. The testbed run's files go to tb, each module's (matches, events) to its
+        directory in ds"""
+        specs = {m.name: {**self.testbed_config(m), "stacklog": m.file("3-chains", "stacklog.txt"),
+                          "matchfile": self.matchfile(m, d)} for m, d in zip(self.mods, ds)}
+        self.testbed(tb).run(tb, specs)
+        for m, d in zip(self.mods, ds):
+            self.module_outputs(tb, m, d)
+            if os.path.getsize(f"{d}/matches.calls.csv") == 0:
+                raise RuntimeError(f"argmatch found no matches in {m.name}; see {tb}/{m.name}")
 
-    def label_values(self, d):
-        run([sys.executable, f"{ARGMATCH_LABELS}/join.py", self.file("5-matches", "matches.calls.csv"),
-             self.file("5-matches", "events.jsonl"), d], log=f"{d}/summary.txt", timeout=900)
+    def label_values(self, m, d):
+        run([sys.executable, f"{ARGMATCH_LABELS}/join.py", m.file("5-matches", "matches.calls.csv"),
+             m.file("5-matches", "events.jsonl"), d], log=f"{d}/summary.txt", timeout=900)
         say(open(f"{d}/summary.txt").readline().strip())
 
     # ---------------------------------------------------------------------------------------------------------------
@@ -313,20 +334,22 @@ class Workflow:
                 section_keys[s].add(fk)
 
         value_keys = self.param_keys(t)
-        # The other targets' needles: evidence for them, not this one (a needle no target has stays, keyless)
-        others = {v for o in self.targets if o is not t for v in self.param_keys(o)} - value_keys.keys()
+        # The module's other targets' needles: evidence for them, not this one (a needle no target has stays,
+        # keyless). (Other modules' needles aren't in this module's matches: each module's argmatch searches for its
+        # own.)
+        others = {v for o in t.m.targets if o is not t for v in self.param_keys(o)} - value_keys.keys()
 
         # Full keys that could have been evidence: set by the concrete config, with a value step 5 searched for (in
         # scope or not: the confidences below leave out those --ignore does)
         ignore = stats.read_patterns(t.ignore)
-        meta = stats.meta_keys(full, self.mod)  # (out of scope, like --ignore's)
+        meta = stats.meta_keys(full, t.m.mod)  # (out of scope, like --ignore's)
         searched = set(open(t.file("4-configkeys", "param_values.txt")).read().splitlines())
         eligible = {fk for c in config.values() if any(v.replace("\n", "\\n") in searched for v in c["values"])
                     for fk in c["full_keys"]}
 
         # Evidence rows: each (message, needle) row of the join, with every concrete key whose value the needle is
         rows, no_key, no_full_key = [], set(), set()
-        for r in csv.DictReader(open(self.file("6-label-values", "joined.csv"), newline="")):
+        for r in csv.DictReader(open(t.m.file("6-label-values", "joined.csv"), newline="")):
             base = [r["message_kind"], r["message_label"], r["needle"]]
             if r["needle"] in others:
                 continue
@@ -385,10 +408,10 @@ class Workflow:
         """stats.py's statistics and visuals (../configkeys/stats/STATISTICS.md) on the target's outputs (--run: the
         earlier steps' outputs and settings.json; --ignore and --transformed as given to this invocation), then
         visualize.sh's coloured graphs"""
-        shutil.copy(self.file("1-unmarshaler-graph", "unmarshaler_subgraph.text"), d)  # visualize.sh reads it here
+        shutil.copy(t.m.file("1-unmarshaler-graph", "unmarshaler_subgraph.text"), d)  # visualize.sh reads it here
         run([sys.executable, f"{STATS}/stats.py", "--run", t.dir, "--out", d] + self.ignore(t), log=f"{d}/stats.log",
             timeout=900)
-        run(["bash", f"{STATS}/visualize.sh", d, self.a.module], log=f"{d}/visualize.log", timeout=1200)
+        run(["bash", f"{STATS}/visualize.sh", d, t.m.go], log=f"{d}/visualize.log", timeout=1200)
         say(f"tables in {t.file('8-stats', 'stats_tables.md')}")
 
     # ---------------------------------------------------------------------------------------------------------------
@@ -397,20 +420,20 @@ class Workflow:
     # skill's label baselines, skip it)
     STEPS = ["1-unmarshaler-graph", "2-full-keys", "3-chains", "4-configkeys", "5-matches", "6-label-values",
              "7-label-keys", "8-stats"]
-    # The steps each target runs; the others are the module's (layout.py)
+    # The steps each target runs; the others are each module's (layout.py), the testbed steps for all the run's
+    # modules at once
     PER_TARGET = {"2-full-keys", "4-configkeys", "7-label-keys", "8-stats"}
-
-    def file(self, step, name):
-        return f"{self.dir(step)}/{name}"
 
     def units(self, step):
         """What running a step means: (arguments for its function, the directories it writes, a label), once per
-        target for a step run per target; else once, the testbed steps writing the testbed run's directory too"""
+        target for a step run per target; once for all modules for a testbed step, which writes the testbed run's
+        directory and each module's; else once per module"""
         if step in self.PER_TARGET:
-            return [((t,), [f"{t.dir}/{step}"], f"{step} ({t.name})") for t in self.targets]
+            return [((t,), [f"{t.dir}/{step}"], f"{step} ({t.m.name}/{t.name})")
+                    for m in self.mods for t in m.targets]
         if step in layout.TESTBED_STEPS:
-            return [((), [f"{self.out}/testbed/{step}", self.dir(step)], step)]
-        return [((), [self.dir(step)], step)]
+            return [((), [f"{self.out}/testbed/{step}"] + [f"{m.dir}/{step}" for m in self.mods], step)]
+        return [((m,), [f"{m.dir}/{step}"], f"{step} ({m.name})") for m in self.mods]
 
     def run(self):
         os.makedirs(self.out, exist_ok=True)
@@ -441,7 +464,7 @@ class Workflow:
                         if os.path.exists(d):
                             shutil.rmtree(d)
                 if all(os.path.exists(d) for d in dirs):
-                    t = args[0] if args else None
+                    t = args[0] if args and isinstance(args[0], Target) else None
                     if step == "2-full-keys":
                         self.check_config_copy(t, dirs[0])
                     self.check_settings(step, dirs[0], t)
@@ -470,63 +493,71 @@ class Workflow:
         sys.exit(f"unknown step {name}; steps: {', '.join(self.STEPS)}")
 
 
-def targets(a, mod, out):
-    """The run's targets: the roots of the module's ROOTS that --config names (<name>=<path>), each under
-    <out>/<module>/<name>"""
+def targets(a, mods):
+    """The run's targets, in each module's targets: the roots of its ROOTS that --config names
+    ([<module>:]<root>=<path>; the module is needed only if several of the run's modules have the root)"""
     def split(values, flag):
         named = {}
         for v in values:
             name, sep, path = v.partition("=")
-            if not sep or name not in mod.ROOTS:
-                sys.exit(f"{flag} {v}: give <root>=<path>, for a root of module {a.module} (ROOTS: "
-                         f"{', '.join(mod.ROOTS)})")
-            if name in named:
-                sys.exit(f"{flag}: root {name} given twice")
-            named[name] = path
+            mname, _, root = name.rpartition(":")
+            ms = [m for m in mods if root in m.mod.ROOTS and mname in ("", m.name, m.go)]
+            if not sep or len(ms) != 1:
+                roots = ", ".join(f"{m.name}:{r}" for m in mods for r in m.mod.ROOTS)
+                sys.exit(f"{flag} {v}: give [<module>:]<root>=<path>, for a root of one of the run's modules "
+                         f"({roots})" + (f"; several have root {root}: name the module" if len(ms) > 1 else ""))
+            if (ms[0], root) in named:
+                sys.exit(f"{flag}: root {ms[0].name}:{root} given twice")
+            named[(ms[0], root)] = path
         return named
 
     configs, files = split(a.config, "--config"), split(a.config_files, "--config-files")
     if set(files) - set(configs):
-        sys.exit(f"--config-files for roots with no --config: {', '.join(sorted(set(files) - set(configs)))}")
-    ts = []
-    for name, config in configs.items():
-        r = mod.ROOTS[name]
-        ts.append(Target(name, f"{out}/{a.module_name}/{name}", r["root"], r["docs"], r.get("ignore", ""),
-                         r.get("transformed", ""), config, files.get(name)))
-    return ts
+        sys.exit("--config-files for roots with no --config: " +
+                 ", ".join(sorted(f"{m.name}:{r}" for m, r in set(files) - set(configs))))
+    for (m, name), config in configs.items():
+        r = m.mod.ROOTS[name]
+        m.targets.append(Target(m, name, r["root"], r["docs"], r.get("ignore", ""), r.get("transformed", ""), config,
+                                files.get((m, name))))
+    for m in mods:
+        if not m.targets:
+            sys.exit(f"module {m.name}: no --config for any of its roots ({', '.join(m.mod.ROOTS)})")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out", required=True, help="Directory for every step's output (one subdirectory per step)")
-    ap.add_argument("--config", required=True, action="append", metavar="ROOT=PATH",
-                    help="Concrete config for a root of the module (its module.py's ROOTS), e.g. the /concreteconfig "
-                         "skill's config.yaml (README.md, \"Use with /concreteconfig\"); once per root the run covers")
-    ap.add_argument("--config-files", action="append", default=[], metavar="ROOT=PATH",
+    ap.add_argument("--out", required=True, help="Directory for every step's output (layout.py)")
+    ap.add_argument("--config", required=True, action="append", metavar="[MODULE:]ROOT=PATH",
+                    help="Concrete config for a root of a module (its module.py's ROOTS), e.g. the /concreteconfig "
+                         "skill's config.yaml (README.md, \"Use with /concreteconfig\"); once per root the run covers. "
+                         "MODULE is needed only if several of the run's modules have the root")
+    ap.add_argument("--config-files", action="append", default=[], metavar="[MODULE:]ROOT=PATH",
                     help="Directory of files a root's concrete config refers to, which the testbed installs (default: "
                          "a files/ directory next to its --config, if any)")
-    # The module, whose module.py (modules/<module>/) has its settings: checkout, config format, roots
-    ap.add_argument("--module", required=True,
-                    help="The module: its Go module path (as in go.mod) or its modules/ directory name; known: "
-                         + ", ".join(modules.names()))
-    ap.add_argument("--testbed", default="docker", type=canonical, choices=sorted(TESTBEDS),
-                    help="where the module runs (testbeds.py; earlier names, e.g. prombench, still work)")
-    ap.add_argument("--vm", default="paramtrack-e2e", help="GCE VM for the prombench-* testbeds")
-    ap.add_argument("--wait", type=int, default=240, help="Seconds to run the module under the workload, per run")
-    ap.add_argument("--argmatch-arg", action="append", default=[], metavar="KEY=VALUE",
-                    help="Override an argmatch build arg (ARGMATCH_KEY), e.g. DEPTH=5; repeatable")
+    # The modules, whose module.py (modules/<module>/) has their settings: checkout, config format, roots
+    ap.add_argument("--module", required=True, action="append",
+                    help="A module to instrument: its Go module path (as in go.mod) or its modules/ directory name; "
+                         "repeatable (the testbed's other modules run stock); known: " + ", ".join(modules.names()))
+    ap.add_argument("--vm", default="paramtrack-e2e", help="GCE VM the testbed (testbeds.py) runs on")
+    ap.add_argument("--wait", type=int, default=240, help="Seconds to run the modules under the workload, per run")
     ap.add_argument("--redo", metavar="STEP", help="Rerun this step and the later ones, even if done (name or number)")
     ap.add_argument("--until", metavar="STEP", help="Stop after this step")
     ap.add_argument("--only", metavar="STEP", action="append", default=[],
                     help="Run only this step, rerunning it if done, from the earlier steps' outputs as they are; "
                          "repeatable. Removes the later steps' outputs, as they're out of date")
     a = ap.parse_args()
-    mod = modules.load(a.module)
-    a.module = mod.GO_MODULE
-    # The module's settings come from its module.py: its checkout, config format and roots (ROOTS: targets())
-    a.module_dir, a.format = mod.MODULE_DIR, mod.FORMAT
-    a.module_name = os.path.basename(os.path.dirname(mod.__file__))  # its modules/ directory name: <out>/<it>
-    Workflow(a, mod, targets(a, mod, os.path.abspath(a.out))).run()
+    out = os.path.abspath(a.out)
+    mods = []
+    for name in a.module:
+        m = Module(modules.load(name), out)
+        if any(o.name == m.name for o in mods):
+            sys.exit(f"--module {name}: module {m.name} given twice")
+        if m.name not in testbeds.COMPONENTS:
+            sys.exit(f"--module {name}: the testbed doesn't run {m.name} (testbeds.py's COMPONENTS: "
+                     f"{', '.join(testbeds.COMPONENTS)})")
+        mods.append(m)
+    targets(a, mods)
+    Workflow(a, mods).run()
 
 
 if __name__ == "__main__":

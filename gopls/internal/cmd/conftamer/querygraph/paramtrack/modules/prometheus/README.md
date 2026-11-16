@@ -4,11 +4,11 @@ Everything paramtrack's workflow needs that is specific to Prometheus is here or
 
 ## Files here
 - [module.py](module.py): the settings paramtrack and stats.py read, and the hooks they call. [../\_\_init\_\_.py](__init__.py) describes each one.
-- [ignore.txt](ignore.txt) (`--ignore`) and [transformed.txt](transformed.txt) (`--transformed`). paramtrack's README describes both flags; each file's comments give its reasons.
+- [ignore.txt](ignore.txt) and [transformed.txt](transformed.txt): the `ignore` and `transformed` files of `module.py`'s `ROOTS["config"]` (the full keys out of scope, and those stored transformed; [../README.md](../README.md) describes both settings). Each file's comments give its reasons.
 - [MODULE.md](MODULE.md) and [prom_files.py](prom_files.py): the concreteconfig skill's guidance and file helpers for this module.
 
 ## Decisions
-- **Version:** v3.2.1, in the checkout `module.py` names (`MODULE_DIR`). The testbeds build the same version (`PrometheusImage.VERSION` in `../../testbeds.py`).
+- **Version:** v3.2.1, in the checkout `module.py` names (`MODULE_DIR`). The testbed builds the same version (`PrometheusMeta.VERSION` in `../../testbeds.py`).
 - **The config:** the YAML file Prometheus loads into `/config.Config` with go-yaml v2.
 - **Custom keys:** the SD configs that `discovery.Configs`' `UnmarshalYAML` picks are resolved in the graph: `extra_graph` in `module.py` adds an edge from each `ServiceDiscoveryConfigs` field (`ScrapeConfig`'s and `AlertmanagerConfig`'s) to each SD config type, keyed `<Name()>_sd_configs` (`static_configs` for `static`). `CustomKeys` only tells stats.py which full keys are under an SD config.
 - **Untagged fields:** our exception holds (`UNTAGGED_KEYS` is False).
@@ -18,7 +18,7 @@ Everything paramtrack's workflow needs that is specific to Prometheus is here or
 
 ## Prometheus-specific code outside this directory
 The workflow was first written for Prometheus, so these places outside `module.py` still assume it:
-- `../../testbeds.py`: `PrometheusImage` builds `prometheus/prombench-argmatch.Dockerfile` from the checkout. The `docker` and `prombench-nginxingress-prom` testbeds run it (paramtrack's README, "Testbeds"; the prombench skill guidance is `../../testbeds/prombench/prometheus/TESTBED.md`).
+- `../../testbeds.py`: `PrometheusMeta` builds `prometheus/prombench-argmatch.Dockerfile` from the checkout and runs it as prombench's prometheus-meta (paramtrack's README, "Running the testbed"; the concreteconfig skill's guidance is `../../testbeds/prombench/prometheus/TESTBED.md`). When Prometheus isn't instrumented, it runs upstream's image with the shipped config (`../../testbeds/prombench/prometheus/shipped-config.yaml`).
 - stats.py's output still speaks of service discovery: `sd_configs.csv`, the `sd` column, and "SD config types found (Name())". It gets the content from `CustomKeys`.
 - `visualize.sh`'s graph descriptions mention SD configs. Its module prefix defaults to Prometheus's, and paramtrack passes the run's.
 - `messages/matches.py`'s `short()` also strips `github.com/prometheus/`, for prometheus/common's types.

@@ -8,8 +8,8 @@ jamie-branch): the caddy-ingress-controller Helm chart's manifests in place
 of 2_ingress-nginx-controller.yaml. Changed for paramtrack: a Namespace
 object instead of deploy.sh's kubectl create namespace, no
 PodDisruptionBudget (the infra tool can't apply that kind; that's why
-f1af45d applied the file with kubectl), paramtrack's image
-caddy-ingress-conftamer:latest, and the argmatch-out mount.
+f1af45d applied the file with kubectl), the image's tag (paramtrack sets
+its own image when it instruments the controller), and the argmatch-out mount.
 ---
  .../cluster-infra/2_caddy-ingress.yaml        | 210 ++++++
  .../2_ingress-nginx-controller.yaml           | 666 ------------------
@@ -26,7 +26,7 @@ index 0000000..687272f
 +# Caddy's ingress controller in place of ingress-nginx: the caddy-ingress-controller Helm chart 1.3.0's manifests
 +# (from Jamie Anzai-Wurfbain's fbc6eb1 and Emily Marx's f1af45d on the fork's jamie-branch), with:
 +# - the Namespace added and the PodDisruptionBudget dropped, so the infra tool can apply it as a wave;
-+# - paramtrack's image (the controller under argmatch and contexttrack) and the argmatch-out mount.
++# - the chart's image tag at its 1.3.0+ checkout (paramtrack sets its own when it instruments it), argmatch-out mount.
 +apiVersion: v1
 +kind: Namespace
 +metadata:
@@ -184,8 +184,8 @@ index 0000000..687272f
 +              - ALL
 +            runAsGroup: 0
 +            runAsUser: 0
-+          # Built and loaded into the main node by paramtrack
-+          image: "caddy-ingress-conftamer:latest"
++          # paramtrack sets caddy-ingress-conftamer:latest (built and loaded into the main node) when it instruments it
++          image: "caddy/ingress:v0.2.1"
 +          imagePullPolicy: IfNotPresent
 +          ports:
 +            - name: http

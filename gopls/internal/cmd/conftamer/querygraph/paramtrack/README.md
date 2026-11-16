@@ -1,23 +1,24 @@
 # paramtrack
 
-Runs a workflow that outputs a relationship between configuration parameters and messages for a Go module running in a testbed. Specifically, the workflow observes messages the module sends and receives while running in the testbed, and determines which of the module's own configuration parameters are likely to influence them: For sends, the existence and contents of the message; for receives, the way the message is handled. A parameter is considered to have influence when it is likely to be accessible when the message is sent/received. Observed messages are grouped by their "label" (see "Output"), and parameters are identified by their keys.
-
-TODO when the workflow supports multiple modules: Update the opening para, usage, and use with concreteconfig
+Runs a workflow that outputs a relationship between configuration parameters and messages for Go module(s) running in a testbed. Specifically, for each module the workflow observes messages the module sends and receives while running in the testbed, and determines which of the module's own configuration parameters are likely to influence them: For sends, the existence and contents of the message; for receives, the way the message is handled. A parameter is considered to have influence when it is likely to be accessible when the message is sent/received. Observed messages are grouped by their "label" (see "Output"), and parameters are identified by their keys.
 
 ## Usage
 ```
 uv run --with pandas --with matplotlib --with tabulate python paramtrack.py \
   --out <dir> \
-  --module <name of a directory in `modules/`> \
-  --config <concrete config> \
-  [--config-files <dir>] \
-  [--testbed docker|prombench] [--vm paramtrack-e2e] [--wait 240] [--argmatch-arg KEY=VALUE ...] [--redo <step>] [--until <step>] [--only <step> ...]
+  --module <name of a directory in `modules/`> ... \
+  --config <concrete config> ... \
+  [--config-files <dir> ...] \
+  [--vm paramtrack-e2e] [--wait 240] [--redo <step>] [--until <step>] [--only <step> ...]
 ```
 
-### Concrete config
-- `config`: <config source>=<path> (config source: a key in `ROOTS` - see the [modules README](modules/README.md))
+Output is produced for each module passed to `--module`. These modules will be configured with the corresponding `--config`, and will be instrumented in the testbed. The other modules in the testbed run with the config prombench ships with, and are not instrumented.
+
+### Concrete configs
+For each module, pass the corresponding config:
+- `config`: `[<module>:]<config_source>=<path>` (config_source: a key in `ROOTS` - see the [modules README](modules/README.md))
 - `--config-files`: The files in this directory are any that the concrete config references (e.g., `password_file:/etc/prometheus/config/password_file.txt`).
-paramtrack copies these into the testbed using module-/testbed-specific logic.
+paramtrack copies these into the testbed using module-/testbed-specific logic (see "Running the testbed" below).
 
 ### Other module-specific inputs
 The workflow should generalize well to new Go modules.
@@ -30,7 +31,7 @@ The module-specific optional arguments (--module-dir, --format) take their defau
 ## Steps and intermediate outputs
 All programs are built locally. In "Inputs" below, "concrete config" and "documented keys" are the ones paramtrack was run with (or a copy in the concrete config case), and the other filenames refer to outputs of previous steps.
 
-The workflow produces the following layout in <out>:
+The workflow produces the following layout:
 
 ```
 bin, paramtrack-commands.log
@@ -39,8 +40,8 @@ testbed/
 <module>/
   1-unmarshaler-graph: the module's graph
   3-chains, 5-matches, 6-label-values: the module's outputs from the testbed run (events, matches, stack log)
-  <config source (prefix of --config)>/
-    2-full-keys, 4-configkeys, 7-label-keys, 8-stats: output for the keys reachable from the config source
+  <config_source (prefix of --config)>/
+    2-full-keys, 4-configkeys, 7-label-keys, 8-stats: output for the keys reachable from the config_source
 ```
 
 | Step | Programs | Inputs | Main outputs |
@@ -71,8 +72,8 @@ See [WORKFLOW_EXAMPLE.md](docs/WORKFLOW_EXAMPLE.md) for an example of each step'
 
 ### Running parts of the workflow
 Steps can be named by number (`5`), name (`matches`) or both (`5-matches`).
-- If a step's directory already exists for that module or (module, config source), it will be skipped.
-  - Specifically, per-module steps are skipped if they exist for that module, while per-(module, config source) steps are skipped if they exist for that (module, config source)
+- If a step's directory already exists for that module or (module, config_source), it will be skipped.
+  - Specifically, per-module steps are skipped if they exist for that module, while per-(module, config_source) steps are skipped if they exist for that (module, config_source)
   - (For the two testbed run steps, they also need to exist under `testbed`)
   - If a step failed or was interrupted, it will not be skipped (since a step writes into `<step>.partial` and renames it when it's done)
 - `--redo <step>` reruns that step and the later ones. Once any step runs, the later ones rerun too, since their inputs changed.
@@ -88,17 +89,18 @@ Steps can be named by number (`5`), name (`matches`) or both (`5-matches`).
 To run paramtrack to evaluate a concrete config output by the [`/concreteconfig`](../../../../../../.claude/skills/concreteconfig/SKILL.md) skill:
 
 (below `uv run` is elided. The environment variables are illustrative, not built in to the workflow.)
+
 #### 1. Run shipped config ("baseline run")
-Determine which message labels the shipped config produces, so the skill can evaluate whether a candidate config loses any labels in the next step. Run once per (module, testbed) pair.
+Determine which message labels the shipped config produces, so the skill can evaluate whether a candidate config loses any labels in the next step. Run once per testbed, instrumenting all modules of interest and passing their shipped configs, to produce a baseline that can be reused for every module.
 ```
 paramtrack.py  \
   --out $OUT_SHIPPED \
-  --testbed $TESTBED \
+  --module $ALL_PLANNED_MODULES \
   --config $CONFIG_SHIPPED \
   --until chains
 ```
 #### 2. Generate new concrete config
-Use the `/concreteconfig` skill to generate a concrete config that optimizes for relevant statistics, while producing the same message labels as the shipped config.
+Use the `/concreteconfig` skill to generate a concrete config that optimizes for relevant statistics, while producing the same message labels for its module as the shipped config.
 
 First, write a skill prompt that points to the results of the baseline run above and to the other inputs listed in SKILL.md ("Inputs"); also indicate whether anyone will be available to answer questions.
 Then, invoke the skill in a fresh session, either headlessly or interactively.
@@ -108,7 +110,9 @@ The headless run script starts a detached `claude -p` with an allowlist of the t
 ```
 .claude/skills/concreteconfig/scripts/run_headless.sh $SKILL_PROMPT $OUT_SKILL
 ```
-The skill will itself run paramtrack with `--until chains` (via a wrapper) to compare each candidate's message labels to the baseline. It writes the final concrete config, and any files it references, to its output directory.
+The skill will itself run paramtrack with `--until chains` (via a wrapper) to compare each candidate's message labels to the baseline. This run only instruments and modifies the config of the skill's own module (i.e., all other modules are not instrumented and run with their shipped configs).
+
+It writes the final concrete config, and any files it references, to its output directory.
 
 Before going on, check that the skill succeeded: the first line of `$OUT_SKILL/result.md` must be `passed` (see SKILL.md, "Outputs"). A headless run's `agent.exit` doesn't indicate success: it's 0 whenever the agent finishes, whatever the outcome.
 
@@ -142,20 +146,25 @@ Columns:
 
 `summary.txt` counts rows (evidence and inferred), messages, full keys and sections, and lists needles with no concrete key and concrete keys with no full key.
 
-## Testbeds
-`--testbed` chooses where the module runs (`testbeds.py`):
-- `docker`: Prometheus in one local container, built from `prometheus/prombench-argmatch.Dockerfile`, with the workload of argmatch-labels' `bootstrap-example/bootstrap.sh`: API queries every 5 s from 20 s on, a config reload at 30 s, and a stop at `--wait` seconds. The config's Kubernetes service account files are stand-ins, so it loads, but Kubernetes SD can't connect.
-- `prombench-nginxingress-prom`: prombench's prometheus-meta, on the GCE VM `--vm` (default `paramtrack-e2e`). paramtrack copies `testbeds.py`, `common.py` and the run's inputs to `/tmp/paramtrack-testbed` on the VM, runs the testbed there over ssh, and copies the outputs back. On the VM, it does what the argmatch experiment's `run_on_vm.sh` does ([README](../../../../../../../dump_ancestors/argmatch/experiment/README.md#what-a-run-does)): it builds `prometheus-conftamer:v3.2.1`, loads it into the main node, restarts prometheus-meta, runs the dashboard viewer and the config reloads, and copies `argmatch-out`. It also sets the prometheus-meta config map to the concrete config, and sets `CONFTAMER_EVENTS` on the deployment, before the restart. The VM needs:
-  - the checkouts that `prometheus-test-infra/prombench/vm_setup.sh` makes. They're built as they are on the VM, so push the changes you want, or copy them there.
-  - prombench deployed with `deploy.sh`, which needs `images/conftamer-images.tar` (see `build_prom_argmatch.sh`).
+## Running the testbed
+The testbed runs on the GCE VM `--vm` (default `paramtrack-e2e`). Paramtrack orchestrates it over ssh as follows (all part of `paramtrack.py`):
+- Copy the inputs to the VM
+- Deploy the cluster ([testbeds/prombench/upstream.py](testbeds/prombench/upstream.py), about 5 minutes) or reuse the one already running on the VM (the workload attempts to force a reused cluster to produce the same messages, e.g. by expiring certs)
+- For each `--module` (not necessarily in this order), using the info in TESTBED.md
+  - Build the instrumented image and load it into the cluster
+  - Install the `--config` and `--config-files`
+  - Restart the pod
+- Run the workload
+- Wait for `--wait`
+- Copy the outputs from the VM
 
-Both testbeds install step 2's `files/` where the config expects them, `/etc/prometheus/config/`: the `prombench-nginxingress-prom` testbed adds each file to the prometheus-meta ConfigMap before restarting it (it's mounted there), and the `docker` testbed mounts the directory there.
+For each module, the argmatch build args default to `ARGMATCH_ARGS` in `testbeds.py`. Modules can override them in module.py.
 
-Both testbeds copy the stack log and match file into the Prometheus checkout, as `paramtrack-stacklog.txt` and `paramtrack-matches.txt`, because the build reads them.
+Each testbed step (`3-chains`, `5-matches`) records its effective settings in `testbed.json`: the arguments to paramtrack and argmatch's build args, defaults filled in. Step 2 records the per-module settings in `2-full-keys/settings.json`: a snapshot of the settings in module.py; the module version from the checkout's git log; and the filename passed to `--config`. It does not record the contents of files, however.
+The concreteconfig skill reads the per-module settings, so it evaluates candidates using the same settings as the baseline, and `stats.py` reads them to get the module info.
 
-argmatch's build args are bootstrap.sh's (`ARGMATCH_ARGS` in `testbeds.py`); override them with `--argmatch-arg`.
+To set up a fresh VM, see [testbeds/prombench/vm_setup.sh](testbeds/prombench/vm_setup.sh). The checkouts are built as they are on the VM, so push the changes you want, or copy them there.
 
-Each testbed step (`3-chains`, `5-matches`) records its effective settings in `testbed.json`: the testbed, `--wait`, `--vm` (for the prombench-* testbeds) and argmatch's build args, defaults filled in. Step 2 likewise records the static ones in `2-full-keys/settings.json`: `--module`, `--module-dir`, the module version, `--root`, `--format`, `--docs`, `--ignore` and `--transformed`. The concreteconfig skill's `score.py` and `check_labels.py` read these, so it evaluates candidates using the same settings as the baseline.
 
 ## Adding modules and testbeds
 To add a module, first run the `/documentedkeys` skill to investigate the module's config.
@@ -163,11 +172,10 @@ To add a module, first run the `/documentedkeys` skill to investigate the module
 ### Reproducibility
 The end-to-end workflow should be relatively reproducible, with exceptions due to e.g. timing-dependent labels, and the behavior of the agents running the skills. To that end:
 - When adding a module/testbed, either commit the corresponding files, or make the process to create them reproducible with committed inputs:
-  - `--ignore`, `--docs`
+  - The module-specific files referenced in module.py (e.g. the ignore list)
   - Inputs passed to skill prompts
 - Once we have results for the paper, we should:
   - Commit the corresponding workflow settings files (see "Testbeds"), `--config`, and `--config-files`
-  - Add the version of the module checkout to the workflow settings
 
 ### Baseline behavior
 Keep in mind that when choosing concrete config values, the skill is only constrained by SKILL.md ("Constraints"). The intent of these constraints is that the modified config produces behavior that is a superset of the shipped config, so that it does not artifically reduce test coverage. In terms of the end-to-end workflow, "coverage" is concretely (1) the set of message labels the module sends/receives, and (2) the data accessible at that time.
@@ -175,6 +183,11 @@ Keep in mind that when choosing concrete config values, the skill is only constr
 So, strictly speaking we should verify the skill's config produces matches that are a superset of the shipped config's. However, to make the workflow cheaper (i.e. less likely to involve a long loop of checking configs), for the testbed behavior constraint we only require that (1) the config loses no message labels and (2) the testbed run does not exit 2.
 
 Thus, when adding modules/testbeds, try to make these requirements good proxies for coverage, i.e.: (1) the baseline run should produce all message labels of interest (e.g. in Prometheus, alerting and dashboards), and (2) the check script should verify anything about the testbed behavior likely to impact the message-related data (e.g. in Prometheus, that the alerting and dashboards work).
+
+Note that the label check in the skill run (described in "Use with concreteconfig" above) does not guarantee that the skill's config is "valid", for several reasons:
+  - The baseline does not produce some behaviors such as Caddy's certificate renewal, so if the skill's config causes the module to misbehave with regard to these, comparing against the baseline doesn't tell us that.
+  - The skill only checks the message labels of its *own* module against the baseline, so it's possible it produces a concrete config that maintains its own module's message labels but messes up other modules. It also runs its new config alongside the other modules' shipped configs, so it's possible the new config could mess up behavior in other modules that only shows up with their expanded configs.
+    - A more strict baseline would be: When running the skill, run all modules onboarded thus far with their skill's config and instrument them. Compare all instrumented modules' labels against the baseline. Once the skill finishes, treat that run as the new baseline. This would be a more thorough check that each expanded config is "compatible" with other modules' expanded configs.
 
 ## Command logs
 paramtrack logs the commands it runs, each line with the time, the working directory and the command, shell-quoted:

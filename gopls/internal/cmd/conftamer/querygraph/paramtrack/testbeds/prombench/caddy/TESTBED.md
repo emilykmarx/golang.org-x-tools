@@ -1,4 +1,4 @@
-# prombench-caddyICingress-caddyIC (prombench, module: Caddy's ingress controller)
+# prombench-caddyICingress (prombench, module: Caddy's ingress controller)
 
 prombench with Caddy's ingress controller in place of ingress-nginx. The module runs as the controller's deployment
 `caddy-caddy-ingress-controller` in namespace `caddy-system`, in prombench's kind cluster on the GCE VM
@@ -6,9 +6,10 @@ prombench with Caddy's ingress controller in place of ingress-nginx. The module 
 --project conftamer`. kubectl context `kind-prombench`. On the VM, the checkouts are under
 `/home/emily/projects/config_tracing`.
 
-paramtrack's `--testbed prombench-caddyICingress-caddyIC` (`PrombenchCaddy` in `testbeds.py`) builds the controller under argmatch and
-contexttrack, deploys the cluster if it isn't this variant (`../upstream.py`, variant `caddy`: about
-5 minutes, replacing the other variant's cluster), and loads the concrete config through Caddy's admin API.
+paramtrack's testbed, with `--module caddy` (`CaddyController` in `testbeds.py`), builds the controller under
+argmatch and contexttrack, deploys the cluster if there's none or it's an older variant (`../upstream.py`, variant
+`caddy`: about 5 minutes), sets the controller's image to it, and loads the concrete config through Caddy's admin
+API. prometheus-meta runs stock (upstream's image, the shipped config) unless the run instruments Prometheus too.
 `../upstream.py`'s docstring and the patches in `../patches*/` say what's deployed and why.
 
 - **Shipped concrete config:** [shipped-config.json](shipped-config.json), next to this file: the config the
@@ -50,13 +51,15 @@ After each applied config, through `cc_vm.py health`:
   querier in `prombench-<PR>`, which queries through Caddy).
 
 ## Message labels (constraint 2)
-SKILL.md's constraint 2 says how to check them. On prombench-caddyICingress-caddyIC:
+SKILL.md's constraint 2 says how to check them. On prombench:
 - **The baseline run** is made with `uv run --with pandas --with matplotlib --with tabulate python paramtrack.py
-  --module caddy --out <dir> --config <shipped config> --testbed prombench-caddyICingress-caddyIC --until 3`, from paramtrack's
-  directory. It and each check take about 8 minutes, most of it the 240 s workload (plus a deploy if the cluster is
-  the other variant).
+  --module caddy --out <dir> --config caddy=<shipped config> --until 3`, from paramtrack's directory. The controller
+  alone is instrumented: the skill's runs must instrument the same modules as the baseline. It and each check take
+  about 8 minutes, most of it the 240 s workload (plus a deploy if there's no cluster or it's an older variant).
 - **Labels that depend on timing,** not the config: e.g. requests that arrive while the controller restarts, and
   which Grafana API calls the dashboard viewer happens to make.
 
-paramtrack's testbed leaves the controller running the config it ran. When done, put back the shipped config (a
-restart does: the controller loads its generated config, and then `cc_vm.py apply shipped-config.json`, with this directory's file, is the same config).
+paramtrack's testbed leaves the controller running the config it ran, on the instrumented image. When done, put back
+the shipped config (a restart does: the controller loads its generated config, and then `cc_vm.py apply
+shipped-config.json`, with this directory's file, is the same config). A paramtrack run that doesn't instrument the
+controller puts back upstream's image and its generated config.

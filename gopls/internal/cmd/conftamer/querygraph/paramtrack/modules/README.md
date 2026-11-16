@@ -1,6 +1,4 @@
-# Module-specific inputs
-
-## Basic info
+# Basic info
 - `GO_MODULE`, `TITLE`, `MODULE_DIR`: name and source code location
   - The source code should be checked out to the same tag the testbed will run
 - `FORMAT`: yaml or json
@@ -8,6 +6,8 @@
 - `ROOTS`: One entry per config source of interest
   - Key: name of the source (often just `config` if the module only has one of interest)
   - Values: `root`, `docs`, `ignore`, `transformed` (below)
+
+# Configuration
 
 ## Scope (ignored keys)
 - `root`: The Go type the workflow will treat as the root of the config types and keys
@@ -48,7 +48,8 @@
 ## The concrete config
 - `UNSET_REASONS`: why the `/concreteconfig` skill left target keys unset: (reason, fnmatch patterns)
 
-## Message info
+# Messages
+- `ARGMATCH_ARGS` (optional): Build args for argmatch.
 - `CHAIN_FUNCTIONS` (optional, default (GO_MODULE + "/",)): prefixes of the function names that count as the module's
   own on message chains (configkeys/stats/messages/chains.py: chain groups, similarity, origins), e.g. Caddy's, whose
   code runs the controller's binary but isn't under its Go module

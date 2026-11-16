@@ -22,7 +22,9 @@ Everything paramtrack's workflow needs that is specific to Caddy's ingress contr
 - `gopls conftamer -extra` (roots and edges the source doesn't show) and `-untagged-keys`; Prometheus's SD configs use `-extra` too.
 - configkeys: keys of module fields (including selector keys, and modules whose type is scalar-like or a map), `k=v` segments inserted when reading JSON documents, keys respelled as the code spells them (encoding/json matches keys ignoring case), and the `section` column.
 
+## Testbed
+prombench, with this controller in place of ingress-nginx: `CaddyController` in `../../testbeds.py` (paramtrack's README, "Running the testbed"). The concreteconfig skill's guidance is [../../testbeds/prombench/caddy/TESTBED.md](../../testbeds/prombench/caddy/TESTBED.md).
+
 ## Not done yet
-- The testbed: prombench, with Caddy's ingress controller in place of nginx.
 - stats.py: its output still speaks of service discovery (`sd_configs.csv`, the `sd` column), and reading the docs list needs hooks for its `map[...]` and `{}` types (a `{}` entry is a module choice with no fields of its own, e.g. `listener_wrappers.wrapper=tls`, not a key).
 - The concreteconfig skill's `MODULE.md` for this module.

@@ -24,6 +24,10 @@ TITLE = "Caddy ingress controller, root caddy.Config"
 # Untagged fields are keys (encoding/json keys them by name): the controller's secret_store storage module has only
 # untagged fields (Namespace, LeaseID), which the generated JSON sets as namespace and leaseId (decision, 2026-11-12)
 UNTAGGED_KEYS = True
+# argmatch's search caps per call (over testbeds.py's ARGMATCH_ARGS, which has none): without them, run 2's controller
+# took over 15 minutes to load the concrete config and wrote 22 GB of matches (2026-11-15); the full run of
+# 2026-11-13 passed these on the command line
+ARGMATCH_ARGS = {"MAXTIME": "2s", "MAXMEM": "1GB"}
 
 
 def extra_graph(module_dir, out_path, timeout=900):

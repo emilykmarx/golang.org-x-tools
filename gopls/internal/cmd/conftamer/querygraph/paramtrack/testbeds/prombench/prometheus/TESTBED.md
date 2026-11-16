@@ -1,18 +1,23 @@
-# prombench-nginxingress-prom (prombench, module: Prometheus, as prometheus-meta)
+# prombench-caddyICingress (prombench, module: Prometheus, as prometheus-meta)
 
 The module runs as **prometheus-meta**, in prombench's kind cluster on the GCE VM `paramtrack-e2e` (zone
 `us-central1-b`, project `conftamer`): `gcloud compute ssh --zone us-central1-b paramtrack-e2e --project conftamer`.
 kubectl context `kind-prombench`. On the VM, the checkouts are under `/home/emily/projects/config_tracing`.
-paramtrack's `prombench-nginxingress-prom` testbed deploys prombench when the VM has no cluster (or the other variant's):
-`../upstream.py` (its docstring says how) deploys upstream prometheus/test-infra at `e85cac548` with the patches in
-`../patches/`, from the tree `$CT/paramtrack-prombench` on the VM.
+paramtrack's testbed, with `--module prometheus` (`PrometheusMeta` in `testbeds.py`), builds Prometheus under argmatch
+and contexttrack, deploys prombench when the VM has no cluster (or an older variant's), sets prometheus-meta's image to
+it, and puts the concrete config in its ConfigMap. `../upstream.py` (its docstring says how) deploys upstream
+prometheus/test-infra at `e85cac548` with the patches in `../patches/` and `../patches-caddy/`, from the tree
+`$CT/paramtrack-prombench-caddy` on the VM: Caddy's ingress controller is the ingress, and runs stock (upstream's image,
+the config it generates) unless the run instruments it too.
 
 - **Shipped concrete config:** the config upstream prombench ships at that commit: the `prometheus.yaml` key of the
   `prometheus-meta` ConfigMap, `git -C $CT/prometheus-test-infra-upstream show
   e85cac548:prombench/manifests/cluster-infra/3b_prometheus-meta.yaml` (141 lines, no template placeholders;
-  identical on upstream master as of 2026-11-05). The patches don't change it.
-- **Information about the testbed:** the deployed manifests, `$CT/paramtrack-prombench/prombench/manifests/` on the
-  VM: the other components' manifests there tell you which endpoints exist for new entries to target.
+  identical on upstream master as of 2026-11-05). The patches don't change it. A copy is
+  [shipped-config.yaml](shipped-config.yaml), next to this file, which the testbed puts back when it runs Prometheus
+  stock.
+- **Information about the testbed:** the deployed manifests, `$CT/paramtrack-prombench-caddy/prombench/manifests/` on
+  the VM: the other components' manifests there tell you which endpoints exist for new entries to target.
 
 ## Applying a config
 `cc_vm.py` (next to this file) does all of this section's and "Adding files"' procedures, and the health numbers: copy
@@ -33,15 +38,15 @@ and check `prometheus_config_last_reload_successful` in `localhost:9090/promethe
 the same way), then run `promtool check config /etc/prometheus/config/candidate.yaml` in the pod.
 
 **A restart:** scale the deployment to 0, wait for the pod to be deleted, then scale it back to 1 and wait for
-`/prometheus-meta/-/ready` (as paramtrack's `Prombench.restart` in `testbeds.py` does). Not `rollout restart`: the
+`/prometheus-meta/-/ready` (as paramtrack's testbed does: `Component.stop` and `start` in `testbeds.py`). Not `rollout restart`: the
 deployment uses the default rolling update, which starts the new pod while the old one still holds the TSDB lock.
 
 ## Adding files
 Add a key to the `prometheus-meta` ConfigMap: it appears as `/etc/prometheus/config/<key>` (`scripts/value.py
 --shape path` gives paths there). Put a copy of each in the output's `files/`.
 
-paramtrack installs them too, when it runs the workflow with your config: its testbeds take the `files/` next to
-`config.yaml` (paramtrack's README, "Testbeds").
+paramtrack installs them too, when it runs the workflow with your config: its testbed takes the `files/` next to
+`config.yaml` (paramtrack's README, "Running the testbed").
 
 ## Health
 After each applied config, for a minute or so, through `kubectl exec ... wget -qO-` on prometheus-meta:
@@ -59,10 +64,12 @@ After each applied config, for a minute or so, through `kubectl exec ... wget -q
 ## Message labels (constraint 2)
 SKILL.md's constraint 2 says how to check them. On prombench:
 - **The baseline run** is made with `uv run --with pandas --with matplotlib --with tabulate python paramtrack.py
-  --module prometheus --out <dir> --config <shipped config> --testbed prombench-nginxingress-prom --until 3`, from paramtrack's directory (plain `python3`
-  fails at import; `scripts/check_labels.py` needs the same packages). It and each check take about 6 minutes, most
-  of it the 240 s workload.
+  --module prometheus --out <dir> --config config=<shipped config> --until 3`, from paramtrack's directory (plain
+  `python3` fails at import; `scripts/check_labels.py` needs the same packages). Prometheus alone is instrumented:
+  the skill's runs must instrument the same modules as the baseline. Behind ingress-nginx (until 2026-11-15) it and
+  each check took about 6 minutes, most of it the 240 s workload; behind Caddy's controller it hasn't been timed yet.
 - **Labels that depend on timing,** not the config: e.g. `/-/ready` answering 503 while Prometheus starts.
 
-paramtrack's testbed leaves the ConfigMap set to the config it ran. When done, put back whatever the user wants the
-testbed left with (the shipped config, unless told otherwise).
+paramtrack's testbed leaves the ConfigMap set to the config it ran, and prometheus-meta running the instrumented
+image. When done, put back whatever the user wants the testbed left with (the shipped config, unless told otherwise);
+a paramtrack run that doesn't instrument Prometheus puts back the shipped config and upstream's image.

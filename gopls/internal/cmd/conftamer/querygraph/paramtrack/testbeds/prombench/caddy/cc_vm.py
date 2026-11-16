@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Runs on the prombench VM: apply and check concrete configs (Caddy JSON) on Caddy's ingress controller (TESTBED.md
-next to this file). Loads configs as paramtrack's PrombenchCaddy testbed does: through Caddy's admin API, POST /load,
+next to this file). Loads configs as paramtrack's testbed does (CaddyController in testbeds.py): through Caddy's admin API, POST /load,
 which validates and provisions the config and keeps the running one if that fails.
 
   cc_vm.py files <dir>              copy each file in dir into the controller's container, at /tmp/paramtrack-files/<name>
