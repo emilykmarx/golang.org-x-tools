@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 
 	"golang.org/x/tools/go/ast/edge"
@@ -32,6 +33,12 @@ type FuncParamCall struct {
 // passing the parameter as the first of two arguments to that function - e.g. UnmarshalJSON's json.Unmarshal(b, &v) -
 // and the second argument's type; other uses of the parameter (e.g. b[0], string(b)) only read the data, so they're
 // left out.
+// Without decode_func, two uses are followed (up to maxParamDepth levels) instead of being reported as they are:
+//   - the parameter passed to a function known statically: that function's uses of its parameter (e.g. Grafana's
+//     values.StringValue.UnmarshalYAML passes unmarshal to getInterpolated, which calls unmarshal(&s) with a string)
+//   - a call decoding into another type with its own method_name: that method's uses (e.g. Alertmanager's
+//     SecretURL.UnmarshalYAML calls unmarshal((*URL)(s)), and URL's UnmarshalYAML decodes a string). (A
+//     `type plain T` has no methods, so its decode is reported as it is.)
 // Returns no calls if the type has no such method, or the method has no body or doesn't name the parameter.
 func FuncParamCalls(ctx context.Context, snapshot *cache.Snapshot, loc protocol.Location, method_name string, param_idx int, decode_func string) ([]FuncParamCall, error) {
 	pkg, _, cur, err := locToCursor(ctx, snapshot, loc)
@@ -46,21 +53,33 @@ func FuncParamCalls(ctx context.Context, snapshot *cache.Snapshot, loc protocol.
 	if !ok {
 		return nil, fmt.Errorf("FuncParamCalls: %v at %v is not a type name", id.Name, loc)
 	}
-	recv := tn.Type()
-	if _, is_ptr := recv.Underlying().(*types.Pointer); !is_ptr {
-		recv = types.NewPointer(recv)
-	}
-	sel := types.NewMethodSet(recv).Lookup(nil, method_name)
-	if sel == nil {
+	fn := lookupMethod(tn.Type(), method_name)
+	if fn == nil {
 		return nil, nil
 	}
-	fn, ok := sel.Obj().(*types.Func)
-	if !ok {
-		return nil, nil
-	}
+	return funcParamUses(ctx, snapshot, pkg.FileSet(), fn, method_name, param_idx, decode_func, 0)
+}
 
-	// Find the method's declaration (by file and line, since the object may come from another package's export data)
-	pos := pkg.FileSet().Position(fn.Pos())
+// How many levels of calls funcParamUses follows the parameter through (see FuncParamCalls)
+const maxParamDepth = 3
+
+// The method method_name in *T's method set, or nil
+func lookupMethod(t types.Type, method_name string) *types.Func {
+	if _, is_ptr := t.Underlying().(*types.Pointer); !is_ptr {
+		t = types.NewPointer(t)
+	}
+	sel := types.NewMethodSet(t).Lookup(nil, method_name)
+	if sel == nil {
+		return nil
+	}
+	fn, _ := sel.Obj().(*types.Func)
+	return fn
+}
+
+// The uses of function fn's parameter param_idx in its body (see FuncParamCalls); fset positions fn
+func funcParamUses(ctx context.Context, snapshot *cache.Snapshot, fset *token.FileSet, fn *types.Func, method_name string, param_idx int, decode_func string, depth int) ([]FuncParamCall, error) {
+	// Find the declaration (by file and line, since the object may come from another package's export data)
+	pos := fset.Position(fn.Pos())
 	if !pos.IsValid() {
 		return nil, fmt.Errorf("FuncParamCalls: no position for %v", fn.FullName())
 	}
@@ -68,10 +87,11 @@ func FuncParamCalls(ctx context.Context, snapshot *cache.Snapshot, loc protocol.
 	if err != nil {
 		return nil, err
 	}
+	sig, _ := fn.Type().(*types.Signature)
 	var decl *ast.FuncDecl
 	for _, d := range decl_pgf.File.Decls {
-		if fd, ok := d.(*ast.FuncDecl); ok && fd.Recv != nil && fd.Name.Name == method_name &&
-			decl_pkg.FileSet().Position(fd.Name.Pos()).Line == pos.Line {
+		if fd, ok := d.(*ast.FuncDecl); ok && (fd.Recv != nil) == (sig != nil && sig.Recv() != nil) &&
+			fd.Name.Name == fn.Name() && decl_pkg.FileSet().Position(fd.Name.Pos()).Line == pos.Line {
 			decl = fd
 			break
 		}
@@ -96,6 +116,11 @@ func FuncParamCalls(ctx context.Context, snapshot *cache.Snapshot, loc protocol.
 	}
 	if param == nil {
 		return nil, nil // unnamed or "_"
+	}
+	// The receiver's type, if a method (a decode into it isn't followed: that's recursion, not delegation)
+	recv := ""
+	if sig != nil && sig.Recv() != nil {
+		recv = types.TypeString(derefType(sig.Recv().Type()), nil)
 	}
 
 	// Its uses in the body
@@ -122,9 +147,29 @@ func FuncParamCalls(ctx context.Context, snapshot *cache.Snapshot, loc protocol.
 			}
 			return true
 		}
-		if c.ParentEdgeKind() == edge.CallExpr_Fun {
+		kind, idx := c.ParentEdge()
+		switch {
+		case kind == edge.CallExpr_Fun:
 			if call_expr := c.Parent().Node().(*ast.CallExpr); len(call_expr.Args) == 1 {
 				call.Arg = info.TypeOf(call_expr.Args[0])
+				// A decode into another type with its own method: what that method decodes
+				if named, ok := derefType(call.Arg).(*types.Named); ok && call.Arg != nil && depth < maxParamDepth &&
+					types.TypeString(named, nil) != recv {
+					if m := lookupMethod(named, method_name); m != nil {
+						if sub, err := funcParamUses(ctx, snapshot, decl_pkg.FileSet(), m, method_name, 0, "", depth+1); err == nil && len(sub) > 0 {
+							calls = append(calls, sub...)
+							return true
+						}
+					}
+				}
+			}
+		case kind == edge.CallExpr_Args && depth < maxParamDepth:
+			// Passed to a function known statically: that function's uses of its parameter
+			if callee := typeutil.StaticCallee(info, c.Parent().Node().(*ast.CallExpr)); callee != nil {
+				if sub, err := funcParamUses(ctx, snapshot, decl_pkg.FileSet(), callee, method_name, idx, "", depth+1); err == nil && len(sub) > 0 {
+					calls = append(calls, sub...)
+					return true
+				}
 			}
 		}
 		call.Dynamic = call.Arg == nil
@@ -132,4 +177,15 @@ func FuncParamCalls(ctx context.Context, snapshot *cache.Snapshot, loc protocol.
 		return true
 	})
 	return calls, nil
+}
+
+// t, or what it points to
+func derefType(t types.Type) types.Type {
+	if t == nil {
+		return nil
+	}
+	if p, ok := t.Underlying().(*types.Pointer); ok {
+		return p.Elem()
+	}
+	return t
 }
