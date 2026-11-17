@@ -1,0 +1,3 @@
+function,parameter,direction,element,named_types
+k8s.io/client-go/tools/cache.(*sharedIndexInformer).Run,stopCh,recv,struct{},
+github.com/caddyserver/ingress/internal/controller.NewCaddyController,stopChan,both,struct{},
