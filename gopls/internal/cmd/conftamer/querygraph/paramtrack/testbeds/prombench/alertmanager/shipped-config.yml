@@ -8,9 +8,9 @@ route:
   repeat_interval: 2d
   receiver: amgithubnotifier-bridge
   routes:
-  # Notify on the frequently-firing latency alert several times a minute, per test Prometheus.
+  # Notify on the always-firing alert several times a minute, per test Prometheus.
   - matchers:
-    - alertname="benchmarkQueryLatencyAboveAverage"
+    - alertname="benchmarkPrometheusAlwaysFiring"
     group_by: ['alertname', 'namespace', 'prometheus']
     group_wait: 10s
     group_interval: 10s

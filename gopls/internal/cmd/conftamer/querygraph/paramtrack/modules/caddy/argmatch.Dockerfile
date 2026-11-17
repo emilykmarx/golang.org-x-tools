@@ -2,7 +2,7 @@
 # prometheus/prombench-argmatch.Dockerfile (whose comments describe the ARGMATCH_* args). Build from the parent of
 # the checkouts ($CT), as paramtrack's testbeds.py does:
 #   docker build -f <this file> -t caddy-ingress-conftamer:latest .
-ARG BUILDER=prometheus-builder:conftamer
+ARG BUILDER=prometheus-builder:go1.26.4  # (testbeds/prombench/upstream.py's BUILDER_TAG)
 
 FROM ${BUILDER} AS build
 ARG ARGMATCH_FUNC=main.main
@@ -23,7 +23,7 @@ ARG ARGMATCH_IGNORELIBS=true
 ARG ARGMATCH_IGNORETYPES=
 ARG ARGMATCH_OUT=
 ARG ARGMATCH_STATS=false
-# Patch Go's net/http (on top of the builder's own Go patch) to log HTTP messages, and Caddy's caddyhttp routes to
+# Patch Go's net/http to log HTTP messages, and Caddy's caddyhttp routes to
 # log their routing; see conftamer/contexttrack/README.md. Nothing is logged unless CONFTAMER_EVENTS is set.
 COPY conftamer/contexttrack/go-inlibrary.patch conftamer/contexttrack/caddy-route.patch /patches/
 RUN cd /usr/local/go && patch -p4 < /patches/go-inlibrary.patch

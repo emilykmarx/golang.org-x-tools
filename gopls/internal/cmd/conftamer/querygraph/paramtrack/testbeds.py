@@ -13,6 +13,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -113,7 +114,8 @@ class Component:
             # argmatch needs -func or -stacklog: name a function that doesn't exist
             overrides = {"FUNC": "main.paramtrackNone", "MATCH": "paramtrack-none"}
         a = {**self.argmatch_args, "OUT": f"{self.pod_out}/matches.csv", **overrides}
-        cmd = ["docker", "build", "--progress=plain", "-f", self.DOCKERFILE]
+        cmd = ["docker", "build", "--progress=plain", "-f", self.DOCKERFILE, "--build-arg",
+               f"BUILDER={upstream.BUILDER_TAG}"]  # (every Dockerfile builds FROM it)
         for k, v in sorted(self.BUILD_ARGS.items()):
             cmd += ["--build-arg", f"{k}={v}"]
         for k, v in sorted(self.BUILD_CONTEXTS.items()):
@@ -274,8 +276,9 @@ class Component:
 class PrometheusMeta(Component):
     """Prometheus as prombench's prometheus-meta, built from prometheus/prombench-argmatch.Dockerfile. The config is the
     prometheus-meta ConfigMap's prometheus.yaml, its files the ConfigMap's other keys (so they appear in CONFIG_DIR).
-    Stock: shipped-config.yaml (upstream's ConfigMap at upstream.UPSTREAM_COMMIT). The reload: the experiment's
-    reload_on_vm.sh, which reloads a changed config and then the concrete config again."""
+    Stock: shipped-config.yaml (upstream's ConfigMap at upstream.UPSTREAM_COMMIT). Its alert rules (the alert-rules
+    ConfigMap, which the config's rule_files read) are set from the prepared tree every run (set_alert_rules). The
+    reload: the experiment's reload_on_vm.sh, which reloads a changed config and then the concrete config again."""
 
     NAME = "prometheus"
     VERSION = "v3.2.1"
@@ -291,6 +294,24 @@ class PrometheusMeta(Component):
     def configure(self):
         super().configure()
         self.set_config_map("prometheus-meta", {"prometheus.yaml": self.config}, [self.files])
+        self.set_alert_rules()
+
+    def set_alert_rules(self):
+        """Sets the alert-rules ConfigMap to its manifest's in the prepared tree (with patch 0004's rules), so a cluster
+        deployed before a change to the rules runs them. Renders the infra tool's templating it uses: {{ .VAR }}
+        (upstream.VARS) and the {{"{{"}} escapes of the rules' own templates."""
+        v = upstream.VARIANTS["caddy"]
+        upstream.ensure_tree(v)
+        manifest = open(f"{v.tree}/prombench/manifests/cluster-infra/3b_prometheus-meta.yaml").read()
+        doc = next(d for d in manifest.split("\n---\n") if re.search(r"^  name: alert-rules$", d, re.M))
+        body = doc.split("  prombench.rules.yml: |\n", 1)[1]
+        rules = "".join((line[4:] if line.strip() else "") + "\n" for line in body.splitlines())
+        rules = re.sub(r"\{\{ \.(\w+) \}\}", lambda m: {**upstream.VARS, "DOMAIN_NAME": v.domain}[m.group(1)], rules)
+        rules = rules.replace('{{"{{"}}', "{{").replace('{{"}}"}}', "}}")
+        with tempfile.NamedTemporaryFile("w", suffix=".yml") as f:
+            f.write(rules)
+            f.flush()
+            self.set_config_map("alert-rules", {"prombench.rules.yml": f.name})
 
     def ready(self):
         # Through the API server's service proxy (the stock image is distroless: no wget to exec)
@@ -654,7 +675,7 @@ class Alertmanager(Component):
     """Prometheus' Alertmanager, built from modules/alertmanager/argmatch.Dockerfile (upstream's v0.27.0, the version
     prombench runs). The config is the alertmanager-config ConfigMap's alertmanager.yml, its files the ConfigMap's
     other keys (so they appear next to it, in /etc/alertmanager/). Stock: shipped-config.yml (the ConfigMap at
-    upstream.UPSTREAM_COMMIT with this testbed's patches: patch 0004's route notifies on its latency alert every 10s).
+    upstream.UPSTREAM_COMMIT with this testbed's patches: patch 0004's route notifies on its always-firing alert every 10s).
     Prometheus sends it alerts; it notifies the webhook receiver, prombench's amgithubnotifier (which answers 500: it
     can't reach GitHub). The web config, if a run has one (upstream's manifest sets none, so shipped has none), is the
     ConfigMap's web.yml, passed with --web.config.file; its files go in the ConfigMap too. The cluster TLS config

@@ -4,7 +4,7 @@
 #   docker build -f <this file> -t alertmanager-conftamer:v0.27.0 .
 # The checkout (alertmanager-paramtrack) is upstream's v0.27.0, the version prombench runs
 # (prombench/manifests/cluster-infra/5a_alertmanager_deployment.yaml).
-ARG BUILDER=prometheus-builder:conftamer
+ARG BUILDER=prometheus-builder:go1.26.4  # (testbeds/prombench/upstream.py's BUILDER_TAG)
 ARG STOCK=quay.io/prometheus/alertmanager:v0.27.0
 
 FROM ${BUILDER} AS build
@@ -26,7 +26,7 @@ ARG ARGMATCH_IGNORELIBS=true
 ARG ARGMATCH_IGNORETYPES=
 ARG ARGMATCH_OUT=
 ARG ARGMATCH_STATS=false
-# Patch Go's net/http (on top of the builder's own Go patch) to log HTTP messages, and Alertmanager's two routers to log
+# Patch Go's net/http to log HTTP messages, and Alertmanager's two routers to log
 # their routes: prometheus/common/route (the UI, /-/ready, /-/reload, ...) and go-openapi/runtime's (the go-swagger
 # generated /api/v2, where Prometheus posts alerts); see conftamer/contexttrack/README.md. Nothing is logged unless
 # CONFTAMER_EVENTS is set.

@@ -3,7 +3,7 @@
 #   docker build -f <this file> -t grafana-conftamer:13.1.0 .
 # The checkout (grafana-paramtrack) is upstream's v13.1.0, the version contexttrack's Grafana patches were made
 # against; the testbed runs the same version stock (testbeds.py's Grafana; prombench itself ships 11.0.0).
-ARG BUILDER=prometheus-builder:conftamer
+ARG BUILDER=prometheus-builder:go1.26.4  # (testbeds/prombench/upstream.py's BUILDER_TAG)
 ARG STOCK=grafana/grafana:13.1.0
 
 FROM ${BUILDER} AS build
@@ -25,7 +25,7 @@ ARG ARGMATCH_IGNORELIBS=true
 ARG ARGMATCH_IGNORETYPES=
 ARG ARGMATCH_OUT=
 ARG ARGMATCH_STATS=false
-# Patch Go's net/http (on top of the builder's own Go patch) to log HTTP messages, and Grafana's routers to log their
+# Patch Go's net/http to log HTTP messages, and Grafana's routers to log their
 # routes: its pkg/web router (in place), and, as patched copies that workspace replaces point at, gorilla/mux and the
 # embedded Kubernetes-style API server's (k8s.io/apiserver's PathRecorderMux, go-restful: the /apis/... endpoints);
 # see conftamer/contexttrack/README.md. Nothing is logged unless CONFTAMER_EVENTS is set. (Not gRPC: grpc-client.patch

@@ -3,7 +3,7 @@
 # checkouts ($CT), with the Kubernetes checkout (module.py's MODULE_DIR, outside $CT) as the build context
 # `kubernetes`, as paramtrack's testbeds.py does:
 #   docker build -f <this file> --build-context kubernetes=<checkout> -t kube-apiserver-conftamer:v1.31.1 .
-ARG BUILDER=prometheus-builder:conftamer
+ARG BUILDER=prometheus-builder:go1.26.4  # (testbeds/prombench/upstream.py's BUILDER_TAG)
 # The image kind's node runs (testbeds/prombench/upstream.py's NODE_IMAGE), whose binary this replaces
 ARG STOCK=registry.k8s.io/kube-apiserver:v1.31.1
 
@@ -26,7 +26,7 @@ ARG ARGMATCH_IGNORELIBS=true
 ARG ARGMATCH_IGNORETYPES=
 ARG ARGMATCH_OUT=
 ARG ARGMATCH_STATS=false
-# Patch Go's net/http (on top of the builder's own Go patch) to log HTTP messages, and Kubernetes' copies of its
+# Patch Go's net/http to log HTTP messages, and Kubernetes' copies of its
 # routers (k8s.io/apiserver's PathRecorderMux, go-restful), gRPC (its client: etcd calls) and x/net's HTTP/2 server
 # (which serves the API over HTTP/2) to log theirs; see conftamer/contexttrack/README.md. Nothing is logged unless
 # CONFTAMER_EVENTS is set.

@@ -13,6 +13,7 @@ Used by ../../testbeds.py; also runnable alone, on the machine that runs the clu
 
 import argparse
 import base64
+import hashlib
 import os
 import shutil
 import subprocess
@@ -72,9 +73,9 @@ VARS = {
     "NODE_IMAGE": "kindest/node:v1.31.1@sha256:cd224d8da58d50907d1dd41d476587643dad2ffd9f6a4d96caf530fb3b9a5956",
 }
 
-BUILDER_TAG = "prometheus-builder:conftamer"
-GO_PATCHED = f"{CT}/go-conftamer-ancestry"  # the builder's build context `conftamer`
-GOPATCH = "patches/send_recv_short_contents.patch"  # in GO_PATCHED
+# The image paramtrack's images build FROM (their BUILDER build arg, which testbeds.py passes). Tagged by its Go: the
+# tag before, prometheus-builder:conftamer, had go-conftamer-ancestry's legacy Go patch, which contexttrack replaced
+BUILDER_TAG = "prometheus-builder:go1.26.4"
 
 
 def prepare(v):
@@ -93,8 +94,27 @@ def prepare(v):
     for p in v.patches:
         run(["git", "apply", p], cwd=v.tree, timeout=60)
     say(f"prepared {v.tree}: upstream {UPSTREAM_COMMIT[:9]} with {len(v.patches)} patches")
+    with open(f"{v.tree}/{STAMP}", "w") as f:
+        f.write(patches_hash(v))
     run(["go", "build", "-o", "infra", "."], cwd=f"{v.tree}/infra", timeout=900,
         env={"PATH": f"{os.environ['PATH']}:/usr/local/go/bin"})
+
+
+STAMP = ".paramtrack-patches"  # in a prepared tree: patches_hash of the patches it was prepared with
+
+
+def patches_hash(v):
+    h = hashlib.sha256(UPSTREAM_COMMIT.encode())
+    for p in v.patches:
+        h.update(open(p, "rb").read())
+    return h.hexdigest()
+
+
+def ensure_tree(v):
+    """Prepares the variant's tree unless it's there with the current patches"""
+    stamp = f"{v.tree}/{STAMP}"
+    if not (os.path.exists(stamp) and open(stamp).read() == patches_hash(v)):
+        prepare(v)
 
 
 def image_exists(tag):
@@ -102,15 +122,13 @@ def image_exists(tag):
 
 
 def ensure_builder(log_dir):
-    """Builds BUILDER_TAG (upstream's prometheus-builder with patched Go, patch 0007) if it isn't there"""
+    """Builds BUILDER_TAG (upstream's prometheus-builder with Go 1.26.4, patch 0007) if it isn't there"""
     if image_exists(BUILDER_TAG):
         return
     v = VARIANTS["caddy"]
-    if not os.path.isdir(v.tree):
-        prepare(v)
+    ensure_tree(v)
     say(f"building {BUILDER_TAG} (several minutes)")
-    run(["docker", "build", "--progress=plain", "--build-context", f"conftamer={GO_PATCHED}", "--build-arg",
-         f"GOPATCH={GOPATCH}", "-t", BUILDER_TAG, f"{v.tree}/tools/prometheus-builder"],
+    run(["docker", "build", "--progress=plain", "-t", BUILDER_TAG, f"{v.tree}/tools/prometheus-builder"],
         log=f"{log_dir}/builder-build.log", timeout=2400)
 
 
