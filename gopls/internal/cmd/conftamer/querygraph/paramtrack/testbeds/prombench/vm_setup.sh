@@ -69,11 +69,17 @@ git clone https://github.com/emilykmarx/go-conftamer-ancestry.git
 # Caddy's ingress controller, for the prombench-caddyICingress-caddyIC testbed
 git clone https://github.com/emilykmarx/caddyserver-ingress.git
 git clone https://github.com/emilykmarx/conftamer
-pushd conftamer; git checkout argmatch; popd
+pushd conftamer; git checkout paramtrack-routes; popd  # (contexttrack patches: go-openapi route, received path in "Response sent"; until merged)
 # The Kubernetes API server (modules/kube-apiserver/module.py's MODULE_DIR, outside this directory): v1.31.1, as
 # upstream.py's NODE_IMAGE (blobs fetched on demand: the history is large)
 git clone --filter=blob:none --single-branch --branch conftamer-ancestry https://github.com/emilykmarx/kubernetes.git \
     /home/emily/go/src/k8s.io/kubernetes
+# Alertmanager and Grafana (modules/alertmanager/, modules/grafana/): upstream's, at the versions their module.py's
+# MODULE_DIR comments give
+git -c advice.detachedHead=false clone --depth 1 --branch v0.27.0 https://github.com/prometheus/alertmanager.git \
+    alertmanager-paramtrack
+git -c advice.detachedHead=false clone --depth 1 --branch v13.1.0 https://github.com/grafana/grafana.git \
+    grafana-paramtrack
 
 # kind: kube-proxy and promtail need more inotify instances than the default 128 (upstream.py also sets it, but
 # only until the next reboot)

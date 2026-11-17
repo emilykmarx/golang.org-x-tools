@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Emily Marx <emilykmarx@alumni.stanford.edu>
+Date: Mon, 16 Nov 2026 16:47:18 -0800
+Subject: [PATCH] Give the Node Metrics dashboard a fixed uid
+
+Without one, Grafana assigns a random uid each time it provisions the
+dashboard (every deploy), which ends up in message labels (Grafana's
+/apis/dashboard.grafana.app/.../dashboards/<uid> calls), so labels differ
+between runs for no reason. The Prombench dashboard has one (7gmLoNDmz).
+---
+ .../cluster-infra/grafana_dashboard_dashboards_noparse.yaml      | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/prombench/manifests/cluster-infra/grafana_dashboard_dashboards_noparse.yaml b/prombench/manifests/cluster-infra/grafana_dashboard_dashboards_noparse.yaml
+index 8250885..899b0c0 100644
+--- a/prombench/manifests/cluster-infra/grafana_dashboard_dashboards_noparse.yaml
++++ b/prombench/manifests/cluster-infra/grafana_dashboard_dashboards_noparse.yaml
+@@ -24,6 +24,7 @@ data:
+       "id": null,
+       "title": "Node Metrics",
+       "description": "Dashboard to view Node metrics",
++      "uid": "paramtrack-node-metrics",
+       "tags": [
+         "nodes",
+         "node-metrics"
+-- 
+2.34.1
+

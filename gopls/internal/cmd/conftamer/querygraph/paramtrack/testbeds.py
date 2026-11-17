@@ -1,11 +1,11 @@
 """paramtrack's testbed for its dynamic phase: prombench, with Caddy's ingress controller in place of ingress-nginx, in
 a kind cluster on a GCE VM. Each module in prombench (COMPONENTS: the cluster's API server, Prometheus as
-prometheus-meta, Caddy's ingress controller) runs either instrumented, if the run gives it concrete configs (built with
-argmatch and contexttrack, run with a concrete config per config root, its events and argmatch's matches collected), or
-stock (upstream's image, the shipped config). See README.md.
+prometheus-meta, Caddy's ingress controller, Alertmanager, Grafana) runs either instrumented, if the run instruments it (built with argmatch
+and contexttrack, run with a concrete config per config root, or else its shipped configs, its events and argmatch's
+matches collected), or stock (upstream's image, the shipped configs). See README.md.
 
-Also run on the VM by PrombenchVM: testbeds.py --out DIR [--config MODULE:ROOT=FILE ... [--files MODULE:ROOT=DIR]
-[--stacklog MODULE=FILE --matchfile MODULE=FILE] ...]
+Also run on the VM by PrombenchVM: testbeds.py --out DIR [--instrument MODULE [--config MODULE:ROOT=FILE ...
+[--files MODULE:ROOT=DIR]] [--stacklog MODULE=FILE --matchfile MODULE=FILE] ...]
 """
 
 import argparse
@@ -32,7 +32,7 @@ import fixtures  # noqa: E402  (kube-apiserver's: the servers its configs point 
 # The testbed's name, as testbed.json records it
 NAME = "prombench-caddyICingress"
 # An instrumented module's outputs, in <out_dir>/<module>/
-OUTPUTS = ("events.jsonl", "matches.csv", "matches.calls.csv")
+OUTPUTS = ("events.jsonl", "matches.csv", "matches.calls.csv", "matches.chans.csv")
 
 # argmatch build args for both runs, as in argmatch-labels/bootstrap-example/bootstrap.sh: search all of each
 # receiver (no libraries or types ignored, no time or memory caps), and spread each function's 30 checks out. A
@@ -51,16 +51,20 @@ def argmatch_args(mod):
 
 
 EXPERIMENT = f"{CT}/dump_ancestors/argmatch/experiment"
+# This run's ID, which each deployment's pod template is annotated with (Component.configure)
+RUN_ID = time.strftime("%Y%m%dT%H%M%S")
 
 
 class Component:
     """A module in prombench (its paramtrack module name: NAME), as one deployment. Instrumented if given configs (one
     per config root of its module.py's ROOTS the run covers): built from DOCKERFILE under argmatch and contexttrack (the
     checkout SRC, relative to $CT or absolute, is in the build context), run as TAG with CONFTAMER_EVENTS and
-    argmatch's output in /argmatch-out/<NAME>/ (the host's upstream.ARGMATCH_OUT/<NAME>), and with the configs.
-    Otherwise stock: STOCK_IMAGE, with the shipped config. Its files go to <out_dir>/<NAME>/."""
+    argmatch's output in /argmatch-out/<NAME>/ (the host's upstream.ARGMATCH_OUT/<NAME>), and with the configs; given
+    none ({}), with its shipped configs (SHIPPED_CONFIGS: e.g. a baseline run's). Otherwise stock: STOCK_IMAGE, with the
+    shipped configs. Its files go to <out_dir>/<NAME>/."""
 
     NAME = DOCKERFILE = SRC = TAG = STOCK_IMAGE = NS = DEPLOY = CONTAINER = LABEL = None
+    SHIPPED_CONFIGS = {}  # The testbed's own config for each config root it sets: root => file under HERE
     BUILD_ARGS = {}
     BUILD_CONTEXTS = {}  # docker build's named contexts besides $CT: name => directory
     CTX = upstream.CTX
@@ -69,9 +73,9 @@ class Component:
         """configs: root => concrete config; files: root => the directory of files its config refers to"""
         self.argmatch_args = {**ARGMATCH_ARGS, **(argmatch_args or {})}
         self.out = f"{out_dir}/{self.NAME}"
-        self.configs, self.files_of = configs or {}, files or {}
-        self.stacklog, self.matchfile = stacklog, matchfile
         self.instrumented = configs is not None
+        self.configs, self.files_of = configs or dict(self.SHIPPED_CONFIGS), files or {}
+        self.stacklog, self.matchfile = stacklog, matchfile
         # A module with one root (Prometheus, Caddy): its config and files
         self.config = next(iter(self.configs.values())) if len(self.configs) == 1 else None
         self.files = next(iter(self.files_of.values()), None) if len(self.configs) == 1 else None
@@ -147,9 +151,48 @@ class Component:
             run(["sudo", "rm", "-f"] + [f"{self.host_out}/{f}" for f in OUTPUTS], timeout=60)
         else:
             self.k("set", "env", self.DEPLOY, "-c", self.CONTAINER, "CONFTAMER_EVENTS-")
+        # The same rollout every run (a new ReplicaSet, the deployment's status updates), whatever the cluster's state:
+        # otherwise only a run that changes the pod template (e.g. the first after a deploy: image, env, mount) rolls
+        # out, and its API server sees messages (labels) the next run's doesn't
+        patch = {"spec": {"template": {"metadata": {"annotations": {"paramtrack/run": RUN_ID}}}}}
+        self.k("patch", self.DEPLOY, "--type", "strategic", "-p", json.dumps(patch))
 
     def start(self):
         self.k("scale", self.DEPLOY, "--replicas=1")
+
+    def mount_argmatch_out(self):
+        """Mounts the node's /argmatch-out (the host's upstream.ARGMATCH_OUT, which kind mounts on the control-plane
+        node, where prombench's main-node pods run) at /argmatch-out in the container, unless it is already (for
+        deployments upstream's manifests don't mount it in, as patch 0002 does for prometheus-meta)"""
+        spec = json.loads(self.k("get", self.DEPLOY, "-o", "json"))["spec"]["template"]["spec"]
+        if any(v["name"] == "argmatch-out" for v in spec.get("volumes") or []):
+            return
+        i = next(i for i, c in enumerate(spec["containers"]) if c["name"] == self.CONTAINER)
+        ops = [{"op": "add", "path": "/spec/template/spec/volumes/-",
+                "value": {"name": "argmatch-out", "hostPath": {"path": "/argmatch-out", "type": "Directory"}}},
+               {"op": "add", "path": f"/spec/template/spec/containers/{i}/volumeMounts/-",
+                "value": {"name": "argmatch-out", "mountPath": "/argmatch-out"}}]
+        self.k("patch", self.DEPLOY, "--type", "json", "-p", json.dumps(ops))
+        say(f"{self.NAME}: mounted /argmatch-out")
+
+    def set_config_map(self, name, key, config, files):
+        """Sets the ConfigMap's data to the config (as key) and its files (as other keys, binary ones as binaryData),
+        removing earlier runs' keys"""
+        data, binary = {key: open(config).read()}, {}
+        for n in sorted(os.listdir(files)) if files else []:
+            content = open(f"{files}/{n}", "rb").read()
+            try:
+                data[n] = content.decode()
+            except UnicodeDecodeError:
+                binary[n] = base64.b64encode(content).decode()
+        # (a merge patch sets the keys it names; null removes one)
+        have = json.loads(self.k("get", "configmap", name, "-o", "json"))
+        patch = {"data": {**{k: None for k in have.get("data") or {}}, **data},
+                 "binaryData": {**{k: None for k in have.get("binaryData") or {}}, **binary}}
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:  # (can be too long for a command line)
+            json.dump(patch, f)
+            f.flush()
+            self.k("patch", "configmap", name, "--type", "merge", "--patch-file", f.name)
 
     def ready(self):
         """Whether it's ready to take the workload (polled after start)"""
@@ -213,28 +256,13 @@ class PrometheusMeta(Component):
     BUILD_ARGS = {"VERSION": VERSION}
     TAG = "prometheus-conftamer:v3.2.1"
     STOCK_IMAGE = "quay.io/prometheus/prometheus:v3-distroless"  # upstream's manifest's
-    SHIPPED = f"{HERE}/testbeds/prombench/prometheus/shipped-config.yaml"
+    SHIPPED_CONFIGS = {"config": f"{HERE}/testbeds/prombench/prometheus/shipped-config.yaml"}
     NS, DEPLOY, CONTAINER, LABEL = "default", "deploy/prometheus-meta", "prometheus", "app=prometheus-meta"
     CONFIG_DIR = "/etc/prometheus/config"  # where prometheus-meta mounts its ConfigMap
 
     def configure(self):
         super().configure()
-        config, files = (self.config, self.files) if self.instrumented else (self.SHIPPED, None)
-        data, binary = {"prometheus.yaml": open(config).read()}, {}
-        for name in sorted(os.listdir(files)) if files else []:
-            content = open(f"{files}/{name}", "rb").read()
-            try:
-                data[name] = content.decode()
-            except UnicodeDecodeError:
-                binary[name] = base64.b64encode(content).decode()
-        # Remove earlier runs' files (a merge patch sets the keys it names; null removes one)
-        have = json.loads(self.k("get", "configmap", "prometheus-meta", "-o", "json"))
-        patch = {"data": {**{k: None for k in have.get("data") or {}}, **data},
-                 "binaryData": {**{k: None for k in have.get("binaryData") or {}}, **binary}}
-        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:  # (can be too long for a command line)
-            json.dump(patch, f)
-            f.flush()
-            self.k("patch", "configmap", "prometheus-meta", "--type", "merge", "--patch-file", f.name)
+        self.set_config_map("prometheus-meta", "prometheus.yaml", self.config, self.files)
 
     def ready(self):
         # Through the API server's service proxy (the stock image is distroless: no wget to exec)
@@ -276,6 +304,8 @@ class CaddyController(Component):
     SRC = "caddyserver-ingress"
     TAG = "caddy-ingress-conftamer:latest"
     STOCK_IMAGE = "caddy/ingress:v0.2.1"  # the checkout's Helm chart's
+    # (the controller's generated config, as testbeds/prombench/caddy/TESTBED.md says; stock runs it as generated)
+    SHIPPED_CONFIGS = {"caddy": f"{HERE}/testbeds/prombench/caddy/shipped-config.json"}
     NS, DEPLOY, CONTAINER = "caddy-system", "deploy/caddy-caddy-ingress-controller", "caddy-ingress-controller"
     LABEL = "app.kubernetes.io/name=caddy-ingress-controller"
     SERVICE = "svc/caddy-caddy-ingress-controller"
@@ -442,6 +472,8 @@ class KubeAPIServer(Component):
     FLAGS = {"authentication": "--authentication-config", "authorization": "--authorization-config",
              "encryption": "--encryption-provider-config", "audit_policy": "--audit-policy-file",
              "egress_selector": "--egress-selector-config-file", "tracing": "--tracing-config-file"}
+    # kind sets none of the roots' flags: shipped, every root is unset (SHIPPED_CONFIGS {}), and the API server runs
+    # with kind's own flags
     # Flags of kind's that a root's config replaces (the API server refuses both)
     REPLACED = {"authorization": ("--authorization-mode",)}
     # Flags a root's config needs to take effect: the audit policy applies only with an audit backend; the
@@ -453,6 +485,11 @@ class KubeAPIServer(Component):
                                     "--audit-webhook-batch-max-wait=5s"],
                    "encryption": ["--encryption-provider-config-automatic-reload=true"]}
     RELOADED = ("authentication", "authorization", "encryption")
+    # Marks the node once the API server has run with an encryption config: it encrypts the resources the config
+    # names (configmaps, in the fixtures' configs) as they're written, and an API server without the config can't read
+    # them back (InternalError: "identity transformer tried to read encrypted data"), so a run without one redeploys
+    # the cluster (Prombench.run). A new cluster's node has no mark.
+    ENCRYPTED = "/etc/kubernetes/paramtrack-original/encrypted"
     SERVE_WITHIN = 900  # seconds for the API server to serve after start (instrumented, it starts slowly)
 
     def node(self, *cmd, input=None, timeout=120, check=True):
@@ -462,6 +499,12 @@ class KubeAPIServer(Component):
         if check and p.returncode != 0:
             raise RuntimeError(f"exit {p.returncode}: {' '.join(full)}: {p.stderr.strip()[-1000:]}")
         return p.stdout
+
+    @classmethod
+    def encrypted(cls):
+        """Whether the node is marked (ENCRYPTED)"""
+        return subprocess.run(["docker", "exec", cls.NODE, "test", "-e", cls.ENCRYPTED], capture_output=True,
+                              timeout=60).returncode == 0
 
     def config_path(self, root, base):
         return f"{base}/config/{root}{os.path.splitext(self.configs[root])[1]}"
@@ -530,6 +573,8 @@ class KubeAPIServer(Component):
             os.makedirs(f"{self.host_out}/config")
             for root, path in self.configs.items():
                 shutil.copy(path, self.config_path(root, self.host_out))
+            if "encryption" in self.configs:
+                self.node("touch", self.ENCRYPTED)
             with open(f"{self.host_out}/config/audit-webhook.kubeconfig", "w") as f:
                 f.write(fixtures.kubeconfig(fixtures.AUDIT_URL, ca=False))
             for root, d in self.files_of.items():
@@ -577,9 +622,68 @@ class KubeAPIServer(Component):
             raise RuntimeError(f"{self.NAME}: running {image} at the capture, not {self.TAG}")
 
 
+class Alertmanager(Component):
+    """Prometheus' Alertmanager, built from modules/alertmanager/argmatch.Dockerfile (upstream's v0.27.0, the version
+    prombench runs). The config is the alertmanager-config ConfigMap's alertmanager.yml, its files the ConfigMap's
+    other keys (so they appear next to it, in /etc/alertmanager/). Stock: shipped-config.yml (the ConfigMap at
+    upstream.UPSTREAM_COMMIT with this testbed's patches: patch 0004's route notifies on its latency alert every 10s).
+    Prometheus sends it alerts; it notifies the webhook receiver, prombench's amgithubnotifier (which answers 500: it
+    can't reach GitHub). No reload yet."""
+
+    NAME = "alertmanager"
+    DOCKERFILE = f"{HERE}/modules/alertmanager/argmatch.Dockerfile"
+    SRC = "alertmanager-paramtrack"
+    TAG = "alertmanager-conftamer:v0.27.0"
+    STOCK_IMAGE = "quay.io/prometheus/alertmanager:v0.27.0"  # upstream's manifest's
+    SHIPPED_CONFIGS = {"config": f"{HERE}/testbeds/prombench/alertmanager/shipped-config.yml"}
+    NS, DEPLOY, CONTAINER, LABEL = "default", "deploy/alertmanager", "alertmanager", "app=alertmanager"
+
+    def configure(self):
+        super().configure()
+        if self.instrumented:
+            self.mount_argmatch_out()
+        self.set_config_map("alertmanager-config", "alertmanager.yml", self.config, self.files)
+
+    def ready(self):
+        # (--web.external-url's path, /alertmanager, prefixes its routes)
+        cmd = ["kubectl", "--context", self.CTX, "get", "--raw",
+               "/api/v1/namespaces/default/services/alertmanager:am-web/proxy/alertmanager/-/ready"]
+        return subprocess.run(cmd, capture_output=True, timeout=60).returncode == 0
+
+
+class Grafana(Component):
+    """Grafana, built from modules/grafana/argmatch.Dockerfile (upstream's v13.1.0, the version contexttrack's Grafana
+    patches were made against). Stock, it runs grafana/grafana:13.1.0 in place of the 11.0.0 prombench ships, so that
+    stock and instrumented runs are the same version. Its config is prombench's: the deployment's GF_* environment
+    variables and the provisioning ConfigMaps (datasources: prometheus-meta and loki; dashboards); no roots yet
+    (modules/grafana/module.py), so it runs only with that (no concrete configs). The workload's dashboard viewer
+    queries prometheus-meta through it. No reload yet."""
+
+    NAME = "grafana"
+    DOCKERFILE = f"{HERE}/modules/grafana/argmatch.Dockerfile"
+    SRC = "grafana-paramtrack"
+    TAG = "grafana-conftamer:13.1.0"
+    STOCK_IMAGE = "grafana/grafana:13.1.0"
+    NS, DEPLOY, CONTAINER, LABEL = "default", "deploy/grafana-core", "grafana-core", "app=grafana,component=core"
+
+    def configure(self):
+        if self.configs:
+            raise RuntimeError(f"{self.NAME}: no config roots yet (modules/grafana/module.py), so no concrete configs: "
+                               f"{', '.join(sorted(self.configs))}")
+        super().configure()
+        if self.instrumented:
+            self.mount_argmatch_out()
+
+    def ready(self):
+        # (GF_SERVER_SERVE_FROM_SUB_PATH: under /grafana)
+        cmd = ["kubectl", "--context", self.CTX, "get", "--raw",
+               "/api/v1/namespaces/default/services/grafana:grafana-web/proxy/grafana/api/health"]
+        return subprocess.run(cmd, capture_output=True, timeout=60).returncode == 0
+
+
 # The modules prombench runs, by paramtrack module name (modules/<name>/), in the order they start (and stop in reverse):
 # the API server first, as the others' restarts go through it
-COMPONENTS = {c.NAME: c for c in (KubeAPIServer, PrometheusMeta, CaddyController)}
+COMPONENTS = {c.NAME: c for c in (KubeAPIServer, PrometheusMeta, CaddyController, Alertmanager, Grafana)}
 
 
 class Prombench:
@@ -601,7 +705,8 @@ class Prombench:
 
     def run(self, out_dir, modules):
         """modules: module name => {configs, files, stacklog, matchfile, argmatch_args} for each instrumented module
-        (the others run stock); configs: config root => concrete config; files: config root => its files' directory.
+        (the others run stock); configs: config root => concrete config (none: the shipped configs); files: config root
+        => its files' directory.
         With a stacklog, argmatch instruments its functions and searches for the strings in
         matchfile; without, it instruments nothing (contexttrack still records events). argmatch_args: the module's
         argmatch build args that differ from ARGMATCH_ARGS."""
@@ -615,6 +720,9 @@ class Prombench:
         for c in instrumented:
             c.build()
         have = upstream.cluster_variant()
+        api = next(c for c in comps if isinstance(c, KubeAPIServer))
+        if have == "caddy" and KubeAPIServer.encrypted() and "encryption" not in api.configs:
+            have = "data encrypted by an earlier run's encryption config, which this run doesn't have"
         if have != "caddy":
             say(f"prombench cluster: {have or 'none'}; deploying the caddy variant (about 5 minutes)")
             upstream.deploy("caddy", f"{out_dir}/deploy")
@@ -689,9 +797,11 @@ class PrombenchVM:
     REMOTE = "/tmp/paramtrack-testbed"
     # Files under HERE that the testbed reads, besides its code and patches
     FILES = ["modules/caddy/argmatch.Dockerfile", "modules/kube-apiserver/argmatch.Dockerfile",
+             "modules/alertmanager/argmatch.Dockerfile", "modules/grafana/argmatch.Dockerfile",
+             "testbeds/prombench/alertmanager/shipped-config.yml",
              *(f"testbeds/prombench/kube-apiserver/{f}" for f in ("fixtures.py", "ca.crt", "server.crt", "server.key",
                                                                    "jwt.key")),
-             "testbeds/prombench/prometheus/shipped-config.yaml"]
+             "testbeds/prombench/prometheus/shipped-config.yaml", "testbeds/prombench/caddy/shipped-config.json"]
 
     POLL = 30  # seconds between checks on the run
     GIVE_UP = 1200  # seconds of failed ssh calls before giving up
@@ -744,6 +854,7 @@ class PrombenchVM:
         args = ["python3", "testbeds.py", "--out", "out", "--wait", str(self.wait)]
         dirs = {}
         for name, m in sorted(modules.items()):
+            args += ["--instrument", name]
             for k, v in (m.get("argmatch_args") or {}).items():
                 if ARGMATCH_ARGS.get(k) != v:
                     args += ["--argmatch-arg", f"{name}:{k}={v}"]
@@ -826,7 +937,8 @@ RENAMED = {"prombench-caddy": ["caddy"], "prombench-caddyICingress-caddyIC": ["c
 
 def recorded(settings):
     """A testbed.json's settings in today's terms: an earlier testbed's name becomes NAME and its module; argmatch's
-    args, recorded for all modules before 2026-11-15, become each module's"""
+    args, recorded for all modules before 2026-11-15, become each module's; no shipped modules before 2026-11-16"""
+    settings = {"shipped": [], **settings}
     if settings.get("testbed") in RENAMED:
         settings = {**settings, "modules": RENAMED[settings["testbed"]], "testbed": NAME}
     a = settings.get("argmatch_args")
@@ -845,12 +957,14 @@ def main():
         ap.add_argument(flag, action="append", default=[], metavar="MODULE=PATH")
     ap.add_argument("--wait", type=int, default=240)
     ap.add_argument("--argmatch-arg", action="append", default=[], metavar="MODULE:KEY=VALUE")
+    ap.add_argument("--instrument", action="append", default=[], metavar="MODULE",
+                    help="A module to instrument (the others run stock): with its --configs, or its shipped configs")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     # (PrombenchVM copies out/ back into the step's directory, next to its commands.log)
     common.COMMANDS_LOG = os.path.abspath(f"{a.out}/vm-commands.log")
     log_command(sys.argv)
-    modules = {}
+    modules = {name: {"configs": {}} for name in a.instrument}
     for key, values in (("configs", a.config), ("files", a.files)):
         for v in values:
             spec, _, path = v.partition("=")
@@ -864,8 +978,8 @@ def main():
         name, _, kv = v.partition(":")
         k, _, val = kv.partition("=")
         modules.setdefault(name, {}).setdefault("argmatch_args", {})[k] = val
-    if any("configs" not in m for m in modules.values()):
-        sys.exit("every module named needs a --config")
+    if set(modules) - set(a.instrument):
+        sys.exit(f"modules not given --instrument: {', '.join(sorted(set(modules) - set(a.instrument)))}")
     Prombench(wait=a.wait).run(os.path.abspath(a.out), modules)
 
 
