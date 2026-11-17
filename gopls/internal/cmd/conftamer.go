@@ -26,6 +26,8 @@ import (
 
 // Conftamer implements the Conftamer verb for gopls
 type Conftamer struct {
+	// Adding extra edges' subtrees (see markJSONKeys)
+	below_extra          bool
 	app                  *Application
 	ctx                  context.Context
 	cli                  *client
@@ -242,6 +244,17 @@ func (c *Conftamer) classifyUnmarshaler(node *ct.CTypeNode) {
 	graph.Logf(c.log, slog.LevelInfo, "%v of %v decodes into: %v (decoded fields %v)", method, ct.CTypeNodeHash(*node), node.UnmarshalKinds, ct.KeyFieldNames(*node))
 }
 
+// A new node below an extra edge (every node added while adding extra edges: the rest of the graph is found first) that
+// has json tags and no yaml tags is decoded at run time by encoding/json (e.g. a Grafana datasource plugin's jsonData
+// settings), so its fields' keys follow JSON's rules (ct.CTypeNode.JSONKeys). A struct reached through the module's own
+// decoding keeps the graph's format: yaml.v3 ignores json tags.
+func (c *Conftamer) markJSONKeys(node *ct.CTypeNode) {
+	if c.below_extra && c.format != ct.JSON && ct.JSONOnlyTags(node.Tags) {
+		node.JSONKeys = true
+		graph.Logf(c.log, slog.LevelInfo, "JSON key rules for %v (json tags only, below an extra edge)", ct.CTypeNodeHash(*node))
+	}
+}
+
 // Whether config values of the type are scalars (see ct.CTypeNode.ScalarLike), as its node would be classified if added:
 // from ct.CopyKeyInfo, or for types with a custom unmarshaler, from classifyUnmarshaler
 func (c *Conftamer) scalarLike(typ golang.TypeInfo) bool {
@@ -301,7 +314,11 @@ func (c *Conftamer) ignoreField(child golang.TypeInfo, parent ct.CTypeNode, pare
 	}
 
 	for _, i := range field_idxs {
-		key, err := ct.GetFieldKey(ct.StructRawField(st, i), c.format)
+		format := c.format
+		if parent.JSONKeys {
+			format = ct.JSON
+		}
+		key, err := ct.GetFieldKey(ct.StructRawField(st, i), format)
 		if err != nil {
 			graph.Logf(c.log, slog.LevelWarn, "Not ignoring child: %v: %v => %v", err, parent_hash, child_name)
 			continue
@@ -527,7 +544,10 @@ func (c *Conftamer) FindUnmarshalerSubgraph() {
 	start := time.Now()
 	c.unmarshaler_subgraph = ct.New(c.log)
 	c.unmarshaler_subgraph.Format = c.format
-	c.unmarshaler_subgraph.KeyInfoHook = c.classifyUnmarshaler
+	c.unmarshaler_subgraph.KeyInfoHook = func(node *ct.CTypeNode) {
+		c.classifyUnmarshaler(node)
+		c.markJSONKeys(node)
+	}
 
 	// 1. Find "Unmarshalers" by configured strategy, plus the extra roots (if any)
 	unmarshalers := c.FindUnmarshalers()
@@ -585,14 +605,16 @@ type ExtraGraph struct {
 	Edges []ExtraEdge `json:"edges"`
 }
 
-// An edge from Parent to Child through Parent's field Field, whose key is the field's key followed by Key
+// An edge from Parent to Child through Parent's field Field, whose key is Before (if any), the field's key, then Key
 // (CONFIG_KEY_PREFIX; e.g. "http" for a module map, or "handler=reverse_proxy" for a module picked by a key inside
-// the object)
+// the object). Before is for a module picked by a key of Parent's own object (CONFIG_KEY_BEFORE_PREFIX; e.g.
+// "type=prometheus" for a Grafana datasource's jsonData: datasources.type=prometheus.jsonData...).
 type ExtraEdge struct {
 	Parent string `json:"parent"`
 	Field  string `json:"field"` // Go field name
 	Child  string `json:"child"`
 	Key    string `json:"key"`
+	Before string `json:"before,omitempty"`
 }
 
 func (c *Conftamer) readExtra() *ExtraGraph {
@@ -607,6 +629,8 @@ func (c *Conftamer) readExtra() *ExtraGraph {
 // repeatedly, since a parent may be reached only through another extra edge. Warns about edges whose parent is never
 // reached.
 func (c *Conftamer) addExtraEdges(edges []ExtraEdge, find NeighFind) {
+	c.below_extra = true
+	defer func() { c.below_extra = false }()
 	children := map[string]golang.TypeInfo{}
 	pending := slices.Clone(edges)
 	for len(pending) > 0 {
@@ -626,8 +650,11 @@ func (c *Conftamer) addExtraEdges(edges []ExtraEdge, find NeighFind) {
 			// The AST path an enclosed field's type would have, plus the key segment(s) the edge adds
 			child.ASTPath = []string{"StructType.Fields", golang.FIELD_NAME_PREFIX + e.Field, "FieldList.List",
 				"Field.Type", ct.CONFIG_KEY_PREFIX + e.Key}
+			if e.Before != "" {
+				child.ASTPath = append([]string{ct.CONFIG_KEY_BEFORE_PREFIX + e.Before}, child.ASTPath...)
+			}
 			neigh_info := ct.NeighInfo{Name: ct.FullTypeName(e.Parent), Age: ct.NeighIsParent, Typ: child}
-			graph.Logf(c.log, slog.LevelInfo, "Adding extra edge %v.%v => %v (key %v)", e.Parent, e.Field, e.Child, e.Key)
+			graph.Logf(c.log, slog.LevelInfo, "Adding extra edge %v.%v => %v (key %v, before %v)", e.Parent, e.Field, e.Child, e.Key, e.Before)
 			ct.CheckErr(c.addReachableCTypes(child, find, &neigh_info, 1))
 		}
 		if len(next) == len(pending) {

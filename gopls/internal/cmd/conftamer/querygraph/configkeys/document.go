@@ -31,7 +31,10 @@ type occurrence struct {
 // inline_keys (JSON): field key => the keys inside its objects whose value picks a module (from the graph's
 // selectors, e.g. handle => [handler]): the object's other keys get a `<inline key>=<value>` segment after the field's
 // key, as the graph's extra edges do (e.g. handle.handler=reverse_proxy.upstreams.dial).
-func readDocument(path string, format ct.Format, inline_keys map[string][]string) []occurrence {
+// parent_keys: field key => the key of the field's own object whose value picks the field's module (from the graph's
+// extra edges with a Before segment, e.g. jsonData => type): the field's key gets a `<key>=<value>` segment before it
+// (e.g. datasources.type=prometheus.jsonData.httpMethod).
+func readDocument(path string, format ct.Format, inline_keys map[string][]string, parent_keys map[string]string) []occurrence {
 	contents, err := os.ReadFile(path)
 	ct.CheckErr(err)
 	out := []occurrence{}
@@ -41,9 +44,9 @@ func readDocument(path string, format ct.Format, inline_keys map[string][]string
 		if err := yaml.Unmarshal(contents, &doc); err != nil {
 			log.Fatalf("Parsing %v: %v", path, err)
 		}
-		walkYAML(&doc, nil, &out)
+		walkYAML(&doc, nil, parent_keys, &out)
 	case ct.JSON:
-		if err := walkJSON(contents, nil, inline_keys, &out); err != nil {
+		if err := walkJSON(contents, nil, inline_keys, parent_keys, &out); err != nil {
 			log.Fatalf("Parsing %v: %v", path, err)
 		}
 	default:
@@ -58,29 +61,48 @@ func readDocument(path string, format ct.Format, inline_keys map[string][]string
 	return out
 }
 
-func walkYAML(n *yaml.Node, path []string, out *[]occurrence) {
+// The `<key>=<value>` segment that goes before field key k in an object whose scalar members are values (see
+// readDocument's parent_keys), or ""
+func parentSegment(k string, parent_keys map[string]string, values map[string]string) string {
+	if sel, ok := parent_keys[k]; ok && values[sel] != "" {
+		return sel + "=" + values[sel]
+	}
+	return ""
+}
+
+func walkYAML(n *yaml.Node, path []string, parent_keys map[string]string, out *[]occurrence) {
 	switch n.Kind {
 	case yaml.DocumentNode:
 		for _, c := range n.Content {
-			walkYAML(c, path, out)
+			walkYAML(c, path, parent_keys, out)
 		}
 	case yaml.AliasNode:
-		walkYAML(n.Alias, path, out)
+		walkYAML(n.Alias, path, parent_keys, out)
 	case yaml.SequenceNode:
 		for _, c := range n.Content {
-			walkYAML(c, path, out)
+			walkYAML(c, path, parent_keys, out)
 		}
 	case yaml.MappingNode:
+		values := map[string]string{} // the object's scalar members (for parentSegment)
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			if v := n.Content[i+1]; v.Kind == yaml.ScalarNode {
+				values[n.Content[i].Value] = v.Value
+			}
+		}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k, v := n.Content[i], n.Content[i+1]
 			if k.Kind == yaml.AliasNode {
 				k = k.Alias
 			}
 			if k.ShortTag() == "!!merge" {
-				walkYAML(v, path, out) // mapping, or sequence of mappings
+				walkYAML(v, path, parent_keys, out) // mapping, or sequence of mappings
 				continue
 			}
-			walkYAML(v, append(slices.Clone(path), k.Value), out)
+			p := slices.Clone(path)
+			if seg := parentSegment(k.Value, parent_keys, values); seg != "" {
+				p = append(p, seg)
+			}
+			walkYAML(v, append(p, k.Value), parent_keys, out)
 		}
 	case yaml.ScalarNode:
 		if n.Value != "" && len(path) > 0 {
@@ -91,7 +113,7 @@ func walkYAML(n *yaml.Node, path []string, out *[]occurrence) {
 
 // Walk a JSON value (raw), at key path. Objects are read whole (keys and raw values, in order), so that an inline key's
 // value is known before the object's other keys are walked.
-func walkJSON(raw []byte, path []string, inline_keys map[string][]string, out *[]occurrence) error {
+func walkJSON(raw []byte, path []string, inline_keys map[string][]string, parent_keys map[string]string, out *[]occurrence) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber() // keep numbers as written
 	tok, err := dec.Token()
@@ -135,12 +157,22 @@ func walkJSON(raw []byte, path []string, inline_keys map[string][]string, out *[
 					}
 				}
 			}
+			values := map[string]string{} // the object's string members (for parentSegment)
+			for _, m := range members {
+				var v string
+				if json.Unmarshal(m.value, &v) == nil {
+					values[m.key] = v
+				}
+			}
 			for _, m := range members {
 				p := slices.Clone(path)
 				if selector != "" && m.key != selector_key {
 					p = append(p, selector)
 				}
-				if err := walkJSON(m.value, append(p, m.key), inline_keys, out); err != nil {
+				if seg := parentSegment(m.key, parent_keys, values); seg != "" {
+					p = append(p, seg)
+				}
+				if err := walkJSON(m.value, append(p, m.key), inline_keys, parent_keys, out); err != nil {
 					return err
 				}
 			}
@@ -150,7 +182,7 @@ func walkJSON(raw []byte, path []string, inline_keys map[string][]string, out *[
 				if err := dec.Decode(&v); err != nil {
 					return err
 				}
-				if err := walkJSON(v, path, inline_keys, out); err != nil {
+				if err := walkJSON(v, path, inline_keys, parent_keys, out); err != nil {
 					return err
 				}
 			}

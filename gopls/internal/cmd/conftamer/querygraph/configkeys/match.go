@@ -368,6 +368,22 @@ func (f *finder) inlineKeys() map[string][]string {
 	return keys
 }
 
+// Field key => the key of the field's own object that picks its module, from the extra edges with a Before segment
+// (e.g. jsonData => type), for reading documents (see readDocument)
+func (f *finder) parentKeys() map[string]string {
+	keys := map[string]string{}
+	for _, outs := range f.adj {
+		for _, e := range outs {
+			for _, seg := range e.segments {
+				if sel, _, found := strings.Cut(seg.Before, "="); seg.Extra && found {
+					keys[seg.Field] = sel
+				}
+			}
+		}
+	}
+	return keys
+}
+
 // Whether node has no module fields (keys from extra edges)
 func (f *finder) noModules(node ct.CTypeHash) bool {
 	return len(f.module_fields[node]) == 0

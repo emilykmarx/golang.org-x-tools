@@ -210,6 +210,27 @@ def go_string_literals(module_dir, mod):
     return {json.loads(line).replace("\n", "\\n") for line in out.splitlines()}
 
 
+def json_case_docs(docs, full, graph_path):
+    """docs (read_docs), with each documented key that matches a full key only case-insensitively spelled as the full
+    key, if the full key is below a node with JSON key rules (the graph's JSONKeys: encoding/json matches keys
+    case-insensitively; e.g. Grafana's cloudwatch assumeRoleArn, json tag assumeRoleARN)"""
+    vertices = json.load(open(graph_path))["Vertices"]
+    json_nodes = {v["Names"][0] for v in (vertices.values() if isinstance(vertices, dict) else vertices)
+                  if v.get("JSONKeys")}
+    if not json_nodes:
+        return docs
+    by_lower = collections.defaultdict(list)
+    for fk in full:
+        by_lower[fk.lower()].append(fk)
+    out = {}
+    for k, t in docs.items():
+        fks = by_lower[k.lower()]
+        if k not in full and len(fks) == 1 and any(set(path_nodes(p)) & json_nodes for p in full[fks[0]]["paths"]):
+            k = fks[0]
+        out[k] = t
+    return out
+
+
 def read_docs(path, mod=None):
     """Documented keys => type, with map keys as `<key>.*` and the docs' <placeholder> segments as `*`. The module's
     optional docs_entry(key, type) hook normalizes its docs' lines first: it returns the (key, type) to use, with
@@ -727,7 +748,7 @@ def main():
     meta = meta_keys(full, mod)  # (before --ignore: a meta key --ignore also matches counts as meta)
     n_meta, n_meta_dropped = apply_ignore(full, config, [], meta)
     n_ignored, n_dropped = apply_ignore(full, config, ignore)
-    docs_all = read_docs(args.docs, mod)
+    docs_all = json_case_docs(read_docs(args.docs, mod), full_all, args.graph)
     docs = {k: t for k, t in docs_all.items() if not matches_any(k, ignore) and k not in meta}
 
     # Per full key: section, top-level section, coverage by the config

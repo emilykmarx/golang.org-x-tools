@@ -19,6 +19,10 @@ const MAP_KEY = "*"
 // picked by a key inside the object). Other AST path readers ignore it.
 const CONFIG_KEY_PREFIX = "ConfigKey:"
 
+// An extra edge's key segment that goes before the field's key (see ExtraEdge.Before), e.g. "type=prometheus" for a
+// datasource's jsonData: CONFIG_KEY_BEFORE_PREFIX + the segment, at the start of the edge's AST path
+const CONFIG_KEY_BEFORE_PREFIX = "ConfigKeyBefore:"
+
 // The config file key segment for one AST path of an edge (from a parent CType to a child)
 type KeySegment struct {
 	// Dot-separated, possibly with MAP_KEY parts; "" if no key is consumed (e.g. inline field, slice element)
@@ -33,6 +37,10 @@ type KeySegment struct {
 	Extra    bool
 	Field    string
 	Selector string
+	// For an extra edge whose module is picked by a key of the parent's own object (e.g. a datasource's
+	// type=prometheus, next to its jsonData): that segment, before the field's key (Pattern is
+	// type=prometheus.jsonData...; Field is jsonData)
+	Before string
 	// The Go name of the (last) field the path goes through, if any (e.g. to tell an extra edge's field's other edges)
 	GoField string
 }
@@ -46,6 +54,9 @@ func JoinKey(parts ...string) string {
 // FieldKey.IsKey. embedded: the field is known to be embedded (for graphs serialized before EmbeddedFields existed).
 // If the field's tag is invalid for the library, warns and treats it as not a key.
 func NodeFieldKey(n CTypeNode, field string, embedded bool, format Format) FieldKey {
+	if n.JSONKeys {
+		format = JSON
+	}
 	raw := NodeRawField(n, field)
 	raw.Embedded = raw.Embedded || embedded
 	key, err := GetFieldKey(raw, format)
@@ -85,7 +96,10 @@ func ASTPathKeySegment(src, target CTypeNode, ast_path ASTPath, format Format) (
 		seg.GoField = field
 	}
 	for _, ast_edge := range ast_path {
-		if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
+		if before, ok := strings.CutPrefix(ast_edge, CONFIG_KEY_BEFORE_PREFIX); ok {
+			seg.Before = before
+			seg.Pattern = JoinKey(seg.Pattern, before)
+		} else if field, ok := strings.CutPrefix(ast_edge, golang.FIELD_NAME_PREFIX); ok {
 			if !add_field(NodeFieldKey(src, field, false, format)) {
 				return seg, false
 			}
@@ -94,9 +108,9 @@ func ASTPathKeySegment(src, target CTypeNode, ast_path ASTPath, format Format) (
 			seg.Pattern = JoinKey(seg.Pattern, MAP_KEY)
 		} else if key, ok := strings.CutPrefix(ast_edge, CONFIG_KEY_PREFIX); ok {
 			// The extra edge names the key, so a "-" field's key isn't left to the custom unmarshaler (no MAP_KEY)
-			seg.Extra, seg.Field, seg.Dash = true, seg.Pattern, false
+			seg.Extra, seg.Field, seg.Dash = true, strings.TrimPrefix(strings.TrimPrefix(seg.Pattern, seg.Before), "."), false
 			if inline_key, _, found := strings.Cut(key, "="); found {
-				seg.Selector = JoinKey(seg.Pattern, inline_key)
+				seg.Selector = JoinKey(seg.Field, inline_key)
 			}
 			seg.Pattern = JoinKey(seg.Pattern, key)
 		}

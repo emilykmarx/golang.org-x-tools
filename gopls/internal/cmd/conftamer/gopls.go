@@ -3,6 +3,7 @@ package conftamer
 import (
 	"fmt"
 	"go/types"
+	"reflect"
 
 	"golang.org/x/tools/gopls/internal/golang"
 )
@@ -46,6 +47,19 @@ func CopyMethods(node *CTypeNode) {
 }
 
 // If n is a struct, populate its field tags
+// Whether a struct's tags (field => tag) have json tags and no yaml tags
+func JSONOnlyTags(tags map[string]string) bool {
+	has_json := false
+	for _, tag := range tags {
+		if _, ok := reflect.StructTag(tag).Lookup("yaml"); ok {
+			return false
+		}
+		_, ok := reflect.StructTag(tag).Lookup("json")
+		has_json = has_json || ok
+	}
+	return has_json
+}
+
 func CopyTags(node *CTypeNode) {
 	struct_info := IsStruct(node.TypeInfo)
 	if struct_info == nil {

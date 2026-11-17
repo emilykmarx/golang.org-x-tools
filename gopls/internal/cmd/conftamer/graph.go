@@ -90,6 +90,9 @@ type CTypeNode struct {
 	UnmarshalKinds []UnmarshalKind
 	DecodedFields  map[string]DecodedField // Field name => field, if it decodes into another struct
 	ScalarLike     bool                    // config values of this type are scalars (no keys below it)
+	// Its fields' keys follow encoding/json's rules, whatever the graph's format: a struct with json tags and no yaml
+	// tags, found below an extra edge (whose run-time decoding is JSON's, e.g. a Grafana datasource plugin's jsonData)
+	JSONKeys bool
 	// Kind of the values stored in the type and in each of its fields (if struct), for leaves of the document
 	Kind       ValueKind
 	FieldKinds map[string]ValueKind

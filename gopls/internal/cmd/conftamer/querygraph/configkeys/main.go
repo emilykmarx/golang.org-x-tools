@@ -201,7 +201,7 @@ func main() {
 	var keys []string
 	switch {
 	case config != "":
-		occs = readDocument(config, format, f.inlineKeys())
+		occs = readDocument(config, format, f.inlineKeys(), f.parentKeys())
 		for _, occ := range occs {
 			keys = append(keys, occ.key)
 		}

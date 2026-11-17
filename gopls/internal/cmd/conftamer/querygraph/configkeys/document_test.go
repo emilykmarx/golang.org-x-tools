@@ -37,7 +37,7 @@ d: *base
 		if err := os.WriteFile(path, []byte(test.doc), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if got := readDocument(path, test.format, nil); !slices.Equal(got, test.want) {
+		if got := readDocument(path, test.format, nil, nil); !slices.Equal(got, test.want) {
 			t.Errorf("%v:\ngot  %v\nwant %v", test.format, got, test.want)
 		}
 	}
@@ -54,7 +54,34 @@ func TestReadDocumentInlineKeys(t *testing.T) {
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := readDocument(path, ct.JSON, map[string][]string{"handle": {"handler"}}); !slices.Equal(got, want) {
+	if got := readDocument(path, ct.JSON, map[string][]string{"handle": {"handler"}}, nil); !slices.Equal(got, want) {
+		t.Errorf("got  %v\nwant %v", got, want)
+	}
+}
+
+// YAML objects whose field's module is picked by a key of the object itself: the field's key gets a <key>=<value>
+// segment before it; the object's other keys don't
+func TestReadDocumentParentKeys(t *testing.T) {
+	doc := `datasources:
+- name: a
+  type: prometheus
+  jsonData:
+    httpMethod: POST
+- jsonData:
+    timeout: 5
+  type: loki
+- jsonData:
+    x: no type
+`
+	want := []occurrence{{"a", "datasources.name", true}, {"prometheus", "datasources.type", true},
+		{"POST", "datasources.type=prometheus.jsonData.httpMethod", true},
+		{"5", "datasources.type=loki.jsonData.timeout", false}, {"loki", "datasources.type", true},
+		{"no type", "datasources.jsonData.x", true}}
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readDocument(path, ct.YAML, nil, map[string]string{"jsonData": "type"}); !slices.Equal(got, want) {
 		t.Errorf("got  %v\nwant %v", got, want)
 	}
 }
