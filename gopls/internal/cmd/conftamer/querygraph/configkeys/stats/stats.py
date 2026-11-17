@@ -748,7 +748,9 @@ def main():
                              # The concreteconfig skill's target keys (in scope, given --ignore)
                              "target": searchable_kind(info["kind"]) and not matches_any(fk, transformed),
                              "sd": custom.of(fk) is not None})
-        return pd.DataFrame(rows)
+        # (columns given: a root whose full keys are all ignored has no rows)
+        return pd.DataFrame(rows, columns=["key", "unmarshaler", "kind", "top", "section", "map_key", "in_config",
+                                           "documented", "searchable_kind", "transformed", "target", "sd"])
 
     fkdf = full_key_rows(full, docs)
     if args.full_keys_only:

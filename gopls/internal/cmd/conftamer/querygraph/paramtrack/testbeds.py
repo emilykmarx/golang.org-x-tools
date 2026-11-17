@@ -175,16 +175,20 @@ class Component:
         self.k("patch", self.DEPLOY, "--type", "json", "-p", json.dumps(ops))
         say(f"{self.NAME}: mounted /argmatch-out")
 
-    def set_config_map(self, name, key, config, files):
-        """Sets the ConfigMap's data to the config (as key) and its files (as other keys, binary ones as binaryData),
-        removing earlier runs' keys"""
-        data, binary = {key: open(config).read()}, {}
-        for n in sorted(os.listdir(files)) if files else []:
-            content = open(f"{files}/{n}", "rb").read()
-            try:
-                data[n] = content.decode()
-            except UnicodeDecodeError:
-                binary[n] = base64.b64encode(content).decode()
+    def set_config_map(self, name, configs, files=()):
+        """Sets the ConfigMap's data to the configs (key => config file) and the files in the directories files (as
+        other keys, binary ones as binaryData), removing earlier runs' keys; creates the ConfigMap if there's none"""
+        data, binary = {key: open(config).read() for key, config in configs.items()}, {}
+        for d in filter(None, files):
+            for n in sorted(os.listdir(d)):
+                content = open(f"{d}/{n}", "rb").read()
+                try:
+                    data[n] = content.decode()
+                except UnicodeDecodeError:
+                    binary[n] = base64.b64encode(content).decode()
+        if subprocess.run(["kubectl", "--context", self.CTX, "-n", self.NS, "get", "configmap", name],
+                          capture_output=True, timeout=60).returncode != 0:
+            self.k("create", "configmap", name)
         # (a merge patch sets the keys it names; null removes one)
         have = json.loads(self.k("get", "configmap", name, "-o", "json"))
         patch = {"data": {**{k: None for k in have.get("data") or {}}, **data},
@@ -193,6 +197,30 @@ class Component:
             json.dump(patch, f)
             f.flush()
             self.k("patch", "configmap", name, "--type", "merge", "--patch-file", f.name)
+
+    def container_spec(self):
+        """The deployment's pod spec, and the index of CONTAINER in it"""
+        spec = json.loads(self.k("get", self.DEPLOY, "-o", "json"))["spec"]["template"]["spec"]
+        return spec, next(i for i, c in enumerate(spec["containers"]) if c["name"] == self.CONTAINER)
+
+    def mount_config_map(self, name, path):
+        """Mounts the ConfigMap at path in the container, unless a volume of its name is mounted already"""
+        spec, i = self.container_spec()
+        if any(v["name"] == name for v in spec.get("volumes") or []):
+            return
+        ops = [{"op": "add", "path": "/spec/template/spec/volumes/-", "value": {"name": name, "configMap": {"name": name}}},
+               {"op": "add", "path": f"/spec/template/spec/containers/{i}/volumeMounts/-",
+                "value": {"name": name, "mountPath": path}}]
+        self.k("patch", self.DEPLOY, "--type", "json", "-p", json.dumps(ops))
+        say(f"{self.NAME}: mounted ConfigMap {name} at {path}")
+
+    def set_flag(self, flag, value):
+        """Sets the container's --flag=value argument (replacing any earlier one), or removes it (value None)"""
+        spec, i = self.container_spec()
+        args = [a for a in spec["containers"][i].get("args") or [] if not a.startswith(f"{flag}=")]
+        args += [f"{flag}={value}"] if value is not None else []
+        ops = [{"op": "add", "path": f"/spec/template/spec/containers/{i}/args", "value": args}]
+        self.k("patch", self.DEPLOY, "--type", "json", "-p", json.dumps(ops))
 
     def ready(self):
         """Whether it's ready to take the workload (polled after start)"""
@@ -262,7 +290,7 @@ class PrometheusMeta(Component):
 
     def configure(self):
         super().configure()
-        self.set_config_map("prometheus-meta", "prometheus.yaml", self.config, self.files)
+        self.set_config_map("prometheus-meta", {"prometheus.yaml": self.config}, [self.files])
 
     def ready(self):
         # Through the API server's service proxy (the stock image is distroless: no wget to exec)
@@ -628,7 +656,9 @@ class Alertmanager(Component):
     other keys (so they appear next to it, in /etc/alertmanager/). Stock: shipped-config.yml (the ConfigMap at
     upstream.UPSTREAM_COMMIT with this testbed's patches: patch 0004's route notifies on its latency alert every 10s).
     Prometheus sends it alerts; it notifies the webhook receiver, prombench's amgithubnotifier (which answers 500: it
-    can't reach GitHub). No reload yet."""
+    can't reach GitHub). The web config, if a run has one (upstream's manifest sets none, so shipped has none), is the
+    ConfigMap's web.yml, passed with --web.config.file; its files go in the ConfigMap too. The cluster TLS config
+    isn't installed: clustering is off (modules/alertmanager/ignore-cluster_tls.txt). No reload yet."""
 
     NAME = "alertmanager"
     DOCKERFILE = f"{HERE}/modules/alertmanager/argmatch.Dockerfile"
@@ -642,7 +672,13 @@ class Alertmanager(Component):
         super().configure()
         if self.instrumented:
             self.mount_argmatch_out()
-        self.set_config_map("alertmanager-config", "alertmanager.yml", self.config, self.files)
+        configs = {**self.SHIPPED_CONFIGS, **self.configs}  # (roots the run has no config for: shipped)
+        if "cluster_tls" in configs:
+            raise RuntimeError(f"{self.NAME}: can't install a cluster_tls config (clustering is off)")
+        keys = {"config": "alertmanager.yml", "web": "web.yml"}
+        self.set_config_map("alertmanager-config", {keys[r]: c for r, c in configs.items()},
+                            [self.files_of.get(r) for r in keys])
+        self.set_flag("--web.config.file", "/etc/alertmanager/web.yml" if "web" in configs else None)
 
     def ready(self):
         # (--web.external-url's path, /alertmanager, prefixes its routes)
@@ -655,9 +691,12 @@ class Grafana(Component):
     """Grafana, built from modules/grafana/argmatch.Dockerfile (upstream's v13.1.0, the version contexttrack's Grafana
     patches were made against). Stock, it runs grafana/grafana:13.1.0 in place of the 11.0.0 prombench ships, so that
     stock and instrumented runs are the same version. Its config is prombench's: the deployment's GF_* environment
-    variables and the provisioning ConfigMaps (datasources: prometheus-meta and loki; dashboards); no roots yet
-    (modules/grafana/module.py), so it runs only with that (no concrete configs). The workload's dashboard viewer
-    queries prometheus-meta through it. No reload yet."""
+    variables and the provisioning files, mounted from ConfigMaps under GF_PATHS_PROVISIONING (/opt/grafana-provision):
+    datasources (prometheus-meta and loki) and dashboards (the dashboards ConfigMap's JSON). Each root
+    (modules/grafana/module.py: the provisioning file kinds) is one ConfigMap's file, its files the ConfigMap's other
+    keys; prombench has no plugins or alerting ConfigMap, so a run with those roots creates and mounts one, left empty
+    when a later run has none. Shipped: upstream's datasources and dashboards files (testbeds/prombench/grafana/). The
+    workload's dashboard viewer queries prometheus-meta through it. No reload yet."""
 
     NAME = "grafana"
     DOCKERFILE = f"{HERE}/modules/grafana/argmatch.Dockerfile"
@@ -665,14 +704,26 @@ class Grafana(Component):
     TAG = "grafana-conftamer:13.1.0"
     STOCK_IMAGE = "grafana/grafana:13.1.0"
     NS, DEPLOY, CONTAINER, LABEL = "default", "deploy/grafana-core", "grafana-core", "app=grafana,component=core"
+    SHIPPED_CONFIGS = {"datasources": f"{HERE}/testbeds/prombench/grafana/shipped-datasources.yaml",
+                       "dashboards": f"{HERE}/testbeds/prombench/grafana/shipped-dashboards.yaml"}
+    PROVISIONING = "/opt/grafana-provision"
+    # root => its ConfigMap and the file's key in it (upstream's, for the ConfigMaps prombench has)
+    CONFIG_MAPS = {"datasources": ("grafana-datasource-provision", "prometheus-datasource.yaml"),
+                   "dashboards": ("grafana-dashboard-provision", "prometheus-dashboard.yaml"),
+                   "plugins": ("grafana-plugins-provision", "plugins.yaml"),
+                   "alerting": ("grafana-alerting-provision", "alerting.yaml")}
 
     def configure(self):
-        if self.configs:
-            raise RuntimeError(f"{self.NAME}: no config roots yet (modules/grafana/module.py), so no concrete configs: "
-                               f"{', '.join(sorted(self.configs))}")
         super().configure()
         if self.instrumented:
             self.mount_argmatch_out()
+        configs = {**self.SHIPPED_CONFIGS, **self.configs}  # (roots the run has no config for: shipped, or none)
+        for root, (name, key) in self.CONFIG_MAPS.items():
+            if root in configs:
+                self.set_config_map(name, {key: configs[root]}, [self.files_of.get(root)])
+                self.mount_config_map(name, f"{self.PROVISIONING}/{root}")
+            elif root not in self.SHIPPED_CONFIGS:
+                self.set_config_map(name, {})  # (empty: Grafana provisions nothing of this kind)
 
     def ready(self):
         # (GF_SERVER_SERVE_FROM_SUB_PATH: under /grafana)
@@ -799,6 +850,7 @@ class PrombenchVM:
     FILES = ["modules/caddy/argmatch.Dockerfile", "modules/kube-apiserver/argmatch.Dockerfile",
              "modules/alertmanager/argmatch.Dockerfile", "modules/grafana/argmatch.Dockerfile",
              "testbeds/prombench/alertmanager/shipped-config.yml",
+             "testbeds/prombench/grafana/shipped-datasources.yaml", "testbeds/prombench/grafana/shipped-dashboards.yaml",
              *(f"testbeds/prombench/kube-apiserver/{f}" for f in ("fixtures.py", "ca.crt", "server.crt", "server.key",
                                                                    "jwt.key")),
              "testbeds/prombench/prometheus/shipped-config.yaml", "testbeds/prombench/caddy/shipped-config.json"]

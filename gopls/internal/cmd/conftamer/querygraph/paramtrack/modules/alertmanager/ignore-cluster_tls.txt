@@ -1,0 +1,4 @@
+# Alertmanager's cluster_tls full keys out of scope (stats.py --ignore): all of them. The testbed runs one replica with
+# clustering off (prombench's 5a_alertmanager_deployment.yaml: --cluster.listen-address=), so there are no cluster
+# peers to talk TLS to. One fnmatch pattern per line.
+*

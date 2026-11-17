@@ -1,0 +1,14 @@
+tls_server_config.cert_file	<filename>
+tls_server_config.key_file	<filename>
+tls_server_config.client_auth_type	<string>
+tls_server_config.client_ca_file	<filename>
+tls_server_config.min_version	<string>
+tls_server_config.max_version	<string>
+tls_server_config.cipher_suites	<string>
+tls_server_config.prefer_server_cipher_suites	<bool>
+tls_server_config.curve_preferences	<string>
+tls_client_config.ca_file	<filepath>
+tls_client_config.cert_file	<filepath>
+tls_client_config.key_file	<filepath>
+tls_client_config.server_name	<string>
+tls_client_config.insecure_skip_verify	<boolean>
