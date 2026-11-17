@@ -424,13 +424,21 @@ RECEIVED_LEGEND = [
                    "received message's context IDs that the sent message also has. White = none shared. A request "
                    "and its own response (same context ID, req.Method and req.URL.Path) don't count as sharing it: "
                    "a received request's response, and a received response's request, aren't shown."),
+    ("Orange outline", "Some function on the received message's chains and some function on the sent message's "
+                       "chains both take a channel parameter whose element type has the same named type (argmatch's "
+                       "chans output, matches.chans.csv; named types through pointers, slices, arrays, maps and "
+                       "channels), the received message's function's channel able to send (send-only or "
+                       "bidirectional) and the sent message's able to receive (receive-only or bidirectional). "
+                       "Hatched orange = associated only this way (no shared context ID). See shared_chan_types "
+                       "here, and chan_types and message_chan_types in configkeys/stats/messages/chains.py."),
 ]
 
 
-def load_received(run):
+def load_received(run, chans=None):
     """The received-message matrices' rows and columns: received messages per kind, and sent messages (requests,
     then responses), each ordered by chain group (by_chain_group; the columns' groups numbered over all sent messages,
-    as in load)"""
+    as in load). chans: argmatch's chans output to associate messages by channel types with (default: the run's
+    step 5 matches.chans.csv, if any)"""
     ch = chains.message_chains(run, kinds=tuple(SENT + RECEIVED))
     sent, group_of = by_chain_group(ch, sorted(k for k in ch if k[0] in SENT))
     cols = [k for kind in SENT for k in sent if k[0] == kind]
@@ -438,8 +446,23 @@ def load_received(run):
     for kind in RECEIVED:
         rows[kind] = by_chain_group(ch, sorted(k for k in ch if k[0] == kind))
     ex = chains.message_exchanges(run, kinds=tuple(SENT + RECEIVED))
+    chans = chans or f"{chains.layout.step_dir(run, chains.STEP)}/matches.chans.csv"
+    table = chains.chan_types(chans) if os.path.exists(chans) else {}
     return dict(cols=cols, col_group=group_of, rows=rows, events={k: len(cs) for k, cs in ch.items()},
-                ids={k: {cid for cid, _ in ex.get(k, ())} for k in ch}, exchanges={k: ex.get(k, set()) for k in ch})
+                ids={k: {cid for cid, _ in ex.get(k, ())} for k in ch}, exchanges={k: ex.get(k, set()) for k in ch},
+                chans=chans if table else None, chan_types=chains.message_chan_types(ch, table))
+
+
+def shared_chan_types(d, r, c, directed=True):
+    """The named types that some function on received message r's chains and some function on sent message c's
+    chains both take a channel of (chains.message_chan_types). directed: only where data could flow from r's chains
+    to c's: r's function's channel can send (send-only or bidirectional) and c's can receive (receive-only or
+    bidirectional)"""
+    rt, ct = d["chan_types"][r], d["chan_types"][c]
+    if not directed:
+        return sorted(rt.keys() & ct.keys())
+    return sorted(t for t in rt.keys() & ct.keys()
+                  if any(dr in ("send", "both") for _, dr in rt[t]) and any(dc in ("recv", "both") for _, dc in ct[t]))
 
 
 # A received message's counterpart kind: the sent message of the same exchange (a received request's response, a
@@ -475,6 +498,8 @@ def write_received_html(d, run, path, kind):
            "<style>", CSS,
            # (the column for the row labels: no top-level key column here)
            "th.row{left:0}td.c{border:1px solid var(--grid)}td.c.g{border-left:2px solid var(--text-primary)}"
+           "td.c.ch{box-shadow:inset 0 0 0 2px var(--outline)}"
+           "td.c.cho{background:repeating-linear-gradient(45deg,var(--outline) 0 2px,var(--zero) 2px 5px)!important}"
            "td.c.k{border-left:3px solid var(--text-primary)}tr.sep td,tr.sep th{border-top:2px solid var(--text-primary)}"
            "th.kind{text-align:left;font-size:12px;color:var(--text-primary);padding:2px 4px;border-left:3px solid "
            "var(--text-primary)}",
@@ -484,12 +509,13 @@ def write_received_html(d, run, path, kind):
            "</style></head><body><div class='viz-root'>",
            f"<h1>Received {what} ({kind}) × sent messages</h1><div class='legend'>Run: {esc(run)}<br>"]
     out += [f"<b>{esc(name)}:</b> {esc(text)}<br>" for name, text in legend(RECEIVED_LEGEND, run)]
+    out.append(f"<b>Channel types from:</b> {esc(d['chans'] or 'none (no chans output): no orange outlines')}<br>")
     n = {k: sum(1 for c in cols if c[0] == k) for k in SENT}
     sw = ("<span class='swatch' style='background:var(--zero)'></span>none " +
           "".join(f"<span class='swatch' style='background:{c}'></span>" for c in RAMP[::3]) + " all")
     out.append(f"<b>Key:</b> {sw}<br>{len(rows)} rows; {n['Request sent']} sent requests and {n['Response sent']} sent "
                f"responses.</div>")
-    filled = 0
+    filled = {"context": 0, "chan": 0, "chan only": 0, "chan undirected": 0}
     # Header: a row naming each kind's columns, then the messages, by chain group, with a line before each group's
     # first message (and a heavier one before the responses)
     kind_start = {next(c for c in cols if c[0] == k) for k in SENT if n[k]}
@@ -508,10 +534,18 @@ def write_received_html(d, run, path, kind):
             cls = "c" + (" k" if c in kind_start and j else " g" if c in group_start and j else "")
             shared, own = shared_ids(d, r, c)
             share = len(shared) / len(d["ids"][r]) if d["ids"][r] else 0
-            filled += bool(shared)
+            types = shared_chan_types(d, r, c)
+            filled["context"] += bool(shared)
+            filled["chan"] += bool(types)
+            filled["chan only"] += bool(types) and not shared
+            filled["chan undirected"] += bool(shared_chan_types(d, r, c, directed=False))
+            if types:
+                cls += " ch" + ("" if shared else " cho")
             data = {"r": f"{r[0]}: {r[1]}", "c": f"{c[0]}: {c[1]}", "n": len(shared), "nr": len(d["ids"][r]),
                     "nc": len(d["ids"][c]), "o": own, "x": sorted(shared, key=lambda i: int(i.split(":")[-1])
-                                                        if i.split(":")[-1].isdigit() else 0)[:5]}
+                                                        if i.split(":")[-1].isdigit() else 0)[:5],
+                    "t": [f"{t}: " + " / ".join(", ".join(sorted(f"{chains.short(f)} ({dr})" for f, dr in d["chan_types"][m][t]))
+                                               for m in (r, c)) for t in types]}
             out.append(f"<td class='{cls}' style='background:{ramp_fill(share) if shared else 'var(--zero)'}' "
                        f"tabindex='0' data-t='{esc(json.dumps(data))}'></td>")
         out.append("</tr>")
@@ -523,6 +557,7 @@ add('v',d.n?d.n+' of the received message\'s '+d.nr+' context IDs shared (the se
 :'no context ID shared');if(d.o)add('s',d.o+' more shared only as one exchange\'s request and response (not shown)');
 add('','received: '+d.r);add('','sent: '+d.c);
 if(d.n)add('s','e.g. '+d.x.join(', '));
+if(d.t.length){add('v','channel types shared (received / sent message\'s functions):');d.t.forEach(l=>add('s',l))}
 tip.style.display='block';const r=td.getBoundingClientRect();
 let x=(e&&e.clientX||r.right)+12,y=(e&&e.clientY||r.bottom)+12;
 if(x+tip.offsetWidth>innerWidth)x=innerWidth-tip.offsetWidth-8;if(y+tip.offsetHeight>innerHeight)y-=tip.offsetHeight+24;
@@ -540,16 +575,20 @@ def main():
     ap.add_argument("--run", required=True, help="a paramtrack run: a root's directory, <out>/<module>/<root> (paramtrack's layout.py; a run from before 2026-11-15: its --out) (steps 1-8)")
     ap.add_argument("--out", required=True, help="output prefix: writes <prefix>.md, <prefix>-requests.html and "
                                                  "<prefix>-responses.html")
+    ap.add_argument("--chans", help="with --received: argmatch's chans output to associate messages by channel "
+                                     "types with (default: the run's step 5 matches.chans.csv, if any)")
     ap.add_argument("--received", action="store_true",
                     help="instead, the received-message matrices (received messages x sent messages, cells not "
                          "filled in yet): <prefix>-received-requests.html and <prefix>-received-responses.html")
     a = ap.parse_args()
     if a.received:
-        d = load_received(a.run)
+        d = load_received(a.run, a.chans)
         for kind, what in (("Request received", "requests"), ("Response received", "responses")):
             filled = write_received_html(d, a.run, f"{a.out}-received-{what}.html", kind)
-            print(f"wrote {a.out}-received-{what}.html: {len(d['rows'][kind][0])} rows x {len(d['cols'])} columns, "
-                  f"{filled} cells with a shared context ID")
+            print(f"wrote {a.out}-received-{what}.html: {len(d['rows'][kind][0])} rows x {len(d['cols'])} columns; "
+                  f"cells with a shared context ID {filled['context']}, a shared channel type {filled['chan']} "
+                  f"({filled['chan only']} of them without a shared context ID; {filled['chan undirected']} ignoring "
+                  f"channel direction)")
         return
     d = load(a.run)
     df = cells(d)

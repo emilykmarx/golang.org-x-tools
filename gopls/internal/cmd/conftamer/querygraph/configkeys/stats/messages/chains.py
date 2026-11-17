@@ -23,9 +23,11 @@ Usage: uv run --with pandas --with tabulate python chains.py --run <paramtrack o
 
 import argparse
 import collections
+import csv
 import itertools
 import json
 import os
+import re
 import sys
 
 import pandas as pd
@@ -56,6 +58,40 @@ def chain(ev):
     runtime.goexit, and without join.py's "created by" and "...elided..." entries"""
     return tuple(n for kind, _, _, names in join.chain(ev["stack"], ev.get("ancestry") or "") if kind == "frame"
                  for n in names if n != "runtime.goexit")
+
+
+# A closure's or go statement wrapper's suffix (pkg.F.func1, pkg.F.gowrap2, pkg.F.func1.3): argmatch, like stacklog's
+# parser, names a closure by the function that defines it
+_CLOSURE = re.compile(r"(\.(func|gowrap)\d+(\.\d+)*)+$")
+
+
+def declared(fn):
+    """The function declaration fn's frame is in, as argmatch names it: without a closure's suffix, and without a
+    generic function's or receiver's [...] (argmatch keeps a generic receiver's, but not a generic function's)"""
+    return _CLOSURE.sub("", fn).replace("[...]", "")
+
+
+def chan_types(path):
+    """argmatch's chans output (matches.chans.csv): function (as declared names it) => {named type => the directions
+    (send, recv, both) of its channel parameters with it}, for parameters whose element type has named types"""
+    out = collections.defaultdict(lambda: collections.defaultdict(set))
+    for row in csv.DictReader(open(path)):
+        for t in filter(None, row["named_types"].split(";")):
+            out[row["function"].replace("[...]", "")][t].add(row["direction"])
+    return out
+
+
+def message_chan_types(chains, table):
+    """(kind, message) => {named type => (function, direction) for each function on its chains with a channel
+    parameter of it}, from chains (message_chains) and table (chan_types)"""
+    out = {}
+    for k, cs in chains.items():
+        found = collections.defaultdict(set)
+        for f in {declared(f) for c in cs for f in c}:
+            for t, dirs in table.get(f, {}).items():
+                found[t] |= {(f, d) for d in dirs}
+        out[k] = found
+    return out
 
 
 def short(fn):
