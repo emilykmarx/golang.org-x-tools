@@ -52,10 +52,9 @@ After each applied config, through `cc_vm.py health`:
 
 ## Message labels (constraint 2)
 SKILL.md's constraint 2 says how to check them. On prombench:
-- **The baseline run** is made with `uv run --with pandas --with matplotlib --with tabulate python paramtrack.py
-  --module caddy --out <dir> --config caddy=<shipped config> --until 3`, from paramtrack's directory. The controller
-  alone is instrumented: the skill's runs must instrument the same modules as the baseline. It and each check take
-  about 8 minutes, most of it the 240 s workload (plus a deploy if there's no cluster or it's an older variant).
+- **The baseline run** is the testbed's shared one (paramtrack's README, "Use with /concreteconfig", step 1), and
+  `scripts/check_labels.py` instruments the same modules. With the controller alone instrumented a check took about 8 minutes, most of it the
+  240 s workload (plus a deploy if there's no cluster or it's an older variant).
 - **Labels that depend on timing,** not the config: e.g. requests that arrive while the controller restarts, and
   which Grafana API calls the dashboard viewer happens to make.
 

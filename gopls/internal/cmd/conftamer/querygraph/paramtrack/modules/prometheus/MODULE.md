@@ -2,8 +2,7 @@
 
 - **Checkout:** `/home/emily/projects/config_tracing/prometheus` (same path locally and on the prombench VM; v3.2.1)
 - **Module and root:** `github.com/prometheus/prometheus`, `/config.Config` (paramtrack's defaults).
-- **Ignore file:** `ignore.txt` next to this file (paramtrack's
-  default `--ignore`): Most keys involving Prometheus' service discovery (i.e. 53 `<parent>.<sd>_configs.*` keys, where `<sd>` is a name registered via Prometheus' `Name()` e.g. `kubernetes`), except `kubernetes_sd_configs` under `scrape_configs` and `alerting.alertmanagers`, and `dns_sd_configs`,
+- **Ignore file:** `ignore.txt` next to this file: Most keys involving Prometheus' service discovery (i.e. 53 `<parent>.<sd>_configs.*` keys, where `<sd>` is a name registered via Prometheus' `Name()` e.g. `kubernetes`), except `kubernetes_sd_configs` under `scrape_configs` and `alerting.alertmanagers`, and `dns_sd_configs`,
   `file_sd_configs` and `static_configs` under `scrape_configs`.
 - **File helpers:** `prom_files.py` here writes the contents of Prometheus-specific files: a Google service account
   key file (`remote_write`'s `google_iam.credentials_file`) and a kubeconfig (`kubernetes_sd_configs`'

@@ -20,7 +20,7 @@ these user-written inputs:
   | plugins | `plugins/config_reader.go` | `pluginsAsConfigV0`, the only version (snake_case `org_id`, as documented), mapped to `pluginsAsConfig` | `plugins_keys.txt` |
   | alerting | `alerting/config_reader.go` | `AlertingFileV1` (`.yaml`, `.yml` or `.json` files, all through `yaml.Unmarshal`) | `alerting_keys.txt` |
 
-  The type names are from a quick read of the readers. Check them before using them as `ROOTS`. The testbed provisions
+  The type names are from a quick read of the readers. Check them before using them as `CONFIG_SOURCES`. The testbed provisions
   2 datasources (`prometheus`, `loki`) and 1 dashboard provider (`type: file`).
 - **grafana.ini (INI): out of scope for now** (the researcher's decision, 2026-11-16). `setting.(*Cfg).Load` loads it
   in `loadConfiguration` (`pkg/setting/setting.go:1313`), in this order:

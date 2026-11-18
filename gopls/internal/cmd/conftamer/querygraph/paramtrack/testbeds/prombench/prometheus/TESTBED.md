@@ -63,11 +63,9 @@ After each applied config, for a minute or so, through `kubectl exec ... wget -q
 
 ## Message labels (constraint 2)
 SKILL.md's constraint 2 says how to check them. On prombench:
-- **The baseline run** is made with `uv run --with pandas --with matplotlib --with tabulate python paramtrack.py
-  --module prometheus --out <dir> --config config=<shipped config> --until 3`, from paramtrack's directory (plain
-  `python3` fails at import; `scripts/check_labels.py` needs the same packages). Prometheus alone is instrumented:
-  the skill's runs must instrument the same modules as the baseline. Behind ingress-nginx (until 2026-11-15) it and
-  each check took about 6 minutes, most of it the 240 s workload; behind Caddy's controller it hasn't been timed yet.
+- **The baseline run** is the testbed's shared one (paramtrack's README, "Use with /concreteconfig", step 1), and
+  `scripts/check_labels.py` instruments the same modules. With Prometheus alone instrumented behind ingress-nginx (until 2026-11-15) a check
+  took about 6 minutes, most of it the 240 s workload.
 - **Labels that depend on timing,** not the config: e.g. `/-/ready` answering 503 while Prometheus starts.
 
 paramtrack's testbed leaves the ConfigMap set to the config it ran, and prometheus-meta running the instrumented

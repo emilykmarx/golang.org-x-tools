@@ -4,7 +4,7 @@ Everything paramtrack's workflow needs that is specific to Prometheus is here or
 
 ## Files here
 - [module.py](module.py): the settings paramtrack and stats.py read, and the hooks they call. [../\_\_init\_\_.py](__init__.py) describes each one.
-- [ignore.txt](ignore.txt) and [transformed.txt](transformed.txt): the `ignore` and `transformed` files of `module.py`'s `ROOTS["config"]` (the full keys out of scope, and those stored transformed; [../README.md](../README.md) describes both settings). Each file's comments give its reasons.
+- [ignore.txt](ignore.txt) and [transformed.txt](transformed.txt): the `ignore` and `transformed` files of `module.py`'s `CONFIG_SOURCES["config"]` (the full keys out of scope, and those stored transformed; [../README.md](../README.md) describes both settings). Each file's comments give its reasons.
 - [MODULE.md](MODULE.md) and [prom_files.py](prom_files.py): the concreteconfig skill's guidance and file helpers for this module.
 
 ## Decisions

@@ -1,0 +1,11 @@
+# Grafana's alerting full keys out of scope (stats.py --ignore): contact point integrations the testbed can't use.
+# email (SMTP, which grafana.ini configures: out of scope, and off in prombench) and mqtt (MQTT) aren't HTTP, and
+# contexttrack logs HTTP messages only. line, pushover, telegram and threema post to fixed third-party endpoints
+# (grafana/alerting's receivers/<type>/v1 APIURL), with no setting to point them elsewhere and no per-integration
+# proxy. Every other integration has a URL setting that can point inside the cluster. One fnmatch pattern per line.
+contactPoints.receivers.type=email.*
+contactPoints.receivers.type=mqtt.*
+contactPoints.receivers.type=line.*
+contactPoints.receivers.type=pushover.*
+contactPoints.receivers.type=telegram.*
+contactPoints.receivers.type=threema.*

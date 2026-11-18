@@ -58,11 +58,30 @@ RUN_ID = time.strftime("%Y%m%dT%H%M%S")
 
 class Component:
     """A module in prombench (its paramtrack module name: NAME), as one deployment. Instrumented if given configs (one
-    per config root of its module.py's ROOTS the run covers): built from DOCKERFILE under argmatch and contexttrack (the
+    per config root of its module.py's CONFIG_SOURCES the run covers): built from DOCKERFILE under argmatch and contexttrack (the
     checkout SRC, relative to $CT or absolute, is in the build context), run as TAG with CONFTAMER_EVENTS and
     argmatch's output in /argmatch-out/<NAME>/ (the host's upstream.ARGMATCH_OUT/<NAME>), and with the configs; given
     none ({}), with its shipped configs (SHIPPED_CONFIGS: e.g. a baseline run's). Otherwise stock: STOCK_IMAGE, with the
-    shipped configs. Its files go to <out_dir>/<NAME>/."""
+    shipped configs. Its files go to <out_dir>/<NAME>/.
+
+    To add a module to the testbed, subclass this and add the class to COMPONENTS (its order is the start order; the
+    API server's comes first). The subclass sets:
+    - NAME: the module's directory under modules/ (and its --module name);
+    - DOCKERFILE (usually modules/<NAME>/argmatch.Dockerfile, built FROM the builder image and the stock image, from
+      $CT), SRC (the checkout, relative to $CT), TAG, STOCK_IMAGE, and BUILD_ARGS / BUILD_CONTEXTS if it needs them;
+    - NS, DEPLOY, CONTAINER, LABEL: where it runs (a deployment, unless it overrides stop and start, as KubeAPIServer);
+    - SHIPPED_CONFIGS: root => the testbed's own config file, under testbeds/prombench/<NAME>/, for each root the
+      testbed ships a config for.
+    And overrides:
+    - configure (required): super().configure(), then mount_argmatch_out() if instrumented (unless the deployment
+      already mounts /argmatch-out), then install every root's config, the shipped one where the run has none
+      ({**SHIPPED_CONFIGS, **self.configs}), with its files (self.files_of): set_config_map, mount_config_map, set_flag.
+      It runs for stock runs too, so it must also undo what an instrumented run installed (e.g. a flag);
+    - ready (required): whether it can take the workload;
+    - reload: what a config reload is for the module (instrumented only), so the code that runs on one runs;
+    - if needed: apply_config (a config loaded after start, e.g. through an admin API), workload (traffic of its own),
+      check_capture (the config is still the concrete one), finish_reload (a reload running in the background).
+    testbeds/prombench/README.md lists each module's class and deployment."""
 
     NAME = DOCKERFILE = SRC = TAG = STOCK_IMAGE = NS = DEPLOY = CONTAINER = LABEL = None
     SHIPPED_CONFIGS = {}  # The testbed's own config for each config root it sets: root => file under HERE
@@ -679,7 +698,7 @@ class Alertmanager(Component):
     Prometheus sends it alerts; it notifies the webhook receiver, prombench's amgithubnotifier (which answers 500: it
     can't reach GitHub). The web config, if a run has one (upstream's manifest sets none, so shipped has none), is the
     ConfigMap's web.yml, passed with --web.config.file; its files go in the ConfigMap too. The cluster TLS config
-    isn't installed: clustering is off (modules/alertmanager/ignore-cluster_tls.txt). No reload yet."""
+    isn't installed: clustering is off (modules/alertmanager/ignore-cluster_tls.txt). The reload: POST /-/reload."""
 
     NAME = "alertmanager"
     DOCKERFILE = f"{HERE}/modules/alertmanager/argmatch.Dockerfile"
@@ -707,6 +726,13 @@ class Alertmanager(Component):
                "/api/v1/namespaces/default/services/alertmanager:am-web/proxy/alertmanager/-/ready"]
         return subprocess.run(cmd, capture_output=True, timeout=60).returncode == 0
 
+    def reload(self):
+        """POST /-/reload: rereads the config file (the web config is reread on every request anyway)"""
+        p = self.exec("wget", "-qO-", "--post-data=", "localhost:9093/alertmanager/-/reload", timeout=120)
+        open(f"{self.out}/reload.log", "w").write(f"exit {p.returncode}\n{p.stdout}{p.stderr}")
+        say(f"{self.NAME}: config reloaded" if p.returncode == 0 else
+            f"{self.NAME}: config reload failed; see {self.out}/reload.log")
+
 
 class Grafana(Component):
     """Grafana, built from modules/grafana/argmatch.Dockerfile (upstream's v13.1.0, the version contexttrack's Grafana
@@ -717,7 +743,7 @@ class Grafana(Component):
     (modules/grafana/module.py: the provisioning file kinds) is one ConfigMap's file, its files the ConfigMap's other
     keys; prombench has no plugins or alerting ConfigMap, so a run with those roots creates and mounts one, left empty
     when a later run has none. Shipped: upstream's datasources and dashboards files (testbeds/prombench/grafana/). The
-    workload's dashboard viewer queries prometheus-meta through it. No reload yet."""
+    workload's dashboard viewer queries prometheus-meta through it. The reload: the admin API's provisioning reload."""
 
     NAME = "grafana"
     DOCKERFILE = f"{HERE}/modules/grafana/argmatch.Dockerfile"
@@ -734,10 +760,16 @@ class Grafana(Component):
                    "plugins": ("grafana-plugins-provision", "plugins.yaml"),
                    "alerting": ("grafana-alerting-provision", "alerting.yaml")}
 
+    # The app plugins Grafana 13.1.0 preinstalls by default (its built-in preinstall list, installed from grafana.com in
+    # the background at startup), installed before startup instead: else a slow startup (an instrumented run 2) can
+    # provision a plugins config naming them before they're installed ("plugin not installed"; 2026-11-17)
+    PREINSTALL_SYNC = "grafana-exploretraces-app,grafana-lokiexplore-app,grafana-metricsdrilldown-app,grafana-pyroscope-app"
+
     def configure(self):
         super().configure()
         if self.instrumented:
             self.mount_argmatch_out()
+        self.k("set", "env", self.DEPLOY, "-c", self.CONTAINER, f"GF_PLUGINS_PREINSTALL_SYNC={self.PREINSTALL_SYNC}")
         configs = {**self.SHIPPED_CONFIGS, **self.configs}  # (roots the run has no config for: shipped, or none)
         for root, (name, key) in self.CONFIG_MAPS.items():
             if root in configs:
@@ -751,6 +783,19 @@ class Grafana(Component):
         cmd = ["kubectl", "--context", self.CTX, "get", "--raw",
                "/api/v1/namespaces/default/services/grafana:grafana-web/proxy/grafana/api/health"]
         return subprocess.run(cmd, capture_output=True, timeout=60).returncode == 0
+
+    def reload(self):
+        """The admin API's provisioning reload (POST /api/admin/provisioning/<root>/reload) for each root the run has a
+        config for, as the admin (whose password is the container's GF_SECURITY_ADMIN_PASSWORD)"""
+        log, ok = [], True
+        for root in sorted(self.configs):
+            url = f"http://admin:$GF_SECURITY_ADMIN_PASSWORD@localhost:3000/grafana/api/admin/provisioning/{root}/reload"
+            p = self.exec("sh", "-c", f'wget -qO- --post-data= "{url}"', timeout=300)
+            log.append(f"{root}: exit {p.returncode}\n{p.stdout}{p.stderr}")
+            ok = ok and p.returncode == 0
+        open(f"{self.out}/reload.log", "w").write("\n".join(log) + "\n")
+        say(f"{self.NAME}: provisioning reloaded: {', '.join(sorted(self.configs))}" if ok else
+            f"{self.NAME}: provisioning reload failed; see {self.out}/reload.log")
 
 
 # The modules prombench runs, by paramtrack module name (modules/<name>/), in the order they start (and stop in reverse):

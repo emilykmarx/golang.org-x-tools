@@ -13,7 +13,7 @@ Alertmanager differs.
   validation, `Secret`, `URL`, `Regexp`, `Matchers`, time intervals), and `HTTPClientConfig`/`TLSConfig` come from
   `github.com/prometheus/common/config` v0.46.0, `SigV4Config` from `common/sigv4` v0.1.0.
   This is the list the workflow should use: `alertmanager_config_keys.txt`, root `config.Config`.
-- Other inputs. The first two are roots too (`../module.py`; `--cluster.tls-config`'s keys are all in its ignore
+- Other inputs. The first two are config sources too (`../module.py`; `--cluster.tls-config`'s keys are all in its ignore
   file, `../ignore-cluster_tls.txt`, since the testbed runs without clustering):
   - `--web.config.file`: YAML, exporter-toolkit v0.11.0 `web.Config`, also `yaml.UnmarshalStrict` (yaml.v2), read on
     every HTTP request. Documented in `docs/https.md` -> `web_config_keys.txt`.
@@ -79,7 +79,7 @@ It exits non-zero if a section has more than one candidate code block or a key i
   structured entries, so no key has a `<placeholder>` segment.
 - **Shared blocks are expanded at every place:** `<http_config>` (36 keys, including `oauth2` and two `tls_config`s)
   under `global` and 11 receiver types: 432 of the 657 keys. `<tls_config>` (7 keys) appears 25 times.
-- **https.md lists both files' `tls_server_config` in full**; they're separate roots, so the keys aren't merged.
+- **https.md lists both files' `tls_server_config` in full**; they're separate config sources, so the keys aren't merged.
 
 ## Types
 Not normalized; the docs' own spelling (`<bool>` and `<boolean>` both occur). Classification for the workflow

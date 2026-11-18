@@ -16,7 +16,7 @@ FORMAT = "json"
 # The six versioned config files in scope, each named by its own flag: the type each file's loader decodes into
 # (documentedkeys/README.md, "The six files in scope")
 _V = "k8s.io/apiserver/pkg/apis/apiserver"
-ROOTS = {
+CONFIG_SOURCES = {
     "authentication": {"root": f"{_V}/v1beta1.AuthenticationConfiguration",  # --authentication-config
                        "docs": f"{DOCS}/authentication_config_keys.txt"},
     "authorization": {"root": f"{_V}/v1beta1.AuthorizationConfiguration",  # --authorization-config

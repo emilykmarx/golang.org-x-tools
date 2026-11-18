@@ -3,7 +3,7 @@
   - The source code should be checked out to the same tag the testbed will run
 - `FORMAT`: yaml or json
 - `GOLITS_PACKAGE`, `GOLITS_TAGS`: entrypoint package and build tags
-- `ROOTS`: One entry per config source of interest
+- `CONFIG_SOURCES`: One entry per config source of interest
   - Key: name of the source (often just `config` if the module only has one of interest)
   - Values: `root`, `docs`, `ignore`, `transformed` (below)
 
@@ -17,16 +17,21 @@
 - `ignore` (optional): A list of keys the testbed is unlikely to be able to use
   - E.g. in Prometheus, we choose to ignore many of the service discovery keys
   - Generated for each module on an ad hoc basis
-  - Interaction with `argmatch`: The /concreteconfig skill does not typically set these (since they are not "target" - see [TERMINOLOGY](../configkeys/stats/TERMINOLOGY.md)), so `argmatch` will typically not search them.
-    - But, the skill may e.g. if it finds that it must in order for the config to be valid. In this case, `argmatch` still searches for the corresponding value if it is a searchable kind, and the final step before the statistics still outputs those matches.
 - `transformed` (optional): A list of keys whose values are likely to have different contents in memory than in the config file
   - E.g. Prometheus parses `*.proxy_url` and `*.api_server` URLs into scheme, host, etc, which are stored as separate fields in `config.URL` - see [modules/prometheus/transformed.txt](modules/prometheus/transformed.txt)
   - Generated for each module on an ad hoc basis
-  - Interaction with `argmatch`: Still searches for these keys' values, in case we're wrong.
 - `META_TYPES` (optional, default {}): Go type => reason, for types whose keys the graph finds because of how the
-  module structures its types, but which aren't config (e.g. Kubernetes' metav1.TypeMeta: apiVersion, kind). A full
-  key is a meta key if every Unmarshaler Path to it passes through one (stats.meta_keys); meta keys are out of scope
-  like --ignore's (no target keys, no statistics), except in stats.py's Q4, which counts them separately
+  module structures its types, but which aren't config (e.g. Kubernetes' metav1.TypeMeta: apiVersion, kind).
+    - A full key is a meta key if every Unmarshaler Path to it passes through one (stats.meta_keys)
+    - Meta keys are treated like keys in the `ignore` list, except that stats.py's Q4 counts them separately
+
+### Role of scope in argmatch
+- argmatch only searches keys with all of these properties:
+  - Reachable from the `root`
+  - Not in `ignore`
+  - Not a meta key
+- (`transformed` keys are still searched, in case we're wrong)
+- (ambiguous keys are still searched in case we want to use their matches somehow, but we currently don't)
 
 ## Custom unmarshaling
 - `CustomKeys(module_dir)`: the keys custom unmarshalers pick (resolved in the graph by extra_graph's edges), for

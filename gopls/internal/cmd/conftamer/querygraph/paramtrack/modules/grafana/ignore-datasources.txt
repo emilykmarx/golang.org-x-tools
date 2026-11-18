@@ -1,0 +1,10 @@
+# Grafana's datasources full keys out of scope (stats.py --ignore): datasource types the testbed can't use. The SQL
+# datasources (mysql, mssql, grafana-postgresql-datasource) speak their databases' protocols, not HTTP, and
+# contexttrack logs HTTP messages only. Azure Monitor gets tokens from and queries Microsoft's endpoints for its cloud;
+# custom clouds come from grafana.ini (out of scope). In scope, with care (MODULE.md): cloudwatch (jsonData.endpoint,
+# proxyUrl) and stackdriver (jsonData.universeDomain; the gce auth type uses the metadata server). One fnmatch pattern
+# per line.
+datasources.type=mysql.*
+datasources.type=mssql.*
+datasources.type=grafana-postgresql-datasource.*
+datasources.type=grafana-azure-monitor-datasource.*

@@ -22,12 +22,24 @@ _P = "/pkg/services/provisioning"
 # (Each reader first decodes configVersion for apiVersion, then the versioned type; the lists have v1 keys only.)
 # datasources' docs: the list with type=<plugin> segments, as the graph's keys have them (extra_graph); the list without
 # them is datasources_keys.txt (datasources_collapsed.tsv lists the keys it collapses)
-ROOTS = {
-    "datasources": {"root": f"{_P}/datasources.configsV1", "docs": f"{HERE}/documentedkeys/datasources_keys_by_type.txt"},
+CONFIG_SOURCES = {
+    "datasources": {"root": f"{_P}/datasources.configsV1", "docs": f"{HERE}/documentedkeys/datasources_keys_by_type.txt",
+                   "ignore": f"{HERE}/ignore-datasources.txt"},
     "dashboards": {"root": f"{_P}/dashboards.configV1", "docs": f"{HERE}/documentedkeys/dashboards_keys.txt"},
     "plugins": {"root": f"{_P}/plugins.pluginsAsConfigV0", "docs": f"{HERE}/documentedkeys/plugins_keys.txt"},
-    "alerting": {"root": f"{_P}/alerting.AlertingFileV1", "docs": f"{HERE}/documentedkeys/alerting_keys.txt"},
+    "alerting": {"root": f"{_P}/alerting.AlertingFileV1", "docs": f"{HERE}/documentedkeys/alerting_keys.txt",
+                "ignore": f"{HERE}/ignore-alerting.txt"},
 }
+# argmatch's search caps per call (over testbeds.py's ARGMATCH_ARGS, which has none), as Caddy's: without them, run 2
+# of 2026-11-17 (with the concrete configs) searched 277 MB in one MultiOrgAlertmanager.LoadAndSyncAlertmanagersForOrgs
+# call (34 s) and 46 MB per SQLStore.WithDbSession call (6 s), and Grafana exited at startup ("multiorg alertmanager
+# manager failed to warm up: context deadline exceeded"). With them alone, the next run 2 still spent 653 s searching in
+# 4.6 min of startup (98 functions, most at MAXCALLS' 30 checks of ~2 s), and provisioning ran before alerting had
+# written the org's default Alertmanager config ("contact points: [alerting.notification.configMissing]"). CALLINTERVAL
+# spreads each function's checked calls over the run instead of the startup (user's choice, 2026-11-17). With it, the
+# restarted container was still provisioning alert rules after 8.5 min (649 s of search, ~130 functions at ~2 s per
+# check), past testbeds.py's READY_WITHIN: MAXTIME 0.3s (user's choice, 2026-11-17).
+ARGMATCH_ARGS = {"MAXTIME": "0.3s", "MAXMEM": "1GB", "CALLINTERVAL": "10s"}
 GOLITS_PACKAGE = "./pkg/cmd/grafana"
 GOLITS_TAGS = "oss"  # (argmatch.Dockerfile's build)
 TITLE = "Grafana, roots: its four provisioning file kinds"

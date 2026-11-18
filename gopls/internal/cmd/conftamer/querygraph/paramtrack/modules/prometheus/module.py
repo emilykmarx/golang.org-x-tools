@@ -12,7 +12,7 @@ CT = "/home/emily/projects/config_tracing"
 GO_MODULE = "github.com/prometheus/prometheus"
 MODULE_DIR = f"{CT}/prometheus"
 FORMAT = "yaml"
-ROOTS = {"config": {"root": "/config.Config", "docs": f"{HERE}/documentedkeys/prometheus_config_keys.txt",
+CONFIG_SOURCES = {"config": {"root": "/config.Config", "docs": f"{HERE}/documentedkeys/prometheus_config_keys.txt",
                     "ignore": f"{HERE}/ignore.txt", "transformed": f"{HERE}/transformed.txt"}}
 GOLITS_PACKAGE = "./cmd/prometheus"
 GOLITS_TAGS = "netgo,builtinassets,stringlabels"  # Prometheus' build tags (.promu.yml)

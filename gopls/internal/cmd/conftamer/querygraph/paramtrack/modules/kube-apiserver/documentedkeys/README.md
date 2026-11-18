@@ -202,4 +202,4 @@ has a map. As the workflow would classify them:
   tags of the same-named struct in v1.31.1 (`apiserver/pkg/apis/{apiserver/{v1,v1beta1,v1alpha1},audit/v1}`,
   `component-base/tracing/api/v1`). It found **no differences**, so the release-1.31 pages match v1.31.1 for
   these types.
-- The output was checked by eye against the pages for all six roots.
+- The output was checked by eye against the pages for all six config sources.

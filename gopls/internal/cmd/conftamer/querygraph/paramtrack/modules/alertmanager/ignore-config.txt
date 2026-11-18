@@ -1,0 +1,8 @@
+# Alertmanager's config full keys out of scope (stats.py --ignore): those the testbed can't use. Email notifications go
+# over SMTP (net/smtp), and contexttrack logs HTTP messages only, so no message carries them. Every other integration
+# can send inside the cluster: through a URL key pointed at an in-cluster address, or, for the fixed endpoints
+# (pushover; pagerduty's service_key, which posts to the v1 API), through http_config.proxy_url pointed at an
+# in-cluster address that refuses connections (contexttrack logs "Request sent" before the dial). One fnmatch pattern
+# per line.
+receivers.email_configs.*
+global.smtp_*

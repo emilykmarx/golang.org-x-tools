@@ -16,13 +16,20 @@ MODULE_DIR = f"{CT}/alertmanager-paramtrack"
 FORMAT = "yaml"
 # The YAML files Alertmanager reads, each named by its own flag (documentedkeys/README.md)
 _DOCS = f"{HERE}/documentedkeys"
-ROOTS = {
-    "config": {"root": "/config.Config", "docs": f"{_DOCS}/alertmanager_config_keys.txt"},  # --config.file
+CONFIG_SOURCES = {
+    "config": {"root": "/config.Config", "docs": f"{_DOCS}/alertmanager_config_keys.txt",  # --config.file
+               "ignore": f"{HERE}/ignore-config.txt", "transformed": f"{HERE}/transformed-config.txt"},
     "web": {"root": "github.com/prometheus/exporter-toolkit/web.Config",  # --web.config.file
             "docs": f"{_DOCS}/web_config_keys.txt", "ignore": f"{HERE}/ignore-web.txt"},
     "cluster_tls": {"root": "/cluster.TLSTransportConfig",  # --cluster.tls-config
                     "docs": f"{_DOCS}/cluster_tls_config_keys.txt", "ignore": f"{HERE}/ignore-cluster_tls.txt"},
 }
+# argmatch's search caps per call (over testbeds.py's ARGMATCH_ARGS, which has none), Grafana's (its module.py says
+# why): without them, run 2 of 2026-11-17 (the concrete configs) spent 2876 s searching in 5 min, ~30-35 s per check
+# of the msteams/discord/pushover/slack notifiers and 5-9 s in the routing and dispatch stages, so notifications
+# stalled (1-5 attempts a minute vs run 1's ~1260) and run 2 lost 11 of run 1's labels (sends and the shipped
+# webhook's /hook response) (user's choice, 2026-11-17)
+ARGMATCH_ARGS = {"MAXTIME": "0.3s", "MAXMEM": "1GB", "CALLINTERVAL": "10s"}
 GOLITS_PACKAGE = "./cmd/alertmanager"
 GOLITS_TAGS = "netgo"  # (.promu.yml)
 TITLE = "Alertmanager, roots: its three YAML config files"
@@ -32,7 +39,7 @@ def extra_graph(module_dir, out_path):
     """Write gopls conftamer's -extra file: the web root, exporter-toolkit's web.Config (gopls conftamer finds roots
     among the module's own tagged types only)"""
     with open(out_path, "w") as f:
-        json.dump({"roots": [ROOTS["web"]["root"]], "edges": []}, f, indent=2)
+        json.dump({"roots": [CONFIG_SOURCES["web"]["root"]], "edges": []}, f, indent=2)
 
 
 class CustomKeys:

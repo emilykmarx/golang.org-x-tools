@@ -48,7 +48,7 @@ class Module:
 
 
 class Target:
-    """One root of a module's config (module.py's ROOTS) that the run maps messages to, with its own concrete config
+    """One root of a module's config (module.py's CONFIG_SOURCES) that the run maps messages to, with its own concrete config
     (and files), docs, ignore and transformed files (README.md, "Several roots"). Its directory, <out>/<module>/<root>,
     has the steps run per target (PER_TARGET); the module's steps are in its parent (layout.py)"""
 
@@ -323,12 +323,15 @@ class Workflow:
         """Run 2: argmatch instruments the functions in run 1's chains and searches for the values; contexttrack
         records the messages to label. The testbed run's files go to tb, each module's (matches, events) to its
         directory in ds"""
+        # (A module with no --config, on its shipped configs, has no values to search: it runs as in run 1, so the
+        # testbed behaves as in run 1 and the baseline; its events are kept, but it gets no later steps)
         specs = {m.name: {**self.testbed_config(m), "stacklog": m.file("3-chains", "stacklog.txt"),
-                          "matchfile": self.matchfile(m, d)} for m, d in zip(self.mods, ds)}
+                          "matchfile": self.matchfile(m, d)} if m.targets else self.testbed_config(m)
+                 for m, d in zip(self.mods, ds)}
         self.testbed(tb).run(tb, specs)
         for m, d in zip(self.mods, ds):
             self.module_outputs(tb, m, d)
-            if os.path.getsize(f"{d}/matches.calls.csv") == 0:
+            if m.targets and os.path.getsize(f"{d}/matches.calls.csv") == 0:
                 raise RuntimeError(f"argmatch found no matches in {m.name}; see {tb}/{m.name}")
 
     def label_values(self, m, d):
@@ -458,10 +461,10 @@ class Workflow:
                     for m in self.mods for t in m.targets]
         if step in layout.TESTBED_STEPS:
             return [((), [f"{self.out}/testbed/{step}"] + [f"{m.dir}/{step}" for m in self.mods], step)]
-        # (A module with no --config, run with its shipped configs, skips step 1: the steps up to run 1 don't use its
-        # graph, and a module not onboarded yet has no ROOTS)
+        # (A module with no --config, run with its shipped configs, skips step 1, whose graph only targets use (and a
+        # module not onboarded yet has no CONFIG_SOURCES), and step 6, as run 2 searched nothing in it)
         return [((m,), [f"{m.dir}/{step}"], f"{step} ({m.name})") for m in self.mods
-                if m.targets or step != "1-unmarshaler-graph"]
+                if m.targets or step not in ("1-unmarshaler-graph", "6-label-values")]
 
     def run(self):
         os.makedirs(self.out, exist_ok=True)
@@ -523,16 +526,16 @@ class Workflow:
 
 
 def targets(a, mods):
-    """The run's targets, in each module's targets: the roots of its ROOTS that --config names
+    """The run's targets, in each module's targets: the roots of its CONFIG_SOURCES that --config names
     ([<module>:]<root>=<path>; the module is needed only if several of the run's modules have the root)"""
     def split(values, flag):
         named = {}
         for v in values:
             name, sep, path = v.partition("=")
             mname, _, root = name.rpartition(":")
-            ms = [m for m in mods if root in m.mod.ROOTS and mname in ("", m.name, m.go)]
+            ms = [m for m in mods if root in m.mod.CONFIG_SOURCES and mname in ("", m.name, m.go)]
             if not sep or len(ms) != 1:
-                roots = ", ".join(f"{m.name}:{r}" for m in mods for r in m.mod.ROOTS)
+                roots = ", ".join(f"{m.name}:{r}" for m in mods for r in m.mod.CONFIG_SOURCES)
                 sys.exit(f"{flag} {v}: give [<module>:]<root>=<path>, for a root of one of the run's modules "
                          f"({roots})" + (f"; several have root {root}: name the module" if len(ms) > 1 else ""))
             if (ms[0], root) in named:
@@ -545,25 +548,26 @@ def targets(a, mods):
         sys.exit("--config-files for roots with no --config: " +
                  ", ".join(sorted(f"{m.name}:{r}" for m, r in set(files) - set(configs))))
     for (m, name), config in configs.items():
-        r = m.mod.ROOTS[name]
+        r = m.mod.CONFIG_SOURCES[name]
         m.targets.append(Target(m, name, r["root"], r["docs"], r.get("ignore", ""), r.get("transformed", ""), config,
                                 files.get((m, name))))
     # A module with no --config runs with the testbed's shipped configs (testbeds.py's SHIPPED_CONFIGS), e.g. in a
-    # baseline run: only through run 1, as the later steps need concrete configs
-    shipped = [m.name for m in mods if not m.targets]
+    # baseline run. The steps after run 1 need concrete configs, so they run only for the modules with a --config; the
+    # others stay instrumented as in run 1 (e.g. a full run resuming a concreteconfig check, whose run 1 had the same
+    # modules). With no --config at all, only through run 1.
     last = Workflow.STEPS.index("3-chains")
-    if shipped and (not a.until or Workflow.step_index(a.until) > last
-                    or any(Workflow.step_index(s) > last for s in a.only)):
-        sys.exit(f"modules with no --config ({', '.join(shipped)}) run with their shipped configs, which only runs "
-                 f"through step {Workflow.STEPS[last]}: give --until {Workflow.STEPS[last]} or earlier (and no later "
-                 f"--only), or a --config for one or more of their roots")
+    if not any(m.targets for m in mods) and (not a.until or Workflow.step_index(a.until) > last
+                                             or any(Workflow.step_index(s) > last for s in a.only)):
+        sys.exit(f"no --config: every module runs with its shipped configs, which only runs through step "
+                 f"{Workflow.STEPS[last]}: give --until {Workflow.STEPS[last]} or earlier (and no later --only), or a "
+                 f"--config for one or more modules' config sources")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True, help="Directory for every step's output (layout.py)")
     ap.add_argument("--config", action="append", default=[], metavar="[MODULE:]ROOT=PATH",
-                    help="Concrete config for a root of a module (its module.py's ROOTS), e.g. the /concreteconfig "
+                    help="Concrete config for a root of a module (its module.py's CONFIG_SOURCES), e.g. the /concreteconfig "
                          "skill's config.yaml (README.md, \"Use with /concreteconfig\"); once per root the run covers. "
                          "MODULE is needed only if several of the run's modules have the root. A module with none runs "
                          "with the testbed's shipped configs (a baseline run; needs --until chains or earlier)")
