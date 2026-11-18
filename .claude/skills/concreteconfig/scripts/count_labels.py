@@ -10,7 +10,11 @@ pattern): that depends on the workload's timing as much as on the config. Labels
 NORMALIZE: e.g. pod names end in `-<pod>`, since they change with every restart). Compare runs of the same length and
 workload: a shorter run can miss labels for that reason alone.
 
+With --varying, it instead lists the labels that some of the given runs have and others don't (each with the runs
+that have it, numbered in the order given): for repeated runs of the same configs, the labels that depend on timing.
+
 Usage: count_labels.py <events.jsonl> [<events.jsonl> ...] [--baseline <events.jsonl>] [--list]
+       count_labels.py <events.jsonl> <events.jsonl> [...] --varying
 --list prints every label (the union's, and the baseline's), sorted, besides the counts and the differences.
 Exits 0 if no baseline label is missing, 1 if one is, and 2 if it couldn't count (an error reading the events, or
 bad arguments).
@@ -40,7 +44,18 @@ def main():
     ap.add_argument("events", nargs="+")
     ap.add_argument("--baseline")
     ap.add_argument("--list", action="store_true", help="print every label, not just counts and differences")
+    ap.add_argument("--varying", action="store_true", help="list the labels not in every one of the runs")
     a = ap.parse_args()
+    if a.varying:
+        sets = [labels(e) for e in a.events]
+        every, some = set.intersection(*sets), set.union(*sets)
+        for i, e in enumerate(a.events, 1):
+            print(f"run {i}: {e}: {len(sets[i - 1])} labels")
+        print(f"{len(some)} distinct labels in all; {len(every)} in every run; {len(some - every)} in only some:")
+        for kind, label in sorted(some - every, key=lambda kl: (kl[1], kl[0])):
+            runs = ",".join(str(i) for i, s in enumerate(sets, 1) if (kind, label) in s)
+            print(f"  runs {runs}: {kind} {label}")
+        return
     have = set().union(*(labels(e) for e in a.events))
     print(f"{len(have)} distinct message labels in {', '.join(a.events)}")
     if a.list:

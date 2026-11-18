@@ -1,118 +1,120 @@
-"""The baseline run's files and settings (SKILL.md, "Inputs"), for the scripts that rerun paramtrack's steps on a
-candidate and must match it: score.py and check_labels.py. paramtrack records its settings, defaults filled in, in
-2-full-keys/settings.json (module, module dir, root, format, docs, ignore file, transformed-keys file) and
-<out>/testbed/3-chains/testbed.json (testbed, its instrumented modules, --wait, --vm, argmatch's build args, which
-the skill's runs, up to testbed run 1, don't need)."""
+"""The baseline run (SKILL.md, "Inputs"; paramtrack's README, "Use with /concreteconfig", step 1), for the scripts that
+rerun paramtrack's steps on a candidate and must match it: score.py and check_labels.py. The baseline is one run for
+the testbed: paramtrack through step 3 (3-chains) with every module of interest instrumented and running its shipped
+configs, reused by every module's skill run. paramtrack records its testbed settings (testbed, instrumented modules,
+--wait, --vm) in <baseline>/testbed/3-chains/testbed.json, and each module's events in
+<baseline>/<module>/3-chains/events.jsonl. A skill run covers one module, all its config sources (roots()); the module's
+other settings (checkout, format, each config source's root type, docs, ignore and transformed-keys files) are its module.py's."""
 
-import glob
 import json
 import os
 import shutil
 import sys
 
-# paramtrack's modules (moved: old runs' paths to the ignore and transformed-keys files)
+# paramtrack's modules
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "../../../../gopls/internal/cmd/conftamer/querygraph/paramtrack"))
-import layout  # noqa: E402  (where a run's step outputs are)
+import layout  # noqa: E402,F401  (where a run's step outputs are; check_labels.py uses it)
 import modules  # noqa: E402
 import testbeds  # noqa: E402  (testbed.json's settings of earlier testbeds: recorded)
 
 
 class MissingInput(Exception):
-    """The baseline run lacks a file the scripts need (e.g. it predates paramtrack recording it)"""
+    """The baseline run lacks a file the scripts need, or doesn't fit the skill's module"""
 
 
 def _load(path, what):
     if not os.path.exists(path):
         raise MissingInput(f"no {path} ({what}): the baseline run must be paramtrack through step 3 (3-chains), "
-                           f"recent enough to record it; redo it")
+                           f"with paramtrack's layout of 2026-11-15 or later; redo it")
     return json.load(open(path))
 
 
-def copy_graph(baseline, out):
-    """Copy the baseline's step 1 (its graph, and the module's extra graph edges if any) to run out, where paramtrack
-    finds the module's step 1 (<out>/<module>/1-unmarshaler-graph)"""
-    mod = modules.load(settings(baseline)["module"])
-    dest = f"{out}/{os.path.basename(os.path.dirname(mod.__file__))}/1-unmarshaler-graph"
-    os.makedirs(dest, exist_ok=True)
-    shutil.copy(graph(baseline), dest)
-    extra = f"{layout.step_dir(run_dir(baseline), '1-unmarshaler-graph')}/extra.json"
-    if os.path.exists(extra):
-        shutil.copy(extra, dest)
-
-
-def graph(baseline):
-    path = f"{layout.step_dir(run_dir(baseline), '1-unmarshaler-graph')}/unmarshaler_subgraph.text"
-    if not os.path.exists(path):
-        raise MissingInput(f"no {path}: the baseline run must be paramtrack through step 3 (3-chains)")
-    # Since 2026-11-12 the graph resolves the keys custom unmarshalers pick (the module's extra_graph: e.g.
-    # Prometheus' <name>_sd_configs); a graph from before has `*` there, which would now pass for full keys
-    mod = modules.load(settings(baseline)["module"])
-    if hasattr(mod, "extra_graph") and not os.path.exists(f"{layout.step_dir(run_dir(baseline), '1-unmarshaler-graph')}/extra.json"):
-        raise MissingInput(f"{path} predates the module's extra graph edges (no extra.json next to it): redo the "
-                           f"baseline's step 1 (paramtrack --redo 1 --until 3), or the whole baseline")
-    return path
-
-
-def run_dir(baseline):
-    """The baseline's directory for its root: <baseline>/<module>/<root> (paramtrack since 2026-11-15), or the baseline
-    itself (before). The skill handles one root for now"""
-    if os.path.exists(f"{baseline}/2-full-keys"):
-        return baseline
-    found = sorted(glob.glob(f"{baseline}/*/*/2-full-keys"))
-    if len(found) > 1:
-        raise MissingInput(f"{baseline} has several roots ({', '.join(f.split('/')[-2] for f in found)}): the skill "
-                           f"handles one for now")
-    return os.path.dirname(found[0]) if found else f"{baseline}/?/?"
-
-
-def settings(baseline):
-    """paramtrack's static settings (2-full-keys/settings.json)"""
-    return _load(f"{run_dir(baseline)}/2-full-keys/settings.json", "paramtrack's static settings")
-
-
-def root(s):
-    """The baseline's root: its name in its module's ROOTS (settings.json's target; a baseline from before has only the
-    root's Go type). paramtrack takes the module's checkout and config format, and the root's docs, ignore and
-    transformed-keys files, from module.py, so they must be the ones the baseline used"""
-    mod = modules.load(s["module"])
-    for k, v in (("module_dir", mod.MODULE_DIR), ("format", mod.FORMAT)):
-        if os.path.abspath(s[k]) != os.path.abspath(v) if k == "module_dir" else s[k] != v:
-            raise MissingInput(f"the baseline's {k} ({s[k]!r}) differs from module {s['module']}'s module.py ({v!r}), "
-                               f"which paramtrack now uses; redo the baseline")
-    # (config_source: earlier "target", 2026-11-15; runs before 2026-11-15 recorded neither, just the root type)
-    recorded = s.get("config_source") or s.get("target")
-    name = recorded or next((n for n, r in mod.ROOTS.items() if r["root"] == s["root"]), None)
-    if name not in mod.ROOTS:
-        raise MissingInput(f"the baseline's root {recorded or s['root']} isn't in module {s['module']}'s ROOTS "
-                           f"({', '.join(mod.ROOTS)}); redo the baseline")
-    r = mod.ROOTS[name]
-    for k in ("root", "docs", "ignore", "transformed"):
-        if k in s and (modules.moved(s[k]) or "") != (r.get(k) or ""):
-            raise MissingInput(f"the baseline's {k} ({s[k]!r}) differs from module {s['module']}'s ROOTS[{name!r}] "
-                               f"({r.get(k)!r}), which paramtrack now uses; redo the baseline")
-    return name
-
-
-def static_args(s):
-    """paramtrack arguments for the static settings s, but --config (the rest are module.py's: root())"""
-    return ["--module", s["module"]]
-
-
-def testbed_args(baseline):
-    """paramtrack arguments for the baseline's testbed settings (3-chains/testbed.json)"""
-    path = f"{layout.testbed_dir(run_dir(baseline), '3-chains')}/testbed.json"
+def testbed(baseline):
+    """The baseline's testbed settings (testbed/3-chains/testbed.json), checked against paramtrack's testbed"""
+    path = f"{baseline}/testbed/3-chains/testbed.json"
     tb = testbeds.recorded(_load(path, "the testbed settings"))
     if tb["testbed"] != testbeds.NAME:
         raise MissingInput(f"the baseline ran on testbed {tb['testbed']} ({path}), which paramtrack no longer has "
                            f"(it has {testbeds.NAME}); redo the baseline")
-    mod = modules.load(settings(baseline)["module"])
-    name = os.path.basename(os.path.dirname(mod.__file__))
-    if tb["modules"] != [name]:
-        raise MissingInput(f"the baseline instrumented modules {tb['modules']} ({path}), but the skill's runs "
-                           f"instrument {name} alone; redo the baseline with --module {name} alone")
-    # (Not argmatch's args: the skill's runs stop after testbed run 1, which instruments nothing)
-    args = ["--wait", str(tb["wait"])]
+    return tb
+
+
+def module(baseline, name):
+    """The skill's module (its module.py, loaded by name), checked to be one the baseline instrumented"""
+    try:
+        mod = modules.load(name)
+    except ValueError as e:
+        raise MissingInput(str(e))
+    dirname = os.path.basename(os.path.dirname(mod.__file__))
+    tb = testbed(baseline)
+    if dirname not in tb["modules"]:
+        raise MissingInput(f"the baseline didn't instrument {dirname} (it instrumented {', '.join(tb['modules'])}): "
+                           f"redo it with every module of interest")
+    events(baseline, dirname)
+    return mod, dirname
+
+
+def events(baseline, name):
+    """A module's events in the baseline (<baseline>/<module>/3-chains/events.jsonl)"""
+    path = f"{baseline}/{name}/3-chains/events.jsonl"
+    if not os.path.exists(path):
+        raise MissingInput(f"no {path}: the baseline run must be paramtrack through step 3 (3-chains)")
+    return path
+
+
+def roots(mod):
+    """The module's config sources a skill run configures: its CONFIG_SOURCES but those wholly out of scope (an ignore file with `*`,
+    e.g. Alertmanager's cluster_tls)"""
+    def all_ignored(r):
+        return bool(r.get("ignore")) and "*" in {line.strip() for line in open(r["ignore"])}
+    return [name for name, r in mod.CONFIG_SOURCES.items() if not all_ignored(r)]
+
+
+def parse_configs(values, mod, flag="--config"):
+    """{config source: path} from --config <source>=<path> arguments, each a config source of the module's"""
+    out = {}
+    for v in values:
+        root, sep, path = v.partition("=")
+        if not sep or root not in mod.CONFIG_SOURCES:
+            raise MissingInput(f"{flag} {v}: give <source>=<path>, with a config source of the module's ({', '.join(mod.CONFIG_SOURCES)})")
+        if root in out:
+            raise MissingInput(f"{flag}: config source {root} given twice")
+        out[root] = os.path.abspath(path)
+    return out
+
+
+def testbed_args(baseline):
+    """paramtrack arguments for the baseline's testbed settings: every module it instrumented (the skill's runs
+    instrument the same ones, the others with their shipped configs), --wait and --vm. (Not argmatch's args: the
+    skill's runs stop after testbed run 1, which instruments nothing)"""
+    tb = testbed(baseline)
+    args = [a for m in tb["modules"] for a in ("--module", m)] + ["--wait", str(tb["wait"])]
     if "vm" in tb:
         args += ["--vm", tb["vm"]]
     return args
+
+
+def graph_cache(baseline, name):
+    """Where the module's step 1 (its graph, and its extra graph edges if any) is kept for the skill's runs: in the
+    baseline, where paramtrack would put it (<baseline>/<module>/1-unmarshaler-graph). A baseline with shipped configs
+    has none: the first score.py builds it and keeps it there"""
+    return f"{baseline}/{name}/1-unmarshaler-graph"
+
+
+def copy_graph(baseline, name, out):
+    """Copy the module's kept step 1 to run out, where paramtrack finds it; False if none is kept yet"""
+    src = graph_cache(baseline, name)
+    if not os.path.exists(f"{src}/unmarshaler_subgraph.text"):
+        return False
+    dest = f"{out}/{name}/1-unmarshaler-graph"
+    if not os.path.exists(dest):
+        shutil.copytree(src, dest)
+    return True
+
+
+def keep_graph(baseline, name, out):
+    """Keep run out's step 1 for the module in the baseline (graph_cache)"""
+    src, dest = f"{out}/{name}/1-unmarshaler-graph", graph_cache(baseline, name)
+    if os.path.exists(f"{src}/unmarshaler_subgraph.text") and not os.path.exists(dest):
+        shutil.copytree(src, dest)
