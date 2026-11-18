@@ -1,0 +1,2 @@
+# No plugins provisioning: prombench has none. The starting "shipped config" for the plugins root (TESTBED.md).
+apiVersion: 1
