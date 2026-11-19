@@ -8,6 +8,10 @@ For each key, find other keys in the same section.
 
 With `--config`, also output the values corresponding to each concrete key.
 
+paramtrack, which runs configkeys in its workflow, and stats.py, the statistics on configkeys' output, moved to
+their own repo on 2026-11-18 (`/home/emily/projects/config_tracing/paramtrack`: paramtrack at its root, stats.py in
+`stats/`), with the concreteconfig and documentedkeys skills and the results (`results/`).
+
 ## Output
 A csv.
 - Columns: `full key,concrete key,values,value kind,Unmarshaler,Num Unmarshalers,Unmarshaler Path,section,section keys`
@@ -166,4 +170,4 @@ Depth-first from every root (or `--root`), never revisiting a node already on th
 - A dynamic non-struct (e.g. `discovery.Configs`) also gives `<prefix>.*` with the ` (custom UnmarshalYAML)` suffix, e.g. `scrape_configs.*.*`.
 - So keys built at runtime appear as `*`: e.g. Prometheus `<Name()>_sd_configs` (`RegisterConfig` and `reflect.StructOf` in `discovery/registry.go`) are `scrape_configs.*`, so `scrape_configs.*.role` is one pattern for all 6 SD configs with a `role` field.
 
-Compared with `dlv --dump-params` from `/config.Config` (`results/prom/tmp/struct_tags/dump_params_step3/all_keys.txt`, 639 keys), the 684 patterns include all of its keys, plus: keys ending at scalar-like custom types (`proxy_url`, `url`, `regex`), the `min_version` keys it missed, SD config keys such as `targets`, `labels.*` and `api_server`, `alerting.alertmanagers.relabel_configs.*`, `global.external_labels.*`, and the two `*.*` patterns of `discovery.Configs`.
+Compared with `dlv --dump-params` from `/config.Config` (paramtrack's `results/prom/tmp/struct_tags/dump_params_step3/all_keys.txt`, 639 keys), the 684 patterns include all of its keys, plus: keys ending at scalar-like custom types (`proxy_url`, `url`, `regex`), the `min_version` keys it missed, SD config keys such as `targets`, `labels.*` and `api_server`, `alerting.alertmanagers.relabel_configs.*`, `global.external_labels.*`, and the two `*.*` patterns of `discovery.Configs`.

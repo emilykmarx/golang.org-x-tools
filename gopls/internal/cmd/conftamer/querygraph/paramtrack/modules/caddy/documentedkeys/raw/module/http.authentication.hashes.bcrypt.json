@@ -1,1 +1,0 @@
-{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2/modules/caddyhttp/caddyauth.BcryptHash","doc":"BcryptHash implements the bcrypt hash.\n"},"repo":"https://github.com/caddyserver/caddy"}]}

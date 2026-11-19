@@ -1,7 +1,0 @@
-apiVersion	example:int
-apps.type	string
-apps.org_id	int
-apps.org_name	string
-apps.disabled	bool
-apps.jsonData	map
-apps.secureJsonData	map

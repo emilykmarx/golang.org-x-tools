@@ -1,9 +1,0 @@
-# Alertmanager's web full keys out of scope (stats.py --ignore): those the testbed can't exercise without changing
-# other modules' configs. TLS and basic auth apply to every request Alertmanager serves, so its clients (Prometheus'
-# alerting config and its scrape of Alertmanager, the readiness check through the API server's service proxy, Caddy's
-# ingress route) would need TLS or credentials too. http2 only takes effect with TLS (exporter-toolkit v0.11.0
-# web.Serve: without TLS it serves plain HTTP). In scope: http_server_config.headers. One fnmatch pattern per line.
-tls_server_config.*
-http_server_config.http2
-basic_auth_users
-basic_auth_users.*

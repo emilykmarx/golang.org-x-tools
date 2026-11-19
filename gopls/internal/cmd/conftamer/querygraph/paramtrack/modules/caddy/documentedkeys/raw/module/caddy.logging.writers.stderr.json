@@ -1,1 +1,0 @@
-{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2.StderrWriter","doc":"StderrWriter writes logs to standard error.\n"},"repo":"https://github.com/caddyserver/caddy"}]}

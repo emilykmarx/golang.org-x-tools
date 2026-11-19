@@ -1,1 +1,0 @@
-{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2/modules/logging.RenameFilter","struct_fields":[{"key":"name","value":{"type":"string"}}],"doc":"RenameFilter is a Caddy log field filter that\nrenames the field's key with the indicated name.\n"},"repo":"https://github.com/caddyserver/caddy"}]}

@@ -1,2 +1,0 @@
-# No web config: prombench runs Alertmanager without one. The starting "shipped config" for the web root (TESTBED.md).
-{}

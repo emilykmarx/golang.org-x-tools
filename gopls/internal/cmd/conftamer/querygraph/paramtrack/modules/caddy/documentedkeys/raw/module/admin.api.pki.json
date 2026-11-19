@@ -1,1 +1,0 @@
-{"status_code":200,"result":[{"structure":{"type":"struct","type_name":"github.com/caddyserver/caddy/v2/modules/caddypki.adminAPI","doc":"adminAPI is a module that serves PKI endpoints to retrieve\ninformation about the CAs being managed by Caddy.\n"},"repo":"https://github.com/caddyserver/caddy"}]}
