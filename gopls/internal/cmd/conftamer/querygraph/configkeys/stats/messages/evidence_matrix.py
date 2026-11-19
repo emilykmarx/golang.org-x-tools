@@ -15,8 +15,9 @@ Inputs, all from the run directory:
   (7-label-keys/label_keys.csv) for each value's full keys.
 
 Labels are normalized and, on the HTML pages, collapsed:
-- normalized: the parts of a label that differ between runs of the same testbed and config (e.g. pod name suffixes) are
-  placeholders (argmatch-labels' join.py, NORMALIZE), so a label is the same message in every run;
+- normalized: the parts of a label that differ between runs of the same testbed and config (e.g. pod name suffixes,
+  folder UIDs Grafana generates) are placeholders (argmatch-labels' join.py, NORMALIZE), so a label is the same message
+  in every run;
 - collapsed: messages of the same kind and chain group whose evidence mappings are identical (the same evidence full
   keys in every section) and not empty share one column (collapse_columns), e.g. Caddy's reads of each generated CA's Secrets. Only
   then: messages whose mappings differ in any section, and messages with no evidence, keep their own columns. A collapsed cell is anchored if any of

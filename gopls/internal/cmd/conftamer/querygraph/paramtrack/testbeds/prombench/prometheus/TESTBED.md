@@ -66,7 +66,9 @@ SKILL.md's constraint 2 says how to check them. On prombench:
 - **The baseline run** is the testbed's shared one (paramtrack's README, "Use with /concreteconfig", step 1), and
   `scripts/check_labels.py` instruments the same modules. With Prometheus alone instrumented behind ingress-nginx (until 2026-11-15) a check
   took about 6 minutes, most of it the 240 s workload.
-- **Labels that depend on timing,** not the config: e.g. `/-/ready` answering 503 while Prometheus starts.
+- **Labels that depend on timing,** not the config: none known among the five-module baselines: its labels changed
+  between them only with the testbed (../README.md, "Labels that depend on timing"), and its 52 labels were identical
+  in the three runs since. Seen in a check: `/-/ready` answering 503 while Prometheus starts.
 
 paramtrack's testbed leaves the ConfigMap set to the config it ran, and prometheus-meta running the instrumented
 image. When done, put back whatever the user wants the testbed left with (the shipped config, unless told otherwise);

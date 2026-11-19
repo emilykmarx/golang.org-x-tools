@@ -27,6 +27,19 @@ the cluster on the VM first (`kind delete cluster --name prombench`, about 20 s)
 46 s, and a run with all five modules took 13 min with a deploy and 8 min without. Labels only a fresh cluster
 produces: `kube-apiserver/TESTBED.md`.
 
+**Labels that depend on timing** (each module's TESTBED.md gives its result): measured with `count_labels.py
+--varying` on the runs of all five modules on their shipped configs, through step 3, in `/tmp`:
+- 2026-11-16: `paramtrack-baseline-2026-11-16`, `-baseline2-`, `-b3-`, `-b4-`, `-b5-` (with the legacy Go patch, so
+  their differences aren't only timing), then `-b6-` and `-b7-` (without it; B6 before the alert was made to always
+  fire, 6f2acb87e);
+- 2026-11-17: `paramtrack-b8-2026-11-17`, `-chk-am-` (Alertmanager's shipped config given as `--config`; cluster
+  reused) and `-b9-` (fresh cluster), the first runs with `testbeds.py`'s reloads (paramtrack's own POSTs to
+  Alertmanager's `/-/reload` and Grafana's provisioning reloads).
+
+Across B6-B9, every difference in Alertmanager's, Caddy's, Grafana's and Prometheus' labels follows a testbed change
+(B6's missing alert path, B8's added reloads), and B8, chk-am and B9 have identical labels for all four, so none of
+their labels is known to depend on timing. kube-apiserver's do, also across runs with modules on concrete configs.
+
 **After the VM restarts,** Docker may give the kind nodes different IPs, and the API server's manifest keeps the
 control plane's old one (`--advertise-address`), so it restarts in a loop and in-cluster clients get "connection
 refused" (e.g. Caddy's controller, "not ready 600s after the restart"). Docker assigns IPs in start order, so restart

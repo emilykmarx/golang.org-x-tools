@@ -59,8 +59,8 @@ SKILL.md's constraint 2 says how to check them. On prombench:
 - **The baseline run** is the testbed's shared one (paramtrack's README, "Use with /concreteconfig", step 1), and
   `scripts/check_labels.py` instruments the same modules. A check takes about 8 minutes on a reused cluster
   (2026-11-17, with 92 integrations in the candidate), most of it the 240 s workload; `score.py` takes seconds.
-- **Labels that depend on timing,** not the config: none seen. Alertmanager's 10 labels were identical in three
-  runs of the shipped configs and two checks (2026-11-17: B8, B9 and the runs in kube-apiserver's TESTBED.md).
+- **Labels that depend on timing,** not the config: none known. Its labels changed between baselines only with the
+  testbed (../README.md, "Labels that depend on timing"), and its 10 labels were identical in the three runs since.
 
 paramtrack's testbed leaves the ConfigMap set to the configs it ran, `--web.config.file` set if it ran a web config,
 and the instrumented image. When done, put back whatever the user wants the testbed left with; a paramtrack run that

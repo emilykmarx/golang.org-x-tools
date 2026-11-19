@@ -59,9 +59,9 @@ SKILL.md's constraint 2 says how to check them. On prombench:
 - **The baseline run** is the testbed's shared one (paramtrack's README, "Use with /concreteconfig", step 1), and
   `scripts/check_labels.py` instruments the same modules. Duration: 7.5 min on a reused cluster (2026-11-17); a fresh
   one: ../README.md.
-- **Labels that depend on timing,** not the config: none seen in Grafana's labels so far (the B8 and B9 baselines and
-  Alertmanager's check had the same Grafana labels). The checks also report kube-apiserver's varying labels (its
-  TESTBED.md); they don't count for Grafana.
+- **Labels that depend on timing,** not the config: none known. Its labels changed between baselines only with the
+  testbed (../README.md, "Labels that depend on timing"), and its 221 labels were identical in the three runs since.
+  The checks also report kube-apiserver's varying labels (its TESTBED.md); they don't count for Grafana.
 
 paramtrack's testbed leaves the ConfigMaps set to the configs it ran (the plugins and alerting ones mounted) and the
 instrumented image. When done, put back whatever the user wants the testbed left with; a paramtrack run that doesn't

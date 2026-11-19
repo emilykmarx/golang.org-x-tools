@@ -55,8 +55,9 @@ SKILL.md's constraint 2 says how to check them. On prombench:
 - **The baseline run** is the testbed's shared one (paramtrack's README, "Use with /concreteconfig", step 1), and
   `scripts/check_labels.py` instruments the same modules. With the controller alone instrumented a check took about 8 minutes, most of it the
   240 s workload (plus a deploy if there's no cluster or it's an older variant).
-- **Labels that depend on timing,** not the config: e.g. requests that arrive while the controller restarts, and
-  which Grafana API calls the dashboard viewer happens to make.
+- **Labels that depend on timing,** not the config: none known among the five-module baselines: its 142 labels were
+  identical in B6-B9 (../README.md, "Labels that depend on timing"). Candidates if one appears: requests that arrive
+  while the controller restarts, and which Grafana API calls the dashboard viewer happens to make.
 
 paramtrack's testbed leaves the controller running the config it ran, on the instrumented image. When done, put back
 the shipped config (a restart does: the controller loads its generated config, and then `cc_vm.py apply

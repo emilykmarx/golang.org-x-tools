@@ -20,8 +20,9 @@ instrumented, configured and reloaded, and which fixtures it gets).
   (`gopls/results/grafana/concreteconfig-2026-11-17/work/labels-1`, Grafana on its concrete configs, reused) and the
   joint check (`/tmp/paramtrack-full-am-gf-2026-11-17`, Alertmanager and Grafana on theirs, freshly deployed). The 81,
   with the runs that have each: [varying-labels-2026-11-17.txt](varying-labels-2026-11-17.txt) (`scripts/count_labels.py
-  --varying` on the seven runs' kube-apiserver events). A run lacks 2-38 of another's labels. They fall into these
-  groups:
+  --varying` on the seven runs' kube-apiserver events). `scripts/check_labels.py` reads every `varying-labels*.txt`
+  here: a missing label listed in one is reported as known timing and doesn't count. A run lacks 2-38 of another's
+  labels. They fall into these groups:
   - **403s** on reads, mostly cluster-wide lists (`/api/v1/namespaces`, `nodes`, `pods`, `services`,
     `persistentvolumes`, `/apis/storage.k8s.io/v1/csidrivers`, ...), the controller-manager's lease and a few named
     reads (`extension-apiserver-authentication`, `/apis/events.k8s.io/v1`): which ones a client without permission
