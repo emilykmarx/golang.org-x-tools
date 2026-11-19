@@ -21,6 +21,35 @@ def source_version(path):
     return {"describe": git("describe", "--tags", "--always", "--dirty"), "commit": commit} if commit else None
 
 
+# The checkouts the workflow's tools come from (paramtrack's README, "Programs" and "Skills"), the same paths on the
+# VM: paramtrack, gopls conftamer, configkeys, stats.py and the skills; argmatch and argmatch-labels (join.py,
+# events_to_stacklog.py); contexttrack's patches. Each instrumented image copies parts of all three (the Dockerfiles)
+CHECKOUTS = {"golang.org-x-tools": f"{CT}/golang.org-x-tools", "dump_ancestors": f"{CT}/dump_ancestors",
+             "conftamer": f"{CT}/conftamer"}
+
+
+# What a step or skill run ran from, as each records it (write_versions): on this machine, and on the VM, where a
+# testbed step builds the instrumented images
+LOCAL_VERSIONS = "local_build_versions.json"
+VM_VERSIONS = "VM_build_versions.json"
+
+
+def versions(modules=None):
+    """{name: {"path", "describe", "commit"}} for CHECKOUTS and each module's checkout ({module name: path}, as
+    "module <name>"); describe ends in -dirty if the checkout had uncommitted changes"""
+    paths = {**CHECKOUTS, **{f"module {m}": p for m, p in (modules or {}).items()}}
+    return {name: {"path": path, **(source_version(path) or {"commit": None})} for name, path in paths.items()}
+
+
+def write_versions(path, modules=None):
+    """Writes versions(modules) to path (LOCAL_VERSIONS or VM_VERSIONS), as JSON, with the time and machine"""
+    import json
+    import socket
+    with open(path, "w") as f:
+        json.dump({"time": time.strftime("%Y-%m-%d %H:%M:%S %z"), "host": socket.gethostname(),
+                   "checkouts": versions(modules)}, f, indent=2)
+
+
 def say(msg):
     print(f"{time.strftime('%H:%M:%S')} {msg}", flush=True)
 

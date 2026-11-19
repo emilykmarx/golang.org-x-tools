@@ -9,6 +9,9 @@ mkdir -p "$2"
 out=$(cd "$2" && pwd)
 limit=${3:-14400}
 cd /home/emily/projects/config_tracing/golang.org-x-tools
+# What the run starts from: the tools' checkouts (local_build_versions.json; with the module's too in its checks'
+# paramtrack steps)
+python3 .claude/skills/concreteconfig/scripts/versions.py "$out" > /dev/null
 allow=(Read Write Edit Glob Grep Skill
   'Bash(gcloud:*)' 'Bash(go:*)' 'Bash(uv:*)' 'Bash(python3:*)' 'Bash(timeout:*)' 'Bash(cd:*)' 'Bash(set:*)'
   'Bash(ls:*)' 'Bash(cat:*)' 'Bash(head:*)' 'Bash(tail:*)' 'Bash(grep:*)' 'Bash(diff:*)' 'Bash(wc:*)'

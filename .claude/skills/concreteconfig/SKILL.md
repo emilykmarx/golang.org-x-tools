@@ -169,6 +169,7 @@ In the output directory:
 - `labels.txt`: the output of `scripts/check_labels.py ... --list` on the final configs
 - `<config_source>/config.<format>` (`config.yaml`, `config.json`, ...: the module's config format): your final configs, and `files/`: the files it refers to, as added to the testbed
 - `commands.md`: the commands and code you used to apply, check and score the configs
+- `local_build_versions.json`: what the run ran from (the git versions of the tools' and the module's checkouts): run `scripts/versions.py <output dir> --module <module>` first (`scripts/run_headless.sh` does it for headless runs)
 - `stats.md`: `scripts/score.py`'s output for the shipped configs and for yours, side by side
 - `diff.md`: the diff from the shipped config, with a line per change explaining the reason you either chose that value or chose to skip the key
 

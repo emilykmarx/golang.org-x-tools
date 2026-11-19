@@ -26,6 +26,9 @@ configs, logs) may be the user's own and outdated. The agent can't ask, so list 
 unless the user says to use some (ask, naming them, if any look relevant).
 
 ## 3. Launch the agent
+Record what the run starts from in the output directory, `local_build_versions.json` (the git versions of the tools'
+and the module's checkouts): `../concreteconfig/scripts/versions.py <output dir> --checkout <name>=<checkout path>`, one
+`--checkout` per checkout from step 1 (the module has no module.py yet, so not `--module`).
 Fill in [brief.md](brief.md)'s `{placeholders}` and pass it as the prompt. Then tell the user it's running and what
 it will produce; don't wait or poll: the completion notification brings its report.
 

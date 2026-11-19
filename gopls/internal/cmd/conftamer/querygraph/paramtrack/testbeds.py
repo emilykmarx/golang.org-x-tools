@@ -22,7 +22,7 @@ import tempfile
 import time
 
 import common
-from common import CT, log_command, popen, run, say, source_version
+from common import CT, VM_VERSIONS, log_command, popen, run, say, source_version, write_versions
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "testbeds", "prombench"))
@@ -119,13 +119,10 @@ class Component:
 
     def build(self):
         upstream.ensure_builder(self.out)  # the image the Dockerfiles build FROM
-        # What the image is built from: the module checkout on the machine that builds it (the VM's, which may differ
-        # from the checkout the graph was built from: settings.json's module_source)
+        # (What the image is built from, the module's checkout on this machine, is in the run's VM_VERSIONS: it may
+        # differ from the checkout the graph was built from, in paramtrack's LOCAL_VERSIONS)
         checkout = os.path.join(CT, self.SRC)
-        src = source_version(checkout)
-        with open(f"{self.out}/build_source.json", "w") as f:
-            json.dump({"checkout": checkout, **(src or {})}, f, indent=2)
-        say(f"{self.NAME}: building from {checkout} at {(src or {}).get('describe')}")
+        say(f"{self.NAME}: building from {checkout} at {(source_version(checkout) or {}).get('describe')}")
         if self.stacklog:
             overrides = {"STACKLOG": self.in_build_context(self.stacklog, "paramtrack-stacklog.txt"),
                          "MATCHFILE": self.in_build_context(self.matchfile, "paramtrack-matches.txt")}
@@ -810,7 +807,7 @@ class Prombench:
     is loaded), runs the workload for `wait` seconds: a simulated person views Grafana's dashboards through Caddy's
     ingress (the experiment's view_dashboards.py), and the loadgen querier queries the benchmark Prometheus instances
     through it; `RELOAD_AFTER` seconds in, each instrumented module reloads its config. Then captures each
-    instrumented module's outputs in <out_dir>/<module>/ (OUTPUTS, build_source.json, logs); every module's pod log
+    instrumented module's outputs in <out_dir>/<module>/ (OUTPUTS, logs); every module's pod log
     is in <out_dir>/<module>/pod.log. (`wait` counts from when every config is loaded, not from the restart: under
     argmatch, loading a large config can take minutes, which would otherwise shorten the workload.)"""
 
@@ -834,6 +831,9 @@ class Prombench:
         comps = [cls(out_dir, **modules.get(name, {})) for name, cls in COMPONENTS.items()]
         instrumented = [c for c in comps if c.instrumented]
         say("modules: " + ", ".join(c.what() for c in comps))
+        # What the instrumented images are built from, on this machine (the VM): the tools' and the instrumented
+        # modules' checkouts
+        write_versions(f"{out_dir}/{VM_VERSIONS}", {c.NAME: os.path.join(CT, c.SRC) for c in instrumented})
         for c in instrumented:
             c.build()
         have = upstream.cluster_variant()

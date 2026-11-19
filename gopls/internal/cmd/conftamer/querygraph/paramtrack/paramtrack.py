@@ -150,9 +150,8 @@ class Workflow:
 
     def static_settings(self, t):
         """The static settings step 2 records in the target's settings.json, defaults filled in"""
-        # module_source: the module checkout's version, which the graph (step 1) is built from
-        s = {"module": t.m.go, "module_dir": os.path.abspath(t.m.src),
-             "module_source": source_version(t.m.src), "root": t.root,
+        # (the module checkout's version, which the graph is built from: common.LOCAL_VERSIONS)
+        s = {"module": t.m.go, "module_dir": os.path.abspath(t.m.src), "root": t.root,
              "format": t.m.format, "docs": os.path.abspath(t.docs),
              "ignore": os.path.abspath(t.ignore) if t.ignore else "",
              "transformed": os.path.abspath(t.transformed) if t.transformed else ""}
@@ -182,6 +181,13 @@ class Workflow:
         if "docs" in recorded:
             recorded["docs"] = modules.moved(recorded["docs"])  # (runs before the docs lists moved)
         current = self.static_settings(t) if name == "settings.json" else self.testbed_settings(self.make_testbed())
+        if name == "settings.json":  # the module checkout's version: common.LOCAL_VERSIONS (before 2026-11-18,
+            # settings.json's module_source)
+            vpath = f"{d}/{common.LOCAL_VERSIONS}"
+            if os.path.exists(vpath):
+                v = json.load(open(vpath))["checkouts"].get(f"module {t.m.name}") or {}
+                recorded["module_source"] = {"describe": v.get("describe"), "commit": v.get("commit")}
+            current["module_source"] = source_version(t.m.src)
         diff = []
         for k in fields:
             if k == "module_source" and k not in recorded:
@@ -302,7 +308,7 @@ class Workflow:
     # A testbed run's outputs that paramtrack moves to the module's directory, <out>/<module>/<step>. The module's
     # other files (its pod log, image build log, Caddy's generated/running/load configs) stay with the testbed run's,
     # in <out>/testbed/<step>/<module>/.
-    MODULE_OUTPUTS = OUTPUTS + ("build_source.json",)
+    MODULE_OUTPUTS = OUTPUTS + ("build_source.json",)  # (build_source.json: runs before common.VM_VERSIONS)
 
     def module_outputs(self, tb, m, d):
         """Move the module's outputs of a testbed run from the testbed run's directory tb to the module's, d"""
@@ -512,7 +518,11 @@ class Workflow:
                 common.COMMANDS_LOG = f"{partials[0]}/commands.log"
                 fn(*args, *partials)
                 common.COMMANDS_LOG = None
+                # What the step ran from on this machine: the tools' and the modules' checkouts (a testbed step's
+                # images are built on the VM: its common.VM_VERSIONS)
+                srcs = {m.name: m.src for m in self.mods}
                 for p, d in zip(partials, dirs):
+                    common.write_versions(f"{p}/{common.LOCAL_VERSIONS}", srcs)
                     os.rename(p, d)
                 ran = True
                 say(f"{what}: done ({', '.join(dirs)})")
